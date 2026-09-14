@@ -178,7 +178,8 @@ async def call_llm_api(prompt_text: str) -> str:
                 raise ValueError(f"Falta la clave API para {provider}.")
                 
             print(f"[LLM INFO] Intentando proveedor primario '{provider}' ({model_name}) en {base_url}...")
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            # Set explicit 25s timeout on HTTP client to avoid hanging indefinitely if network stalls
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=25.0)
             
             def _run_openai():
                 extra_args = {}
@@ -196,10 +197,10 @@ async def call_llm_api(prompt_text: str) -> str:
                 )
                 return response.choices[0].message.content
                 
-            return await asyncio.to_thread(_run_openai)
+            return await asyncio.wait_for(asyncio.to_thread(_run_openai), timeout=30.0)
         except Exception as primary_err:
             primary_error_msg = str(primary_err)
-            print(f"[LLM WARN] El proveedor primario '{provider}' falló: {primary_err}")
+            print(f"[LLM WARN] El proveedor primario '{provider}' falló/agotó tiempo ({primary_err})")
             print("[LLM INFO] Activando respaldo automático a Gemini...")
 
     # 2. Fallback Provider: Gemini
@@ -218,16 +219,17 @@ async def call_llm_api(prompt_text: str) -> str:
         try:
             print(f"[LLM INFO] Intentando modelo Gemini de respaldo: '{m_name}'...")
             model = genai.GenerativeModel(m_name, generation_config=generation_config)
-            res = await asyncio.to_thread(model.generate_content, prompt_text)
+            res = await asyncio.wait_for(asyncio.to_thread(model.generate_content, prompt_text), timeout=30.0)
             if res and res.text:
                 return res.text
         except Exception as e:
-            print(f"[LLM WARN] El modelo Gemini '{m_name}' falló: {e}")
+            print(f"[LLM WARN] El modelo Gemini '{m_name}' falló/agotó tiempo: {e}")
             last_err = e
             continue
             
     err_detail = f" (Error primario: {primary_error_msg})" if primary_error_msg else ""
     raise ValueError(f"Fallaron todos los modelos. Gemini: {last_err}{err_detail}")
+
 
 async def generation_pipeline(file_path: str, jd: str, target_role: Optional[str] = None, github_url: Optional[str] = None, linkedin_url: Optional[str] = None, custom_instructions: Optional[str] = None, base_resume_filename: Optional[str] = None, theme: Optional[str] = "sb2nov"):
     try:

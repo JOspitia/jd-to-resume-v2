@@ -63,11 +63,16 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     formData.append("file", file);
     formData.append("jd", jd);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 40000); // 40 second timeout
+
     try {
       const res = await fetch("http://localhost:8000/api/analyze-ats", {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (!res.ok) {
         throw new Error("No se pudo conectar con el servidor de análisis.");
@@ -94,7 +99,12 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
         ]);
       }
     } catch (err: any) {
-      setAtsErrorMessage(err.message || "Ocurrió un error inesperado al analizar el ATS.");
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        setAtsErrorMessage("La solicitud de análisis ATS agotó el tiempo de espera (40s). Por favor reintenta.");
+      } else {
+        setAtsErrorMessage(err.message || "Ocurrió un error inesperado al analizar el ATS.");
+      }
       setAtsStatus('error');
     }
   };
