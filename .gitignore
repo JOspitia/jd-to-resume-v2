@@ -27,9 +27,17 @@ build/
 !README.md
 !*.md
 
+# Output & RenderCV temp files
+backend/output/
+backend/rendercv_output/
+backend/test_cv.*
+backend/test_output.*
+rendercv/
+
 # Images
 *.jpg
 *.jpeg
 *.png
 *.gif
 *.ico
+

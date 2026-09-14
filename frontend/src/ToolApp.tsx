@@ -14,6 +14,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
   const [generatedPdfFilename, setGeneratedPdfFilename] = useState<string | null>(null);
+  const [selectedTheme, setSelectedTheme] = useState<string>('sb2nov');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ATS & AI Detection states
@@ -129,6 +130,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     if (customInstructionsOverride) {
       formData.append("custom_instructions", customInstructionsOverride);
     }
+    formData.append("theme", selectedTheme);
     // Pass the previously generated PDF filename so the backend refines it instead of starting fresh
     if (baseResumeFilename) {
       formData.append("base_resume_filename", baseResumeFilename);
@@ -381,6 +383,40 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                 placeholder="https://github.com/..."
                 className="w-full border-2 border-black bg-white p-3 font-sans focus:outline-none focus:ring-4 focus:ring-blue-100"
               />
+            </div>
+          </div>
+
+          {/* Theme Selector */}
+          <div className="mt-8 border-t-2 border-gray-300 pt-6">
+            <label className="font-bold font-mono text-sm uppercase tracking-wide block mb-3">
+              🎨 Plantilla & Diseñador de PDF (Vectorial Typst / ATS)
+            </label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { id: 'sb2nov', name: 'SB2Nov', badge: 'Silicon Valley / ATS', desc: 'Limpio y estructurado para Tech' },
+                { id: 'classic', name: 'Classic', badge: 'Sobrio', desc: 'Tradicional, elegante y universal' },
+                { id: 'moderncv', name: 'ModernCV', badge: 'Visual', desc: 'Detalles a color y tipografía moderna' },
+                { id: 'classic_html', name: 'Classic HTML', badge: 'Playwright', desc: 'Renderizado web tradicional' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSelectedTheme(t.id)}
+                  className={`p-3.5 text-left border-2 transition-all flex flex-col justify-between ${
+                    selectedTheme === t.id 
+                      ? 'border-blue-700 bg-blue-50 font-bold shadow-[2px_2px_0px_0px_rgba(29,78,216,1)]' 
+                      : 'border-black bg-white hover:bg-gray-50'
+                  }`}
+                >
+                  <div>
+                    <span className="text-xs font-mono px-1.5 py-0.5 bg-gray-200 text-black font-bold uppercase inline-block mb-1">
+                      {t.badge}
+                    </span>
+                    <div className="text-sm font-serif font-bold text-black">{t.name}</div>
+                  </div>
+                  <div className="text-[11px] text-gray-600 mt-2 line-clamp-1">{t.desc}</div>
+                </button>
+              ))}
             </div>
           </div>
         </motion.div>

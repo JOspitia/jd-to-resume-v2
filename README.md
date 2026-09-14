@@ -1,73 +1,82 @@
-# 🚀 Resume Tailor AI (v2) — ATS Match & Iterative Optimizer
+# 🚀 Resume Tailor AI (v2.5) — ATS Match, RenderCV (Typst) & Iterative Optimizer
 
 <div align="center">
 
 [![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite%20%2B%20Tailwind-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20%2B%20Python-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![RenderCV](https://img.shields.io/badge/PDF_Engine-RenderCV%20%2B%20Typst-0055FF?style=for-the-badge&logo=python&logoColor=white)](https://github.com/sinaatalay/rendercv)
 [![Gemini](https://img.shields.io/badge/AI-Google%20Gemini%20Flash-FF5E00?style=for-the-badge&logo=google&logoColor=white)](https://aistudio.google.com/)
-[![Playwright](https://img.shields.io/badge/PDF_Render-Playwright%20Chromium-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev/)
-[![Status](https://img.shields.io/badge/Status-Active%20v2.0-brightgreen?style=for-the-badge)]()
+[![Status](https://img.shields.io/badge/Status-Active%20v2.5-brightgreen?style=for-the-badge)]()
 
-**Genera, audita y optimiza iterativamente tu currículum contra cualquier vacante laboral (Job Description) superando filtros ATS y detectores de IA.**
+**Genera, audita, diseña y optimiza iterativamente tu currículum contra cualquier oferta laboral (Job Description) superando filtros ATS y detectores de IA con plantillas vectoriales profesionales.**
 
-[Características](#-características-principales) • [Arquitectura](#-arquitectura-y-flujo) • [Instalación](#-guía-de-instalación) • [Historial de Mejoras](#-historial-de-versiones-v2) • [Agradecimientos](#-agradecimientos)
+[Características](#-características-principales) • [Diseños & Plantillas](#-diseños-y-plantillas-pdf) • [Arquitectura](#-arquitectura-y-flujo) • [Instalación](#-guía-de-instalación) • [Agradecimientos](#-agradecimientos-y-créditos)
 
 </div>
 
 ---
 
-## 🌟 ¿Qué es Resume Tailor AI v2?
+## 🌟 ¿Qué es Resume Tailor AI v2.5?
 
-**Resume Tailor AI v2** es una solución Full-Stack moderna diseñada para maximizar la tasa de éxito de postulaciones laborales. No solo adapta la experiencia y habilidades de tu currículum existente (PDF) a los requisitos específicos de una oferta de empleo, sino que introduce un **ciclo de auditoría y refinamiento continuo** con métricas ATS reales, detección de contenido sintético/IA y control de evolución de versiones.
+**Resume Tailor AI v2.5** es una plataforma Full-Stack avanzada diseñada para elevar el impacto de tus postulaciones laborales. No solo adapta la experiencia de tu CV en formato PDF a los requisitos de una oferta de trabajo, sino que ofrece:
+- **Compilador tipográfico ultra rápido con Typst + RenderCV.**
+- **Selección de plantillas profesionales creadas para superar filtros ATS.**
+- **Auditoría independiente ATS & Detección de tono de IA.**
+- **Ciclo de refinamiento iterativo sobre el CV generado sin pérdida de datos.**
+- **Detección y traducción de idioma automática (Español / Inglés).**
 
 ---
 
 ## ⚡ Características Principales
 
-### 1. 🎯 Generación Adaptada de Alto Impacto
-- **Extracción Inteligente:** Procesa currículums en formato PDF respetando tu trayectoria base.
-- **Inyección de Contexto Personalizado:** Posibilidad de suministrar Rol Objetivo, enlaces a GitHub, LinkedIn y notas clave.
-- **Renderizado Nativo con Playwright:** Exporta un documento PDF impecable, tipográficamente balanceado y 100% legible para escáneres ATS.
+### 1. 🎨 Renderizado Vectorial de Alta Calidad & Plantillas ATS
+Con el motor integrado de **RenderCV + Typst**, los currículums se compilan en milisegundos generando archivos PDF vectoriales ultra nítidos y sin distorsiones tipográficas:
+- 🟢 **SB2Nov:** El formato estándar preferido en Silicon Valley y empresas Tech.
+- 🔵 **Classic:** Diseño sobrio, tradicional y elegante ideal para cualquier sector.
+- 🟣 **ModernCV:** Formato contemporáneo con detalles sutiles a color.
+- ⚪ **Classic HTML:** Opción de renderizado web mediante Playwright.
 
-### 2. 📊 Auditoría Integral ATS & Detección de IA
-- **Score ATS (Compatibilidad CompuTrabajo, Workday, etc.):** Evaluación de coincidencia de palabras clave, balance técnico/blando y formato estructural.
-- **Detector de Tono IA:** Análisis probabilístico para detectar patrones repetitivos, sobreuso de frases trilladas de LLMs y sugerencias para humanizar el perfil.
-- **Diagnóstico Detallado:**
-  - Desglose de competencias encontradas vs. faltantes.
-  - Consejos de redacción orientados a resultados cuantificables (fórmula STAR/Google XYZ).
-  - Recomendaciones de ascenso de rango (Mid $\rightarrow$ Senior / Lead).
+### 2. 🎯 Adaptación y Restructuración Sin Alucinación
+- **Cero Invención de Datos:** La IA únicamente reestructura, reordena y enfatiza tu experiencia real existente en el CV base.
+- **Traducción e Idioma Automático:** Detecta el idioma de la oferta de trabajo y genera todo el contenido (resumen, viñetas y títulos de sección) en el mismo idioma de la vacante.
+- **Verbos de Acción y Métricas Cuantitativas:** Redacción orientada a resultados concretos (fórmula STAR) e integración natural de palabras clave exactas.
 
-### 3. 🔄 Refinamiento Iterativo Inteligente
-- **Iteración sobre el CV Generado:** El sistema no reinicia desde cero; utiliza como base el último PDF generado (`base_resume_filename`) para pulirlo sin perder los ajustes previos.
-- **Inyección Selectiva de Feedback:**
-  - Checkbox para incluir consejos de humanización de tono.
-  - Checkbox para incorporar recomendaciones de nivel senior.
-  - Caja de texto para instrucciones personalizadas adicionales.
-- **Protección contra Regresión de Score:** Inyecta automáticamente el puntaje actual y un objetivo a superar en el prompt para asegurar que cada regeneración mantenga o supere la calidad.
+### 3. 📊 Auditoría Integral ATS & Detector de Tono IA
+- **Score ATS (% Match):** Análisis de coincidencia de competencias técnicas y blandas frente a plataformas como CompuTrabajo, Workday, LinkedIn y Greenhouse.
+- **Detección de Tono Sintético / IA:** Identifica si la redacción suena robótica o cargada de clichés de LLMs, sugiriendo cambios para humanizar el perfil.
+- **Botón "Solo Auditar ATS":** Audita directamente tu archivo PDF sin necesidad de generar una nueva versión ni consumir tokens de edición.
 
-### 4. 📈 Historial y Evolución de Scores
-- Línea temporal visual que compara el desempeño entre versiones (`v1`, `v2`, etc.).
-- Identificación inmediata de mejoras o retrocesos porcentuales (+15% ▲ / -5% ▼).
-
-### 5. 🔍 Botón "Solo Auditar ATS"
-- ¿Ya tienes un CV listo y solo quieres saber cómo rankea frente a una oferta?
-- Audita directamente tu archivo PDF sin necesidad de generar una nueva versión ni gastar tokens innecesarios.
+### 4. 🔄 Refinamiento Iterativo y Memoria de Versiones
+- **Refinación sobre el PDF Generado:** Al solicitar correcciones, el backend toma como base el último PDF generado (`base_resume_filename`), preservando las mejoras acumuladas.
+- **Historial Evolutivo de Puntaje:** Compara visualmente el avance del Score ATS y la reducción de tono IA a lo largo de cada iteración (`v1`, `v2`, etc.).
 
 ---
 
-## 🏗️ Arquitectura y Flujo
+## 📐 Diseños y Plantillas PDF (RenderCV + Typst)
+
+| Plantilla | Estilo | Indicado Para |
+| :--- | :--- | :--- |
+| **SB2Nov** | Limpio, estructurado y de una sola columna | Desarrolladores, Data Science, DevOps y Tech |
+| **Classic** | Tradicional, sobrio y elegante | Administración, Finanzas, Salud, Leyes y Gerencia |
+| **ModernCV** | Moderno con acentos visuales sutiles | Marketing, Diseño, Producto y Ventas |
+| **Classic HTML** | Renderizado web flexible (Playwright) | Pruebas y personalización HTML |
+
+---
+
+## 🏗️ Arquitectura del Sistema
 
 ```mermaid
 flowchart TD
-    A[PDF Base + Vacante JD] --> B[FastAPI Backend / Gemini AI]
-    B --> C[Playwright: Renderizado de PDF]
-    C --> D[Visualización & Preview en Front-end]
-    D --> E{Opciones de Validación}
-    E -->|Validación Automática o Manual| F[Auditoría ATS & Detector IA]
-    F --> G[Reporte: Score, Keywords, Tono]
-    G --> H[Historial de Scores]
-    G --> I[Refinamiento Iterativo]
-    I -->|Prompt con Score Benchmark + Feedback| B
+    A[PDF Base + Oferta de Empleo JD] --> B[FastAPI Backend / Gemini AI]
+    B --> C{Elección de Motor PDF}
+    C -->|RenderCV + Typst| D[PDF Vectorial en 100ms]
+    C -->|Playwright HTML| E[PDF Web HTML]
+    D --> F[Visualización & Preview en Front-end]
+    E --> F
+    F --> G{Opciones de Usuario}
+    G -->|Botón Solo Auditar| H[Auditoría ATS & Detector IA]
+    G -->|Refinar CV| I[Refinamiento Iterativo sobre PDF Generado]
+    I -->|Prompt con Feedback + Memoria| B
 ```
 
 ---
@@ -77,11 +86,11 @@ flowchart TD
 ### Prerrequisitos
 - [Node.js](https://nodejs.org/) (v18+)
 - [Python 3.10+](https://www.python.org/)
-- API Key gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey)
+- Clave API gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey) o proveedor OpenAI compatible.
 
 ---
 
-### 1. Backend (FastAPI + Playwright)
+### 1. Backend (FastAPI + RenderCV / Typst)
 
 1. Ingresa a la carpeta del backend:
    ```bash
@@ -90,7 +99,7 @@ flowchart TD
 
 2. Crea y activa tu entorno virtual:
    - **Windows:**
-     ```bash
+     ```powershell
      python -m venv venv
      .\venv\Scripts\activate
      ```
@@ -100,7 +109,7 @@ flowchart TD
      source venv/bin/activate
      ```
 
-3. Instala las dependencias y el navegador de Playwright:
+3. Instala las dependencias necesarias:
    ```bash
    pip install -r requirements.txt
    playwright install chromium
@@ -120,17 +129,17 @@ flowchart TD
 
 ### 2. Frontend (React + Vite + Tailwind CSS)
 
-1. Abre una segunda terminal e ingresa a la carpeta de frontend:
+1. En una segunda terminal, ingresa a la carpeta de frontend:
    ```bash
    cd frontend
    ```
 
-2. Instala los paquetes:
+2. Instala los paquetes de Node:
    ```bash
    npm install
    ```
 
-3. Inicia la aplicación en modo desarrollo:
+3. Inicia la aplicación web:
    ```bash
    npm run dev
    ```
@@ -144,42 +153,31 @@ flowchart TD
 ```text
 jd-to-resume/
 ├── backend/
-│   ├── main.py               # Endpoints FastAPI: generación, auditoría ATS y streaming
-│   ├── knowledge_base.txt    # Contexto técnico de soporte para la IA
-│   ├── requirements.txt      # Librerías de Python
-│   └── output/               # PDFs generados (almacenamiento temporal)
+│   ├── main.py               # Endpoints FastAPI y pipeline de generación/auditoría
+│   ├── render_service.py     # Adaptador de datos y motor de renderizado RenderCV (Typst)
+│   ├── requirements.txt      # Dependencias (FastAPI, RenderCV, Typst, PyMuPDF, etc.)
+│   └── output/               # PDFs generados (almacenamiento persistente)
 ├── frontend/
 │   ├── src/
-│   │   ├── ToolApp.tsx       # Interfaz principal, estado, historial y controles ATS
-│   │   ├── App.tsx           # Router / Wrapper principal
-│   │   └── index.css         # Estilos globales y tokens Neo-Brutalist
-│   └── package.json          # Dependencias de npm
-├── sample-pdfs/              # Plantillas de ejemplo para pruebas
+│   │   ├── ToolApp.tsx       # UI interactiva: selección de plantillas, auditoría e historial
+│   │   ├── App.tsx           # Contenedor principal de la aplicación
+│   │   └── index.css         # Estilos globales y diseño Neo-Brutalist
+│   └── package.json          # Configuración y scripts npm
 └── README.md
 ```
 
 ---
 
-## 🚀 Historial de Versiones (v2.0)
+## 🤝 Agradecimientos y Créditos
 
-- [x] **Auditoría ATS Completa:** Algoritmo de compatibilidad de palabras clave y estructura.
-- [x] **Estimador de Tono IA:** Detección de frases cliché y sugerencias de redacción orgánica.
-- [x] **Panel de Refinamiento Modular:** Checkboxes de feedback automático y campo libre de instrucciones.
-- [x] **Memoria de Versión Previa:** Las regeneraciones toman como base el PDF generado (`base_resume_filename`), no el CV inicial plano.
-- [x] **Control de Regresión:** El prompt incluye el puntaje actual y fija un target mínimo a superar.
-- [x] **Historial Visual de Score:** Comparativa porcentual entre iteraciones.
-- [x] **Botón Standalone "Solo Auditar ATS":** Análisis independiente sin coste de generación.
+Este proyecto rinde reconocimiento y agradecimiento a las siguientes iniciativas de código abierto:
 
----
-
-## 🤝 Agradecimientos y Reconocimientos
-
-Este proyecto fue construido y extendido a partir de la idea y base inicial de **[VJsharan/jd-to-resume](https://github.com/VJsharan/jd-to-resume)**. 
-
-Queremos expresar un sincero agradecimiento a su creador original por sentar las bases conceptuales y la integración de Playwright + Jinja para la generación ágil de plantillas en PDF. Esta versión **v2** expande la propuesta original incorporando auditoría ATS en tiempo real, detección de lenguaje IA, ciclo de optimización iterativo y control evolutivo de puntaje.
+1. **[VJsharan/jd-to-resume](https://github.com/VJsharan/jd-to-resume):** Proyecto base original que sirvió como inspiración técnica e inicial para la integración de Jinja + Playwright en la generación de currículums.
+2. **[Sina Atalay / RenderCV](https://github.com/sinaatalay/rendercv):** Framework open-source extraordinario de generación de CVs en YAML/Typst que proporciona la estructura base de plantillas y modelos de datos tipográficos.
+3. **[Typst Project](https://github.com/typst/typst):** Motor de marcado y compilación tipográfica moderno que permite generar PDFs vectoriales nítidos a máxima velocidad.
 
 ---
 
 <div align="center">
-  Hecho con dedicación para potenciar postulaciones laborales de alto impacto. ⭐ ¡Si te sirvió el proyecto, no olvides dejar tu estrella!
+  Creado para potenciar postulaciones de alto impacto. ⭐ ¡Si este proyecto te ha sido útil, no olvides dejar tu estrella en el repositorio!
 </div>

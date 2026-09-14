@@ -10,3 +10,6 @@ langgraph
 langchain-core
 python-dotenv
 openai
+rendercv
+rendercv-fonts
+typst

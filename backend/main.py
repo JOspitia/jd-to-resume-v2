@@ -14,6 +14,7 @@ import tempfile
 import time
 
 from dotenv import load_dotenv
+from render_service import render_cv_with_rendercv
 
 load_dotenv()
 
@@ -25,6 +26,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Persistent directory for generated PDFs — survives uvicorn hot-reloads
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
@@ -70,12 +75,12 @@ HTML_TEMPLATE = """
   </div>
   
   {% if summary %}
-  <h2>Resumen Profesional</h2>
+  <h2>{{ labels.summary }}</h2>
   <p>{{ summary }}</p>
   {% endif %}
   
   {% if education and education|length > 0 %}
-  <h2>Educación</h2>
+  <h2>{{ labels.education }}</h2>
   {% for ed in education %}
     <div class="flex-container">
       <div><span class="item-title">{{ ed.school }}</span></div>
@@ -89,7 +94,7 @@ HTML_TEMPLATE = """
   {% endif %}
   
   {% if skills and skills|length > 0 %}
-  <h2>Habilidades</h2>
+  <h2>{{ labels.skills }}</h2>
   <div class="skills-list">
     {% for skill in skills %}
       <span class="item-title">{{ skill.category }}:</span> {{ skill['items']|join(', ') }}<br>
@@ -98,7 +103,7 @@ HTML_TEMPLATE = """
   {% endif %}
   
   {% if experience and experience|length > 0 %}
-  <h2>Experiencia Laboral</h2>
+  <h2>{{ labels.experience }}</h2>
   {% for exp in experience %}
     <div class="flex-container">
       <div><span class="item-title">{{ exp.role }}</span> | <span class="item-subtitle">{{ exp.company }}</span></div>
@@ -113,7 +118,7 @@ HTML_TEMPLATE = """
   {% endif %}
 
   {% if projects and projects|length > 0 %}
-  <h2>Proyectos</h2>
+  <h2>{{ labels.projects }}</h2>
   {% for proj in projects %}
     <div class="flex-container">
       <div><span class="item-title">{{ proj.name }}</span></div>
@@ -128,7 +133,7 @@ HTML_TEMPLATE = """
   {% endif %}
 
   {% if achievements and achievements|length > 0 %}
-  <h2>Logros</h2>
+  <h2>{{ labels.achievements }}</h2>
   <ul>
     {% for ach in achievements %}
       <li>{{ ach }}</li>
@@ -224,7 +229,7 @@ async def call_llm_api(prompt_text: str) -> str:
     err_detail = f" (Error primario: {primary_error_msg})" if primary_error_msg else ""
     raise ValueError(f"Fallaron todos los modelos. Gemini: {last_err}{err_detail}")
 
-async def generation_pipeline(file_path: str, jd: str, target_role: Optional[str] = None, github_url: Optional[str] = None, linkedin_url: Optional[str] = None, custom_instructions: Optional[str] = None, base_resume_filename: Optional[str] = None):
+async def generation_pipeline(file_path: str, jd: str, target_role: Optional[str] = None, github_url: Optional[str] = None, linkedin_url: Optional[str] = None, custom_instructions: Optional[str] = None, base_resume_filename: Optional[str] = None, theme: Optional[str] = "sb2nov"):
     try:
         # Reload .env dynamically so any new API Key is immediately picked up
         load_dotenv(override=True)
@@ -236,12 +241,13 @@ async def generation_pipeline(file_path: str, jd: str, target_role: Optional[str
         # This enables iterative refinement instead of regenerating from scratch
         effective_file_path = file_path
         if base_resume_filename:
-            candidate_path = os.path.join(tempfile.gettempdir(), base_resume_filename)
+            candidate_path = os.path.join(OUTPUT_DIR, base_resume_filename)
             if os.path.exists(candidate_path):
                 effective_file_path = candidate_path
-                print(f"[INFO] Using previously generated resume as base: {base_resume_filename}")
+                print(f"[INFO] ✅ Using previously generated resume as base: {candidate_path}")
             else:
-                print(f"[WARN] base_resume_filename '{base_resume_filename}' not found, falling back to original upload.")
+                print(f"[WARN] ⚠️ base_resume_filename '{base_resume_filename}' not found in OUTPUT_DIR, falling back to original upload.")
+                print(f"[WARN]    Expected path: {candidate_path}")
 
         yield f"data: {json.dumps({'step': 'Extracting Text from Resume', 'progress': 25})}\n\n"
         resume_text = extract_text(effective_file_path)
@@ -258,7 +264,7 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
 2. TAILOR AND RESTRUCTURE ONLY: Rephrase, reorganize, and emphasize the candidate's real existing achievements and technical skills using strong action verbs and relevant keywords from the Job Description.
 3. TARGET ROLE ALIGNMENT: Frame the summary and highlights toward the 'Target Role' if provided. The professional summary MUST include the exact target job title when possible.
 4. STRICT 1-PAGE LAYOUT: Keep all descriptions concise (max 3-4 high-impact bullet points per role) so the resulting resume strictly fits on a single US Letter page.
-5. LANGUAGE MATCHING: Detect the language of the Job Description and Base Resume. If they are in Spanish, you MUST generate all fields (summary, role titles if translated, skills, and bullet points) strictly in Spanish.
+5. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly.
 6. ATS KEYWORD DENSITY: Naturally integrate the most important technical keywords, tools, and soft-skill terms from the Job Description into the bullet points and summary. Prioritize exact-match keywords over synonyms when possible (e.g. if JD says 'React.js' use 'React.js', not just 'React').
 7. STRONG ACTION VERBS: Every bullet point MUST start with a powerful, past-tense action verb (e.g. Desarrollé, Optimicé, Implementé, Lideré, Diseñé, Automaticé, Reduje, Incrementé, Escalé, Migré, Construí, Configuré, Integré). Avoid passive voice and weak starters like 'Responsible for' or 'Helped with'.
 8. QUANTIFIABLE METRICS: Include specific numbers, percentages, dollar amounts, or time savings wherever the Base Resume hints at them (e.g. 'Optimicé consultas SQL reduciendo tiempos de respuesta en un 40%', 'Automaticé 15 flujos de trabajo'). If exact numbers are unknown, use plausible specific estimates based on context.
@@ -283,7 +289,7 @@ Job Description:
         
         generation_config = {"response_mime_type": "application/json"}
         prompt += """
-Respond ONLY with a JSON object in this exact structure:
+Respond ONLY with a JSON object in this exact structure. The 'section_labels' field MUST contain the localized section headings in the SAME language as the Job Description:
 {
   "name": "Jane Doe",
   "phone": "555-1234",
@@ -296,8 +302,17 @@ Respond ONLY with a JSON object in this exact structure:
   "skills": [{"category": "Languages", "items": ["Python", "JavaScript"]}],
   "experience": [{"company": "Acme Corp", "role": "Software Engineer", "dates": "Jan 2023 - Present", "points": ["Shipped API...", "Optimized DB..."]}],
   "projects": [{"name": "AI Tool", "dates": "Fall 2023", "points": ["Built cool thing using X", "Improved Y by Z%"]}],
-  "achievements": ["Won Hackathon X", "Published paper Y"]
+  "achievements": ["Won Hackathon X", "Published paper Y"],
+  "section_labels": {
+    "summary": "Professional Summary",
+    "education": "Education",
+    "skills": "Skills",
+    "experience": "Work Experience",
+    "projects": "Projects",
+    "achievements": "Achievements"
+  }
 }
+IMPORTANT: If the JD is in Spanish, the section_labels values must be in Spanish (e.g. 'Resumen Profesional', 'Educación', 'Habilidades', 'Experiencia Laboral', 'Proyectos', 'Logros'). If the JD is in English, they must be in English as shown above.
 """
         
         yield f"data: {json.dumps({'step': 'Generating Tailored Resume Content', 'progress': 75})}\n\n"
@@ -325,29 +340,53 @@ Respond ONLY with a JSON object in this exact structure:
         # Ensure all expected keys exist to prevent template render errors
         defaults = {
             "name": "", "phone": "", "email": "", "portfolio": "", "linkedin": "", "github": "",
-            "summary": "", "education": [], "skills": [], "experience": [], "projects": [], "achievements": []
+            "summary": "", "education": [], "skills": [], "experience": [], "projects": [], "achievements": [],
+            "section_labels": {}
         }
         for k, v in defaults.items():
             if k not in parsed_data or parsed_data[k] is None:
                 parsed_data[k] = v
 
+        # Extract localized section headings from LLM output (fallback to English if missing)
+        default_labels = {
+            "summary": "Professional Summary",
+            "education": "Education",
+            "skills": "Skills",
+            "experience": "Work Experience",
+            "projects": "Projects",
+            "achievements": "Achievements"
+        }
+        labels = {**default_labels, **parsed_data.get("section_labels", {})}
+
         yield f"data: {json.dumps({'step': 'Formatting Professional PDF', 'progress': 90})}\n\n"
         
-        template = Template(HTML_TEMPLATE)
-        html_content = template.render(**parsed_data)
-        
         output_filename = f"tailored_resume_{int(time.time())}.pdf"
-        output_path = os.path.join(tempfile.gettempdir(), output_filename)
+        output_path = os.path.join(OUTPUT_DIR, output_filename)
         
-        def render_pdf_sync():
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                page.set_content(html_content)
-                page.pdf(path=output_path, prefer_css_page_size=True, print_background=True)
-                browser.close()
+        use_rendercv = theme and theme != "classic_html"
+        rendered = False
+        if use_rendercv:
+            try:
+                print(f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}'...")
+                await asyncio.to_thread(render_cv_with_rendercv, parsed_data, output_path, theme)
+                rendered = True
+            except Exception as r_err:
+                print(f"[WARN] ⚠️ RenderCV theme '{theme}' failed: {r_err}. Falling back to Playwright HTML renderer.")
 
-        await asyncio.to_thread(render_pdf_sync)
+        if not rendered:
+            print("[INFO] 📄 Rendering PDF with Playwright HTML engine...")
+            template = Template(HTML_TEMPLATE)
+            html_content = template.render(**parsed_data, labels=labels)
+            
+            def render_pdf_sync():
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=True)
+                    page = browser.new_page()
+                    page.set_content(html_content)
+                    page.pdf(path=output_path, prefer_css_page_size=True, print_background=True)
+                    browser.close()
+
+            await asyncio.to_thread(render_pdf_sync)
             
         yield f"data: {json.dumps({'step': 'Finished', 'progress': 100, 'download_url': f'/api/download/{output_filename}'})}\n\n"
         
@@ -365,7 +404,8 @@ async def generate_resume(
     github_url: Optional[str] = Form(None),
     linkedin_url: Optional[str] = Form(None),
     custom_instructions: Optional[str] = Form(None),
-    base_resume_filename: Optional[str] = Form(None)
+    base_resume_filename: Optional[str] = Form(None),
+    theme: Optional[str] = Form("sb2nov")
 ):
     # Save the original uploaded file temporarily (used as fallback if no base_resume_filename)
     temp_dir = tempfile.gettempdir()
@@ -374,7 +414,7 @@ async def generate_resume(
          f.write(await file.read())
          
     return StreamingResponse(
-        generation_pipeline(file_path, jd, target_role, github_url, linkedin_url, custom_instructions, base_resume_filename),
+        generation_pipeline(file_path, jd, target_role, github_url, linkedin_url, custom_instructions, base_resume_filename, theme),
         media_type="text/event-stream"
     )
 
@@ -450,7 +490,7 @@ Job Description:
 
 @app.get("/api/download/{filename}")
 async def download_resume(filename: str):
-    file_path = os.path.join(tempfile.gettempdir(), filename)
+    file_path = os.path.join(OUTPUT_DIR, filename)
     if os.path.exists(file_path):
         return FileResponse(file_path, filename=filename, media_type="application/pdf")
     return {"error": "File not found"}
