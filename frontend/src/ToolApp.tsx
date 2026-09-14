@@ -17,6 +17,12 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [selectedTheme, setSelectedTheme] = useState<string>('sb2nov');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ATS & AI Detection states
+  const [autoValidateATS, setAutoValidateATS] = useState(false);
+  const [atsStatus, setAtsStatus] = useState<'idle' | 'analyzing' | 'success' | 'error'>('idle');
+  const [atsData, setAtsData] = useState<any | null>(null);
+  const [atsErrorMessage, setAtsErrorMessage] = useState('');
+
   // Live timer for loading states (seconds counter up to 60s)
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -33,12 +39,6 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       if (interval) clearInterval(interval);
     };
   }, [status, atsStatus]);
-
-  // ATS & AI Detection states
-  const [autoValidateATS, setAutoValidateATS] = useState(false);
-  const [atsStatus, setAtsStatus] = useState<'idle' | 'analyzing' | 'success' | 'error'>('idle');
-  const [atsData, setAtsData] = useState<any | null>(null);
-  const [atsErrorMessage, setAtsErrorMessage] = useState('');
 
   // Score history — tracks ATS evolution across regeneration versions
   type ScoreEntry = { version: number; ats: number; ai: number; format: number; label: string };
