@@ -178,8 +178,8 @@ async def call_llm_api(prompt_text: str) -> str:
                 raise ValueError(f"Falta la clave API para {provider}.")
                 
             print(f"[LLM INFO] Intentando proveedor primario '{provider}' ({model_name}) en {base_url}...")
-            # Set explicit 25s timeout on HTTP client to avoid hanging indefinitely if network stalls
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=25.0)
+            # Set explicit 45s timeout on HTTP client to give DeepSeek enough time under high load
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=45.0)
             
             def _run_openai():
                 extra_args = {}
@@ -197,7 +197,7 @@ async def call_llm_api(prompt_text: str) -> str:
                 )
                 return response.choices[0].message.content
                 
-            return await asyncio.wait_for(asyncio.to_thread(_run_openai), timeout=30.0)
+            return await asyncio.wait_for(asyncio.to_thread(_run_openai), timeout=50.0)
         except Exception as primary_err:
             primary_error_msg = str(primary_err)
             print(f"[LLM WARN] El proveedor primario '{provider}' falló/agotó tiempo ({primary_err})")
@@ -212,14 +212,14 @@ async def call_llm_api(prompt_text: str) -> str:
     genai.configure(api_key=gemini_key)
     generation_config = {"response_mime_type": "application/json"}
     
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro']
+    models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
     last_err = None
     
     for m_name in models_to_try:
         try:
             print(f"[LLM INFO] Intentando modelo Gemini de respaldo: '{m_name}'...")
             model = genai.GenerativeModel(m_name, generation_config=generation_config)
-            res = await asyncio.wait_for(asyncio.to_thread(model.generate_content, prompt_text), timeout=30.0)
+            res = await asyncio.wait_for(asyncio.to_thread(model.generate_content, prompt_text), timeout=50.0)
             if res and res.text:
                 return res.text
         except Exception as e:

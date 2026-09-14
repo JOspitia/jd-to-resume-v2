@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw } from 'lucide-react';
+import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock } from 'lucide-react';
 
 export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -16,6 +16,23 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [generatedPdfFilename, setGeneratedPdfFilename] = useState<string | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<string>('sb2nov');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Live timer for loading states (seconds counter up to 60s)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  React.useEffect(() => {
+    let interval: any = null;
+    if (status === 'generating' || atsStatus === 'analyzing') {
+      interval = setInterval(() => {
+        setElapsedSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [status, atsStatus]);
 
   // ATS & AI Detection states
   const [autoValidateATS, setAutoValidateATS] = useState(false);
@@ -64,7 +81,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     formData.append("jd", jd);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 40000); // 40 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second (1 minute) timeout
 
     try {
       const res = await fetch("http://localhost:8000/api/analyze-ats", {
@@ -101,7 +118,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     } catch (err: any) {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError') {
-        setAtsErrorMessage("La solicitud de análisis ATS agotó el tiempo de espera (40s). Por favor reintenta.");
+        setAtsErrorMessage("La solicitud de análisis ATS agotó el tiempo de espera (1 min). Por favor reintenta.");
       } else {
         setAtsErrorMessage(err.message || "Ocurrió un error inesperado al analizar el ATS.");
       }
@@ -447,10 +464,10 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             >
               {status === 'generating' ? (
                 <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-                  <CheckCircle className="w-6 h-6" />
+                  <Clock className="w-6 h-6" />
                 </motion.div>
               ) : <Play className="w-6 h-6 fill-current" />}
-              {status === 'generating' ? 'PROCESSING...' : 'GENERATE TAILORED RESUME'}
+              {status === 'generating' ? `GENERANDO (${elapsedSeconds}s / 60s)...` : 'GENERATE TAILORED RESUME'}
             </button>
 
             {/* Standalone ATS-only audit button */}
@@ -462,10 +479,10 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             >
               {atsStatus === 'analyzing' ? (
                 <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}>
-                  <BarChart3 className="w-6 h-6" />
+                  <Clock className="w-6 h-6" />
                 </motion.div>
               ) : <ShieldCheck className="w-6 h-6" />}
-              {atsStatus === 'analyzing' ? 'ANALIZANDO...' : '📊 SOLO AUDITAR ATS'}
+              {atsStatus === 'analyzing' ? `AUDITANDO (${elapsedSeconds}s / 60s)...` : '📊 SOLO AUDITAR ATS'}
             </button>
           </div>
 
@@ -498,7 +515,13 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
               {status === 'generating' && (
                 <div className="space-y-6">
                   <div className="flex justify-between items-end border-b-2 border-black pb-4">
-                    <h3 className="text-2xl font-bold font-serif">{stepMessage}</h3>
+                    <div>
+                      <h3 className="text-2xl font-bold font-serif">{stepMessage}</h3>
+                      <div className="flex items-center gap-2 mt-1 text-sm font-mono font-bold text-blue-800">
+                        <Clock className="w-4 h-4 animate-spin text-blue-600" />
+                        <span>Tiempo transcurrido: {elapsedSeconds}s / 60s</span>
+                      </div>
+                    </div>
                     <span className="text-3xl font-black font-mono">{progress}%</span>
                   </div>
                   <div className="w-full border-2 border-black h-10 bg-gray-100 overflow-hidden relative">
