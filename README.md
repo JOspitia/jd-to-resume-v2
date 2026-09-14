@@ -1,137 +1,185 @@
-<div align="center">
-  <h1>✨ Resume Tailor AI</h1>
-  <p><strong>Perfect Your Resume. Beat the ATS. 🚀</strong></p>
-  <p>Stop starting from scratch. Let an intelligent AI agent perfectly craft your master resume into an optimized PDF precisely tailored to any job description you encounter.</p>
+# 🚀 Resume Tailor AI (v2) — ATS Match & Iterative Optimizer
 
-  <p>
-    <img src="https://img.shields.io/badge/Frontend-React%20%2B%20Vite-blue?style=for-the-badge&logo=react" alt="React" />
-    <img src="https://img.shields.io/badge/UI-Tailwind%20%2B%20Shadcn-38bdf8?style=for-the-badge&logo=tailwind-css" alt="Tailwind CSS" />
-    <img src="https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi" alt="FastAPI" />
-  </p>
-  <p>
-    <img src="https://img.shields.io/badge/AI_Engine-Google_Gemini-FF5E00?style=for-the-badge&logo=google" alt="Gemini AI" />
-    <img src="https://img.shields.io/badge/PDF_Rendering-Playwright-2EAD33?style=for-the-badge&logo=playwright" alt="Playwright" />
-    <img src="https://img.shields.io/badge/Style-Neo--Brutalism-black?style=for-the-badge" alt="Neo-Brutalism" />
-  </p>
+<div align="center">
+
+[![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite%20%2B%20Tailwind-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://reactjs.org/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20%2B%20Python-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Gemini](https://img.shields.io/badge/AI-Google%20Gemini%20Flash-FF5E00?style=for-the-badge&logo=google&logoColor=white)](https://aistudio.google.com/)
+[![Playwright](https://img.shields.io/badge/PDF_Render-Playwright%20Chromium-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev/)
+[![Status](https://img.shields.io/badge/Status-Active%20v2.0-brightgreen?style=for-the-badge)]()
+
+**Genera, audita y optimiza iterativamente tu currículum contra cualquier vacante laboral (Job Description) superando filtros ATS y detectores de IA.**
+
+[Características](#-características-principales) • [Arquitectura](#-arquitectura-y-flujo) • [Instalación](#-guía-de-instalación) • [Historial de Mejoras](#-historial-de-versiones-v2) • [Agradecimientos](#-agradecimientos)
+
 </div>
 
-<br/>
+---
 
-## 🎯 What is it?
-**Resume Tailor AI** is a fully open-source, local-friendly full-stack application. It extracts text from your existing PDF resume, matches it dynamically against any copied/pasted Job Description using the Google Gemini LLM, and flawlessly renders it back into an ATS-destroying PDF format.
+## 🌟 ¿Qué es Resume Tailor AI v2?
 
-Complete with a modern, high-contrast **Neo-Brutalism web interface** and real-time streaming progress bars so you never wonder what the AI is thinking!
-
-## ⚡ Core Features
-- **AI-Powered Keyword Extraction**: Integrates seamlessly with `Google Gemini Flash` to ensure you hit all technical keywords.
-- **Flawless Formatting**: Uses `Playwright` to render modern HTML/CSS Jinja templates natively into PDFs without heavy system dependencies (goodbye GTK+ errors).
-- **Custom Context Injection**: Feed it your Target Role, GitHub link, and LinkedIn URLs to effortlessly sprinkle them into your final PDF.
-- **Neo-Brutalism React UI**: Designed edge-to-edge taking inspiration from top-tier modern SAAS utilities—giving you a premium local experience.
-
-<br/>
-
-## 🛠️ Step-by-Step Setup
-
-Want to run this yourself? It's easy. Since this is a full-stack dual-application, you will need to open two terminals (one for the Backend API, one for the Frontend Web App).
-
-### 1. Prerequisites
-Make sure you have installed:
-- [Node.js](https://nodejs.org/) (for the frontend)
-- [Python 3.10+](https://www.python.org/) (for the backend API)
-- A free **Google Gemini API Key** from [Google AI Studio](https://aistudio.google.com/app/apikey)
+**Resume Tailor AI v2** es una solución Full-Stack moderna diseñada para maximizar la tasa de éxito de postulaciones laborales. No solo adapta la experiencia y habilidades de tu currículum existente (PDF) a los requisitos específicos de una oferta de empleo, sino que introduce un **ciclo de auditoría y refinamiento continuo** con métricas ATS reales, detección de contenido sintético/IA y control de evolución de versiones.
 
 ---
 
-### 2. Backend Setup (FastAPI + AI Engine)
+## ⚡ Características Principales
 
-Open your first terminal and navigate into the `backend/` folder:
+### 1. 🎯 Generación Adaptada de Alto Impacto
+- **Extracción Inteligente:** Procesa currículums en formato PDF respetando tu trayectoria base.
+- **Inyección de Contexto Personalizado:** Posibilidad de suministrar Rol Objetivo, enlaces a GitHub, LinkedIn y notas clave.
+- **Renderizado Nativo con Playwright:** Exporta un documento PDF impecable, tipográficamente balanceado y 100% legible para escáneres ATS.
 
-```bash
-cd backend
-```
+### 2. 📊 Auditoría Integral ATS & Detección de IA
+- **Score ATS (Compatibilidad CompuTrabajo, Workday, etc.):** Evaluación de coincidencia de palabras clave, balance técnico/blando y formato estructural.
+- **Detector de Tono IA:** Análisis probabilístico para detectar patrones repetitivos, sobreuso de frases trilladas de LLMs y sugerencias para humanizar el perfil.
+- **Diagnóstico Detallado:**
+  - Desglose de competencias encontradas vs. faltantes.
+  - Consejos de redacción orientados a resultados cuantificables (fórmula STAR/Google XYZ).
+  - Recomendaciones de ascenso de rango (Mid $\rightarrow$ Senior / Lead).
 
-**Step 2A: Create a Virtual Environment & Install Dependencies**
-```bash
-# Windows
-python -m venv venv
-.\venv\Scripts\activate
+### 3. 🔄 Refinamiento Iterativo Inteligente
+- **Iteración sobre el CV Generado:** El sistema no reinicia desde cero; utiliza como base el último PDF generado (`base_resume_filename`) para pulirlo sin perder los ajustes previos.
+- **Inyección Selectiva de Feedback:**
+  - Checkbox para incluir consejos de humanización de tono.
+  - Checkbox para incorporar recomendaciones de nivel senior.
+  - Caja de texto para instrucciones personalizadas adicionales.
+- **Protección contra Regresión de Score:** Inyecta automáticamente el puntaje actual y un objetivo a superar en el prompt para asegurar que cada regeneración mantenga o supere la calidad.
 
-# Mac/Linux
-python3 -m venv venv
-source venv/bin/activate
-```
-```bash
-pip install -r requirements.txt
-```
+### 4. 📈 Historial y Evolución de Scores
+- Línea temporal visual que compara el desempeño entre versiones (`v1`, `v2`, etc.).
+- Identificación inmediata de mejoras o retrocesos porcentuales (+15% ▲ / -5% ▼).
 
-**Step 2B: Install Playwright Browsers**
-The backend uses Playwright to render your PDF. Install its underlying Chromium engine seamlessly:
-```bash
-playwright install chromium
-```
-
-**Step 2C: Add your API Key**
-Create a new file named `.env` right inside the `backend/` folder, and add your key:
-```env
-GEMINI_API_KEY=YOUR_API_KEY_HERE
-```
-
-**Step 2D: Run the API!**
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-*(Your backend is now safely listening on port 8000!)*
+### 5. 🔍 Botón "Solo Auditar ATS"
+- ¿Ya tienes un CV listo y solo quieres saber cómo rankea frente a una oferta?
+- Audita directamente tu archivo PDF sin necesidad de generar una nueva versión ni gastar tokens innecesarios.
 
 ---
 
-### 3. Frontend Setup (React Web UI)
+## 🏗️ Arquitectura y Flujo
 
-Open a **new/second terminal** and navigate into the `frontend/` folder:
-
-```bash
-cd frontend
+```mermaid
+flowchart TD
+    A[PDF Base + Vacante JD] --> B[FastAPI Backend / Gemini AI]
+    B --> C[Playwright: Renderizado de PDF]
+    C --> D[Visualización & Preview en Front-end]
+    D --> E{Opciones de Validación}
+    E -->|Validación Automática o Manual| F[Auditoría ATS & Detector IA]
+    F --> G[Reporte: Score, Keywords, Tono]
+    G --> H[Historial de Scores]
+    G --> I[Refinamiento Iterativo]
+    I -->|Prompt con Score Benchmark + Feedback| B
 ```
 
-**Step 3A: Install Node modules**
-```bash
-npm install
-```
+---
 
-**Step 3B: Start the Application!**
-```bash
-npm run dev
-```
+## 🛠️ Guía de Instalación y Uso
 
-🚀 Open your browser to `http://localhost:5173/` and enjoy!
+### Prerrequisitos
+- [Node.js](https://nodejs.org/) (v18+)
+- [Python 3.10+](https://www.python.org/)
+- API Key gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey)
 
-<br />
+---
 
-## 📁 Repository Structure
-```
-jd-to-resume-pdf/
-├── backend/                  # Powered by FastAPI
-│   ├── main.py               # Application & Streaming API logic
-│   ├── knowledge_base.txt    # Developer context for AI tailoring
-│   ├── requirements.txt      # Python Dependencies
-│   └── .env                  # Secret keys (ignored by git)
-│
-├── frontend/                 # Powered by Vite + React
-│   ├── src/                  
-│   │   ├── ...               # React Components & Logic
-│   └── package.json          # Node Dependencies
-│
-├── sample-pdfs/              # Provided resume templates for testing
-│   ├── jakes-resume.pdf
-│   └── resume-template-...pdf
-│
-├── assets/                   # Local personal data (git ignored)
-│
-├── .gitignore
+### 1. Backend (FastAPI + Playwright)
+
+1. Ingresa a la carpeta del backend:
+   ```bash
+   cd backend
+   ```
+
+2. Crea y activa tu entorno virtual:
+   - **Windows:**
+     ```bash
+     python -m venv venv
+     .\venv\Scripts\activate
+     ```
+   - **Linux / macOS:**
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
+
+3. Instala las dependencias y el navegador de Playwright:
+   ```bash
+   pip install -r requirements.txt
+   playwright install chromium
+   ```
+
+4. Configura tu variable de entorno en `backend/.env`:
+   ```env
+   GEMINI_API_KEY=tu_api_key_aqui
+   ```
+
+5. Inicia el servidor de backend:
+   ```bash
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+---
+
+### 2. Frontend (React + Vite + Tailwind CSS)
+
+1. Abre una segunda terminal e ingresa a la carpeta de frontend:
+   ```bash
+   cd frontend
+   ```
+
+2. Instala los paquetes:
+   ```bash
+   npm install
+   ```
+
+3. Inicia la aplicación en modo desarrollo:
+   ```bash
+   npm run dev
+   ```
+
+4. Abre tu navegador en `http://localhost:5173`.
+
+---
+
+## 📂 Estructura del Proyecto
+
+```text
+jd-to-resume/
+├── backend/
+│   ├── main.py               # Endpoints FastAPI: generación, auditoría ATS y streaming
+│   ├── knowledge_base.txt    # Contexto técnico de soporte para la IA
+│   ├── requirements.txt      # Librerías de Python
+│   └── output/               # PDFs generados (almacenamiento temporal)
+├── frontend/
+│   ├── src/
+│   │   ├── ToolApp.tsx       # Interfaz principal, estado, historial y controles ATS
+│   │   ├── App.tsx           # Router / Wrapper principal
+│   │   └── index.css         # Estilos globales y tokens Neo-Brutalist
+│   └── package.json          # Dependencias de npm
+├── sample-pdfs/              # Plantillas de ejemplo para pruebas
 └── README.md
 ```
 
-## 🤝 Open Source
-Because no product is complete without a buzzword-filled feature list. 
-Feel free to fork, customize your own HTML templates using Jinja inside `main.py`, or modify the AI System Prompt to meet your specific career industry.
+---
 
-Enjoy saving hours on your job applications!
+## 🚀 Historial de Versiones (v2.0)
+
+- [x] **Auditoría ATS Completa:** Algoritmo de compatibilidad de palabras clave y estructura.
+- [x] **Estimador de Tono IA:** Detección de frases cliché y sugerencias de redacción orgánica.
+- [x] **Panel de Refinamiento Modular:** Checkboxes de feedback automático y campo libre de instrucciones.
+- [x] **Memoria de Versión Previa:** Las regeneraciones toman como base el PDF generado (`base_resume_filename`), no el CV inicial plano.
+- [x] **Control de Regresión:** El prompt incluye el puntaje actual y fija un target mínimo a superar.
+- [x] **Historial Visual de Score:** Comparativa porcentual entre iteraciones.
+- [x] **Botón Standalone "Solo Auditar ATS":** Análisis independiente sin coste de generación.
+
+---
+
+## 🤝 Agradecimientos y Reconocimientos
+
+Este proyecto fue construido y extendido a partir de la idea y base inicial de **[VJsharan/jd-to-resume](https://github.com/VJsharan/jd-to-resume)**. 
+
+Queremos expresar un sincero agradecimiento a su creador original por sentar las bases conceptuales y la integración de Playwright + Jinja para la generación ágil de plantillas en PDF. Esta versión **v2** expande la propuesta original incorporando auditoría ATS en tiempo real, detección de lenguaje IA, ciclo de optimización iterativo y control evolutivo de puntaje.
+
+---
+
+<div align="center">
+  Hecho con dedicación para potenciar postulaciones laborales de alto impacto. ⭐ ¡Si te sirvió el proyecto, no olvides dejar tu estrella!
+</div>
