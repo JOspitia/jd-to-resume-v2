@@ -1,0 +1,35 @@
+# Environments
+.env
+assets/
+**/venv/
+**/__pycache__/
+node_modules/
+dist/
+dist-ssr/
+build/
+*.local
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.sln
+*.sw?
+
+# Personal/Temp Files
+*.pdf
+!sample-pdfs/*.pdf
+*.log
+*.txt
+!requirements.txt
+!knowledge_base.txt
+!README.md
+!*.md
+
+# Images
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.ico

@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 60 4% 89%; /* #E5E5E0 equivalent in HSL */
+    --foreground: 0 0% 0%;   /* #000000 */
+    
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+
+    --primary: 224 76% 48%; /* #1D4ED8 (Royal Blue) */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 25 95% 53%; /* #F97316 (Orange) */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 90%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 60 4% 95%; 
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 100% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 0%;
+    --input: 0 0% 0%;
+    --ring: 0 0% 0%;
+
+    --radius: 0px; /* STRICTLY SHARP CORNERS */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Noto Sans', 'Geist Sans', sans-serif;
+    background-image: 
+      linear-gradient(90deg, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+      linear-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-color: #E5E5E0;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Merriweather', serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+.rm-box {
+  border: 2px solid black;
+  box-shadow: 4px 4px 0px 0px rgba(0,0,0,1);
+  border-radius: var(--radius);
+  background-color: white;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.rm-box:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0px 0px rgba(0,0,0,1);
+}
+
+.rm-btn {
+  border: 2px solid black;
+  box-shadow: 4px 4px 0px 0px rgba(0,0,0,1);
+  border-radius: var(--radius);
+  transition: transform 0.1s, box-shadow 0.1s;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.rm-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0px 0px rgba(0,0,0,1);
+}
+
+.rm-btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 1px 1px 0px 0px rgba(0,0,0,1);
+}
+
+.rm-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border: 2px solid black;
+  box-shadow: 2px 2px 0px 0px rgba(0,0,0,1);
+}
