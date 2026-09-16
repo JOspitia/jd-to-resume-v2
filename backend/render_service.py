@@ -50,14 +50,18 @@ def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = 
     name = parsed_data.get("name", "Candidate").strip() or "Candidate"
     email = parsed_data.get("email", "").strip()
     phone = sanitize_phone(parsed_data.get("phone", ""))
+    location = parsed_data.get("location", "").strip()
     
     cv_info: Dict[str, Any] = {
         "name": name,
     }
+    if location:
+        cv_info["location"] = location
     if email:
         cv_info["email"] = email
     if phone:
         cv_info["phone"] = phone
+
         
     # Social networks & Links
     social_networks = []
@@ -185,26 +189,88 @@ def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = 
     valid_themes = ["sb2nov", "classic", "moderncv"]
     selected_theme = theme.lower().strip() if theme and theme.lower().strip() in valid_themes else "sb2nov"
     
-    return {
-        "cv": cv_info,
-        "design": {
-            "theme": selected_theme
+    # Custom design configuration for clean layout & orphan avoidance
+    design_config: Dict[str, Any] = {
+        "theme": selected_theme,
+        "entries": {
+            # STRICT ANTI-ORPHAN: Never break an individual job / project across pages
+            "allow_page_break": False,
+            "highlights": {
+                "space_between_items": "0.1em",
+                "space_above": "0.1em"
+            }
+        },
+        "sections": {
+            "space_between_regular_entries": "0.8em",
+            "space_between_text_based_entries": "0.25em"
+        },
+        "section_titles": {
+            "space_above": "0.4cm",
+            "space_below": "0.2cm"
         }
     }
 
-def render_cv_with_rendercv(parsed_data: Dict[str, Any], output_path: str, theme: str = "sb2nov") -> str:
+    # If fit_single_page requested, tighten vertical margins and line spacing
+    if fit_single_page:
+        design_config["page"] = {
+            "top_margin": "0.45in",
+            "bottom_margin": "0.45in",
+            "left_margin": "0.5in",
+            "right_margin": "0.5in"
+        }
+        design_config["typography"] = {
+            "line_spacing": "0.45em"
+        }
+        design_config["sections"]["space_between_regular_entries"] = "0.6em"
+        design_config["section_titles"]["space_above"] = "0.3cm"
+        design_config["section_titles"]["space_below"] = "0.15cm"
+
+    return {
+        "cv": cv_info,
+        "design": design_config
+    }
+
+def render_cv_with_rendercv(
+    parsed_data: Dict[str, Any], 
+    output_path: str, 
+    theme: str = "sb2nov", 
+    fit_single_page: bool = False,
+    page_break_section: Optional[str] = None
+) -> str:
     """
     Renders CV to PDF using RenderCV Python API.
     Returns the absolute path to the generated PDF.
     """
-    rendercv_dict = convert_llm_json_to_rendercv_dict(parsed_data, theme=theme)
+    rendercv_dict = convert_llm_json_to_rendercv_dict(
+        parsed_data, 
+        theme=theme, 
+        fit_single_page=fit_single_page
+    )
     json_str = json.dumps(rendercv_dict, ensure_ascii=False)
     
     # Build RenderCV Model
     d, rendercv_model = build_rendercv_dictionary_and_model(json_str)
     
-    # Generate Typst & PDF
+    # Generate Typst
     typst_path = generate_typst(rendercv_model)
+
+    # If manual page break before a specific section is requested, insert it directly in the Typst file
+    if page_break_section and os.path.exists(typst_path):
+        try:
+            with open(typst_path, "r", encoding="utf-8") as f:
+                typst_code = f.read()
+
+            # Search section title heading pattern in Typst, e.g. == Experience or = Experience
+            pattern = rf"(==\s*\[?{re.escape(page_break_section)}\]?)"
+            if re.search(pattern, typst_code, flags=re.IGNORECASE):
+                typst_code = re.sub(pattern, r"#pagebreak()\n\1", typst_code, count=1, flags=re.IGNORECASE)
+                with open(typst_path, "w", encoding="utf-8") as f:
+                    f.write(typst_code)
+                print(f"[INFO] 📄 Injected #pagebreak() before section: {page_break_section}")
+        except Exception as pb_err:
+            print(f"[WARN] Could not inject pagebreak into Typst: {pb_err}")
+
+    # Generate PDF from Typst
     pdf_generated_path = generate_pdf(rendercv_model, typst_path)
     
     if not pdf_generated_path or not os.path.exists(pdf_generated_path):
@@ -213,3 +279,4 @@ def render_cv_with_rendercv(parsed_data: Dict[str, Any], output_path: str, theme
     # Copy final PDF to target output_path
     shutil.copy(pdf_generated_path, output_path)
     return output_path
+

@@ -53,11 +53,11 @@ HTML_TEMPLATE = """
   .contact-info { text-align: center; font-size: 10.5pt; margin-bottom: 8px; }
   .contact-info a { color: #000; text-decoration: none; }
   
-  h2 { font-size: 12pt; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid black; padding-bottom: 2px; margin-top: 12px; margin-bottom: 6px; color: #000; }
+  h2 { font-size: 12pt; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid black; padding-bottom: 2px; margin-top: 12px; margin-bottom: 6px; color: #000; page-break-after: avoid; break-after: avoid; }
   
   p { margin: 0 0 4px 0; }
   ul { margin: 0 0 8px 0; padding-left: 20px; }
-  li { margin-bottom: 2px; }
+  li { margin-bottom: 2px; orphans: 3; widows: 3; }
   
   .flex-container { display: flex; justify-content: space-between; align-items: baseline; }
   
@@ -66,79 +66,117 @@ HTML_TEMPLATE = """
   .item-right { text-align: right; }
   
   .skills-list { margin: 0 0 8px 0; }
+
+  /* Anti-orphan block protection */
+  .resume-entry {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin-bottom: 6px;
+  }
+  .manual-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
 </style>
 </head>
 <body>
   <h1>{{ name }}</h1>
   <div class="contact-info">
-    {{ phone }} | {{ email }} | <a href="{{ portfolio }}">Portfolio</a> | <a href="{{ linkedin }}">LinkedIn</a> | <a href="{{ github }}">GitHub</a>
+    {% set items = [] %}
+    {% if location %}{% set _ = items.append(location) %}{% endif %}
+    {% if phone %}{% set _ = items.append(phone) %}{% endif %}
+    {% if email %}{% set _ = items.append(email) %}{% endif %}
+    {% if linkedin %}{% set _ = items.append('<a href="' ~ linkedin ~ '">LinkedIn</a>') %}{% endif %}
+    {% if github %}{% set _ = items.append('<a href="' ~ github ~ '">GitHub</a>') %}{% endif %}
+    {% if portfolio %}{% set _ = items.append('<a href="' ~ portfolio ~ '">Portfolio</a>') %}{% endif %}
+    {{ items|join(' | ') }}
   </div>
+
+
   
   {% if summary %}
-  <h2>{{ labels.summary }}</h2>
-  <p>{{ summary }}</p>
+  <div class="resume-entry {% if page_break_section == 'summary' %}manual-page-break{% endif %}">
+    <h2>{{ labels.summary }}</h2>
+    <p>{{ summary }}</p>
+  </div>
   {% endif %}
   
   {% if education and education|length > 0 %}
-  <h2>{{ labels.education }}</h2>
-  {% for ed in education %}
-    <div class="flex-container">
-      <div><span class="item-title">{{ ed.school }}</span></div>
-      <div class="item-right">{{ ed.dates }}</div>
-    </div>
-    <div class="flex-container">
-      <div><span class="item-subtitle">{{ ed.degree }}</span>{% if ed.gpa %} (GPA: {{ ed.gpa }}){% endif %}</div>
-      <div class="item-right"></div>
-    </div>
-  {% endfor %}
+  <div class="{% if page_break_section == 'education' %}manual-page-break{% endif %}">
+    <h2>{{ labels.education }}</h2>
+    {% for ed in education %}
+      <div class="resume-entry">
+        <div class="flex-container">
+          <div><span class="item-title">{{ ed.school }}</span></div>
+          <div class="item-right">{{ ed.dates }}</div>
+        </div>
+        <div class="flex-container">
+          <div><span class="item-subtitle">{{ ed.degree }}</span>{% if ed.gpa %} (GPA: {{ ed.gpa }}){% endif %}</div>
+          <div class="item-right"></div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
   {% endif %}
   
   {% if skills and skills|length > 0 %}
-  <h2>{{ labels.skills }}</h2>
-  <div class="skills-list">
-    {% for skill in skills %}
-      <span class="item-title">{{ skill.category }}:</span> {{ skill['items']|join(', ') }}<br>
-    {% endfor %}
+  <div class="{% if page_break_section == 'skills' %}manual-page-break{% endif %}">
+    <h2>{{ labels.skills }}</h2>
+    <div class="skills-list resume-entry">
+      {% for skill in skills %}
+        <span class="item-title">{{ skill.category }}:</span> {{ skill['items']|join(', ') }}<br>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
   
   {% if experience and experience|length > 0 %}
-  <h2>{{ labels.experience }}</h2>
-  {% for exp in experience %}
-    <div class="flex-container">
-      <div><span class="item-title">{{ exp.role }}</span> | <span class="item-subtitle">{{ exp.company }}</span></div>
-      <div class="item-right">{{ exp.dates }}</div>
-    </div>
-    <ul>
-      {% for point in exp.points %}
-        <li>{{ point }}</li>
-      {% endfor %}
-    </ul>
-  {% endfor %}
+  <div class="{% if page_break_section == 'experience' %}manual-page-break{% endif %}">
+    <h2>{{ labels.experience }}</h2>
+    {% for exp in experience %}
+      <div class="resume-entry">
+        <div class="flex-container">
+          <div><span class="item-title">{{ exp.role }}</span> | <span class="item-subtitle">{{ exp.company }}</span></div>
+          <div class="item-right">{{ exp.dates }}</div>
+        </div>
+        <ul>
+          {% for point in exp.points %}
+            <li>{{ point }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endfor %}
+  </div>
   {% endif %}
 
   {% if projects and projects|length > 0 %}
-  <h2>{{ labels.projects }}</h2>
-  {% for proj in projects %}
-    <div class="flex-container">
-      <div><span class="item-title">{{ proj.name }}</span></div>
-      <div class="item-right">{{ proj.dates }}</div>
-    </div>
-    <ul>
-      {% for point in proj.points %}
-        <li>{{ point }}</li>
-      {% endfor %}
-    </ul>
-  {% endfor %}
+  <div class="{% if page_break_section == 'projects' %}manual-page-break{% endif %}">
+    <h2>{{ labels.projects }}</h2>
+    {% for proj in projects %}
+      <div class="resume-entry">
+        <div class="flex-container">
+          <div><span class="item-title">{{ proj.name }}</span></div>
+          <div class="item-right">{{ proj.dates }}</div>
+        </div>
+        <ul>
+          {% for point in proj.points %}
+            <li>{{ point }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endfor %}
+  </div>
   {% endif %}
 
   {% if achievements and achievements|length > 0 %}
-  <h2>{{ labels.achievements }}</h2>
-  <ul>
-    {% for ach in achievements %}
-      <li>{{ ach }}</li>
-    {% endfor %}
-  </ul>
+  <div class="resume-entry {% if page_break_section == 'achievements' %}manual-page-break{% endif %}">
+    <h2>{{ labels.achievements }}</h2>
+    <ul>
+      {% for ach in achievements %}
+        <li>{{ ach }}</li>
+      {% endfor %}
+    </ul>
+  </div>
   {% endif %}
 </body>
 </html>
@@ -231,7 +269,18 @@ async def call_llm_api(prompt_text: str) -> str:
     raise ValueError(f"Fallaron todos los modelos. Gemini: {last_err}{err_detail}")
 
 
-async def generation_pipeline(file_path: str, jd: str, target_role: Optional[str] = None, github_url: Optional[str] = None, linkedin_url: Optional[str] = None, custom_instructions: Optional[str] = None, base_resume_filename: Optional[str] = None, theme: Optional[str] = "sb2nov"):
+async def generation_pipeline(
+    file_path: str, 
+    jd: str, 
+    target_role: Optional[str] = None, 
+    github_url: Optional[str] = None, 
+    linkedin_url: Optional[str] = None, 
+    custom_instructions: Optional[str] = None, 
+    base_resume_filename: Optional[str] = None, 
+    theme: Optional[str] = "sb2nov",
+    fit_single_page: bool = False,
+    page_break_section: Optional[str] = None
+):
     try:
         # Reload .env dynamically so any new API Key is immediately picked up
         load_dotenv(override=True)
@@ -265,16 +314,26 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
 1. ZERO HALLUCINATION & NO INVENTING DATA: You MUST ONLY use the candidate's real experiences, companies, education, degrees, dates, and projects provided in the 'Base Resume'. Absolutely DO NOT invent, hallucinate, or import fake or third-party companies, internships, jobs, dates, or projects (e.g. DO NOT add ZScore, Hackumi, Resume Analyzer, or any experience not in the Base Resume).
 2. TAILOR AND RESTRUCTURE ONLY: Rephrase, reorganize, and emphasize the candidate's real existing achievements and technical skills using strong action verbs and relevant keywords from the Job Description.
 3. TARGET ROLE ALIGNMENT: Frame the summary and highlights toward the 'Target Role' if provided. The professional summary MUST include the exact target job title when possible.
-4. STRICT 1-PAGE LAYOUT: Keep all descriptions concise (max 3-4 high-impact bullet points per role) so the resulting resume strictly fits on a single US Letter page.
+4. STRICT 1-PAGE LAYOUT & ANTI-ORPHAN COMPACTNESS:
+   - Provide 2 to 3 concise, punchy bullet points per role (do not exceed 3 unless essential).
+   - Ensure bullet points are self-contained and max 1 to 2 lines each so they never spill solitary orphan lines onto a next page.
+   - Keep the professional summary to 2-3 focused lines.
 5. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly.
 6. ATS KEYWORD DENSITY: Naturally integrate the most important technical keywords, tools, and soft-skill terms from the Job Description into the bullet points and summary. Prioritize exact-match keywords over synonyms when possible (e.g. if JD says 'React.js' use 'React.js', not just 'React').
 7. STRONG ACTION VERBS: Every bullet point MUST start with a powerful, past-tense action verb (e.g. Desarrollé, Optimicé, Implementé, Lideré, Diseñé, Automaticé, Reduje, Incrementé, Escalé, Migré, Construí, Configuré, Integré). Avoid passive voice and weak starters like 'Responsible for' or 'Helped with'.
 8. QUANTIFIABLE METRICS: Include specific numbers, percentages, dollar amounts, or time savings wherever the Base Resume hints at them (e.g. 'Optimicé consultas SQL reduciendo tiempos de respuesta en un 40%', 'Automaticé 15 flujos de trabajo'). If exact numbers are unknown, use plausible specific estimates based on context.
 9. ATS FORMATTING COMPLIANCE: The output data must produce a clean, single-column, ATS-parseable layout. Do NOT include tables, graphics, columns, text boxes, headers/footers with contact info, or special characters that confuse ATS parsers. Use standard section names that ATS systems recognize (Experience, Education, Skills, Projects).
-10. SKILLS CATEGORIZATION: Group skills into clear, ATS-friendly categories matching the JD requirements (e.g. 'Lenguajes de Programación', 'Frameworks & Librerías', 'Bases de Datos', 'DevOps & Cloud', 'Herramientas'). Include all skills from JD that the candidate demonstrably has.
+10. DOMAIN-AWARE INTELLIGENT SKILLS CATEGORIZATION:
+   - Categorize skills strictly according to the candidate's actual profession/domain and the target role:
+     * For Psychology / HR / Talent Acquisition / Recruiting: Group into categories such as 'Pruebas Psicotécnicas & Evaluación', 'Metodologías de Selección & Entrevista', 'Legislación Laboral & Contratación', 'Sistemas ATS & Portales de Empleo', 'Gestión del Talento'.
+     * For Software / Engineering / Tech: Group into 'Lenguajes de Programación', 'Frameworks & Librerías', 'Bases de Datos & Cloud', 'Herramientas & DevOps'.
+     * For Business / Finance / Administration: Group into 'Finanzas & Análisis', 'Herramientas ERP/CRM', 'Gestión de Proyectos', 'Normativa & Auditoría'.
+   - NEVER force tech/developer categories onto a non-tech profile (e.g. NEVER put 'Programming Languages' in a psychology resume).
+11. CANDIDATE LOCATION (CRITICAL FOR ATS):
+   - Extract the candidate's city and country (e.g. 'Medellín, Colombia' or 'Bogotá, D.C.') from the Base Resume if present, and output it in the 'location' field.
 """
         if custom_instructions and custom_instructions.strip():
-            prompt += f"11. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): You MUST explicitly apply the following user-selected improvements, tone humanization tips, and custom instructions above all other defaults: {custom_instructions.strip()}\n"
+            prompt += f"12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): You MUST explicitly apply the following user-selected improvements, tone humanization tips, and custom instructions above all other defaults: {custom_instructions.strip()}\n"
 
         prompt += f"""
 Target Role: {target_role if target_role else 'Not specified'}
@@ -294,17 +353,18 @@ Job Description:
 Respond ONLY with a JSON object in this exact structure. The 'section_labels' field MUST contain the localized section headings in the SAME language as the Job Description:
 {
   "name": "Jane Doe",
+  "location": "Medellín, Colombia",
   "phone": "555-1234",
   "email": "jane@example.com",
-  "portfolio": "https://janedoe.com",
-  "linkedin": "https://linkedin.com/in/janedoe",
-  "github": "https://github.com/janedoe",
+  "portfolio": "",
+  "linkedin": "",
+  "github": "",
   "summary": "Concise 2-line summary tailored to JD...",
-  "education": [{"school": "University of Tech", "degree": "B.S. in Computer Science", "dates": "2018 - 2022", "gpa": "3.8"}],
-  "skills": [{"category": "Languages", "items": ["Python", "JavaScript"]}],
-  "experience": [{"company": "Acme Corp", "role": "Software Engineer", "dates": "Jan 2023 - Present", "points": ["Shipped API...", "Optimized DB..."]}],
-  "projects": [{"name": "AI Tool", "dates": "Fall 2023", "points": ["Built cool thing using X", "Improved Y by Z%"]}],
-  "achievements": ["Won Hackathon X", "Published paper Y"],
+  "education": [{"school": "Universidad Ejemplo", "degree": "Pregrado en Psicología", "dates": "2018 - 2022", "gpa": ""}],
+  "skills": [{"category": "Pruebas Psicotécnicas", "items": ["16PF", "DISC", "Wartegg", "Valanti"]}],
+  "experience": [{"company": "Empresa Ejemplo", "role": "Analista de Selección", "dates": "Ene 2023 - Presente", "points": ["Lideré procesos de selección...", "Evalué candidatos mediante..."]}],
+  "projects": [],
+  "achievements": [],
   "section_labels": {
     "summary": "Professional Summary",
     "education": "Education",
@@ -316,6 +376,7 @@ Respond ONLY with a JSON object in this exact structure. The 'section_labels' fi
 }
 IMPORTANT: If the JD is in Spanish, the section_labels values must be in Spanish (e.g. 'Resumen Profesional', 'Educación', 'Habilidades', 'Experiencia Laboral', 'Proyectos', 'Logros'). If the JD is in English, they must be in English as shown above.
 """
+
         
         yield f"data: {json.dumps({'step': 'Generating Tailored Resume Content', 'progress': 75})}\n\n"
         content = await call_llm_api(prompt)
@@ -341,13 +402,36 @@ IMPORTANT: If the JD is in Spanish, the section_labels values must be in Spanish
 
         # Ensure all expected keys exist to prevent template render errors
         defaults = {
-            "name": "", "phone": "", "email": "", "portfolio": "", "linkedin": "", "github": "",
+            "name": "", "location": "", "phone": "", "email": "", "portfolio": "", "linkedin": "", "github": "",
             "summary": "", "education": [], "skills": [], "experience": [], "projects": [], "achievements": [],
             "section_labels": {}
         }
         for k, v in defaults.items():
             if k not in parsed_data or parsed_data[k] is None:
                 parsed_data[k] = v
+
+
+        # If user explicitly left GitHub / LinkedIn / Portfolio empty or they contain dummy placeholders, remove them
+        # User input overrides if provided
+        if github_url and github_url.strip():
+            parsed_data["github"] = github_url.strip()
+        elif not github_url:
+            # Check if LLM generated dummy or empty github
+            gh_val = str(parsed_data.get("github", "")).strip()
+            if not gh_val or any(dummy in gh_val.lower() for dummy in ["github.com/janedoe", "github.com/...", "example", "none"]):
+                parsed_data["github"] = ""
+
+        if linkedin_url and linkedin_url.strip():
+            parsed_data["linkedin"] = linkedin_url.strip()
+        elif not linkedin_url:
+            li_val = str(parsed_data.get("linkedin", "")).strip()
+            if not li_val or any(dummy in li_val.lower() for dummy in ["linkedin.com/in/janedoe", "linkedin.com/in/...", "example", "none"]):
+                parsed_data["linkedin"] = ""
+
+        port_val = str(parsed_data.get("portfolio", "")).strip()
+        if not port_val or any(dummy in port_val.lower() for dummy in ["janedoe.com", "example.com", "none"]):
+            parsed_data["portfolio"] = ""
+
 
         # Extract localized section headings from LLM output (fallback to English if missing)
         default_labels = {
@@ -369,16 +453,23 @@ IMPORTANT: If the JD is in Spanish, the section_labels values must be in Spanish
         rendered = False
         if use_rendercv:
             try:
-                print(f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}'...")
-                await asyncio.to_thread(render_cv_with_rendercv, parsed_data, output_path, theme)
+                print(f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section})...")
+                await asyncio.to_thread(
+                    render_cv_with_rendercv, 
+                    parsed_data, 
+                    output_path, 
+                    theme, 
+                    fit_single_page, 
+                    page_break_section
+                )
                 rendered = True
             except Exception as r_err:
                 print(f"[WARN] ⚠️ RenderCV theme '{theme}' failed: {r_err}. Falling back to Playwright HTML renderer.")
 
         if not rendered:
-            print("[INFO] 📄 Rendering PDF with Playwright HTML engine...")
+            print(f"[INFO] 📄 Rendering PDF with Playwright HTML engine (page_break_section={page_break_section})...")
             template = Template(HTML_TEMPLATE)
-            html_content = template.render(**parsed_data, labels=labels)
+            html_content = template.render(**parsed_data, labels=labels, page_break_section=page_break_section)
             
             def render_pdf_sync():
                 with sync_playwright() as p:
@@ -407,7 +498,9 @@ async def generate_resume(
     linkedin_url: Optional[str] = Form(None),
     custom_instructions: Optional[str] = Form(None),
     base_resume_filename: Optional[str] = Form(None),
-    theme: Optional[str] = Form("sb2nov")
+    theme: Optional[str] = Form("sb2nov"),
+    fit_single_page: Optional[bool] = Form(False),
+    page_break_section: Optional[str] = Form(None)
 ):
     # Save the original uploaded file temporarily (used as fallback if no base_resume_filename)
     temp_dir = tempfile.gettempdir()
@@ -416,9 +509,21 @@ async def generate_resume(
          f.write(await file.read())
          
     return StreamingResponse(
-        generation_pipeline(file_path, jd, target_role, github_url, linkedin_url, custom_instructions, base_resume_filename, theme),
+        generation_pipeline(
+            file_path, 
+            jd, 
+            target_role, 
+            github_url, 
+            linkedin_url, 
+            custom_instructions, 
+            base_resume_filename, 
+            theme,
+            fit_single_page or False,
+            page_break_section
+        ),
         media_type="text/event-stream"
     )
+
 
 @app.post("/api/analyze-ats")
 async def analyze_ats(
@@ -497,6 +602,24 @@ async def download_resume(filename: str):
         return FileResponse(file_path, filename=filename, media_type="application/pdf")
     return {"error": "File not found"}
 
+@app.post("/api/clear-cache")
+async def clear_cache():
+    try:
+        deleted_count = 0
+        if os.path.exists(OUTPUT_DIR):
+            for fname in os.listdir(OUTPUT_DIR):
+                fpath = os.path.join(OUTPUT_DIR, fname)
+                if os.path.isfile(fpath):
+                    try:
+                        os.remove(fpath)
+                        deleted_count += 1
+                    except Exception as err:
+                        print(f"Could not remove {fpath}: {err}")
+        return {"status": "ok", "deleted_files": deleted_count, "message": "Cache y CVs generados eliminados correctamente."}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

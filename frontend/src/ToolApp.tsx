@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock } from 'lucide-react';
+import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw } from 'lucide-react';
+
+
 
 export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -15,7 +17,10 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [downloadUrl, setDownloadUrl] = useState('');
   const [generatedPdfFilename, setGeneratedPdfFilename] = useState<string | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<string>('sb2nov');
+  const [fitSinglePage, setFitSinglePage] = useState<boolean>(true);
+  const [pageBreakSection, setPageBreakSection] = useState<string>('none');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   // ATS & AI Detection states
   const [autoValidateATS, setAutoValidateATS] = useState(false);
@@ -47,6 +52,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
 
   // Refinement states
   const [selectedTips, setSelectedTips] = useState<string[]>([]);
+  const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [customPrompt, setCustomPrompt] = useState<string>('');
 
   const toggleTip = (tip: string) => {
@@ -55,11 +61,56 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     );
   };
 
+  const toggleKeyword = (kw: string) => {
+    setSelectedKeywords(prev => 
+      prev.includes(kw) ? prev.filter(k => k !== kw) : [...prev, kw]
+    );
+  };
+
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
     }
   };
+
+  const handleResetProcess = async () => {
+    // Reset all frontend state
+    setFile(null);
+    setJd('');
+    setTargetRole('');
+    setGithubUrl('');
+    setLinkedinUrl('');
+    setStatus('idle');
+    setProgress(0);
+    setStepMessage('');
+    setErrorMessage('');
+    setDownloadUrl('');
+    setGeneratedPdfFilename(null);
+    setAtsStatus('idle');
+    setAtsData(null);
+    setAtsErrorMessage('');
+    setScoreHistory([]);
+    setSelectedTips([]);
+    setSelectedKeywords([]);
+    setCustomPrompt('');
+    generationVersionRef.current = 0;
+
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    // Call backend to purge cached PDFs and temp outputs
+    try {
+      await fetch("http://localhost:8000/api/clear-cache", {
+        method: "POST",
+      });
+    } catch (e) {
+      console.error("No se pudo limpiar la caché del backend:", e);
+    }
+  };
+
 
   const handleValidateATS = async () => {
     if (!file) {
@@ -158,7 +209,12 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       formData.append("custom_instructions", customInstructionsOverride);
     }
     formData.append("theme", selectedTheme);
+    formData.append("fit_single_page", fitSinglePage ? "true" : "false");
+    if (pageBreakSection && pageBreakSection !== 'none') {
+      formData.append("page_break_section", pageBreakSection);
+    }
     // Pass the previously generated PDF filename so the backend refines it instead of starting fresh
+
     if (baseResumeFilename) {
       formData.append("base_resume_filename", baseResumeFilename);
     }
@@ -247,11 +303,16 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
         );
       }
 
-      if (atsData.missing_keywords && atsData.missing_keywords.length > 0) {
+      if (selectedKeywords.length > 0) {
         keywordConstraints.push(
-          `KEYWORDS ATS FALTANTES — DEBES INCORPORAR DE FORMA NATURAL EN EL CV (en bullet points, resumen o habilidades, usando las que el candidato realmente posea): ${atsData.missing_keywords.join(', ')}.`
+          `PALABRAS CLAVE FALTANTES MARCADAS EXPLÍCITAMENTE POR EL USUARIO PARA INCORPORAR (MÁXIMA PRIORIDAD): ${selectedKeywords.join(', ')}. Debes incorporarlas de manera fluida y profesional en las secciones de Habilidades (Skills) o en los bullet points de Experiencia donde apliquen.`
+        );
+      } else if (atsData.missing_keywords && atsData.missing_keywords.length > 0) {
+        keywordConstraints.push(
+          `KEYWORDS ATS FALTANTES DETECTADAS — Considera incorporar de forma natural las más relevantes que el candidato realmente posea: ${atsData.missing_keywords.slice(0, 5).join(', ')}.`
         );
       }
+
 
       // Include AI detection score target to prevent the AI from over-writing in a robotic style
       if (typeof atsData.ai_detection_score === 'number' && atsData.ai_detection_score > 20) {
@@ -282,11 +343,21 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   return (
     <div className="min-h-screen text-black flex flex-col items-center pt-16 pb-24 px-6 md:px-12 selection:bg-blue-600 selection:text-white relative">
       
-      {/* Decorative Accent Badges */}
-      <button onClick={onBack} className="absolute top-8 left-8 rm-btn bg-white hover:bg-gray-100 text-black px-4 py-2 flex items-center gap-2">
-         <ArrowLeft className="w-5 h-5" /> Back
-      </button>
+      {/* Decorative Accent Badges & Action Buttons */}
+      <div className="absolute top-8 left-8 flex items-center gap-3">
+        <button onClick={onBack} className="rm-btn bg-white hover:bg-gray-100 text-black px-4 py-2 flex items-center gap-2">
+           <ArrowLeft className="w-5 h-5" /> Back
+        </button>
+        <button 
+          onClick={handleResetProcess} 
+          title="Limpiar campos y borrar la caché de CVs para iniciar de nuevo"
+          className="rm-btn bg-rose-100 hover:bg-rose-200 border-rose-600 text-rose-900 px-4 py-2 flex items-center gap-2 text-sm font-bold shadow-[2px_2px_0px_0px_rgba(225,29,72,1)]"
+        >
+           <RotateCcw className="w-4 h-4 text-rose-700" /> Nuevo / Limpiar
+        </button>
+      </div>
       <div className="absolute top-12 right-12 rm-tag bg-blue-700 text-white px-3 py-1 rotate-[3deg]">100% FREE</div>
+
 
       <div className="w-full max-w-5xl space-y-12 z-10 relative">
         
@@ -402,12 +473,12 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             </div>
 
             <div className="flex flex-col gap-2">
-              <label className="font-bold font-mono text-sm uppercase tracking-wide">GitHub / Portfolio</label>
+              <label className="font-bold font-mono text-sm uppercase tracking-wide">Sitio Web / Portfolio / GitHub (Opcional)</label>
               <input 
                 type="url" 
                 value={githubUrl}
                 onChange={e => setGithubUrl(e.target.value)}
-                placeholder="https://github.com/..."
+                placeholder="https://..."
                 className="w-full border-2 border-black bg-white p-3 font-sans focus:outline-none focus:ring-4 focus:ring-blue-100"
               />
             </div>
@@ -446,7 +517,54 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
               ))}
             </div>
           </div>
+
+          {/* Page Break & Anti-Orphan Layout Controls */}
+          <div className="mt-8 border-t-2 border-gray-300 pt-6">
+            <label className="font-bold font-mono text-sm uppercase tracking-wide block mb-3">
+              📐 Control de Páginas & Saltos Limpios (Evitar líneas huérfanas)
+            </label>
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Checkbox: Strict 1 page auto-compact */}
+              <label className="flex items-start gap-3 bg-white border-2 border-black p-4 cursor-pointer hover:bg-gray-50 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] select-none">
+                <input 
+                  type="checkbox"
+                  checked={fitSinglePage}
+                  onChange={(e) => setFitSinglePage(e.target.checked)}
+                  className="w-5 h-5 mt-0.5 accent-blue-700 cursor-pointer"
+                />
+                <div>
+                  <span className="font-bold text-sm block">Ajuste Compacto (Priorizar 1 Página)</span>
+                  <span className="text-xs text-gray-600 block mt-0.5">
+                    Reduce márgenes e interlineado para evitar que 1 o 2 líneas se desborden a una segunda hoja.
+                  </span>
+                </div>
+              </label>
+
+              {/* Selector: Manual page break before section */}
+              <div className="bg-white border-2 border-black p-4 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] flex flex-col justify-between">
+                <div>
+                  <label className="font-bold text-sm block mb-1">Insertar Salto de Página limpio antes de:</label>
+                  <span className="text-xs text-gray-600 block mb-2">
+                    Si tu CV es de 2 hojas, divide limpiamente una sección completa al inicio de la página 2.
+                  </span>
+                </div>
+                <select
+                  value={pageBreakSection}
+                  onChange={(e) => setPageBreakSection(e.target.value)}
+                  className="w-full border-2 border-black bg-white p-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                >
+                  <option value="none">Sin salto manual (Automático anti-huérfanas)</option>
+                  <option value="Experience">Antes de: Experiencia Laboral (Experience)</option>
+                  <option value="Education">Antes de: Educación (Education)</option>
+                  <option value="Projects">Antes de: Proyectos (Projects)</option>
+                  <option value="Skills">Antes de: Habilidades (Skills)</option>
+                  <option value="Achievements">Antes de: Logros (Achievements)</option>
+                </select>
+              </div>
+            </div>
+          </div>
         </motion.div>
+
 
         {/* Generate & Validate Controls */}
         <motion.div 
@@ -484,6 +602,19 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
               ) : <ShieldCheck className="w-6 h-6" />}
               {atsStatus === 'analyzing' ? `AUDITANDO (${elapsedSeconds}s / 60s)...` : '📊 SOLO AUDITAR ATS'}
             </button>
+
+            {/* Clear / Reset Button */}
+            {(file || jd || status !== 'idle' || atsStatus !== 'idle') && (
+              <button
+                onClick={handleResetProcess}
+                disabled={status === 'generating' || atsStatus === 'analyzing'}
+                title="Limpiar campos y borrar caché de CVs"
+                className="rm-btn bg-white hover:bg-rose-50 border-2 border-black text-rose-700 px-6 py-5 text-lg flex items-center gap-2 font-bold"
+              >
+                <RotateCcw className="w-5 h-5 text-rose-600" />
+                LIMPIAR / NUEVO
+              </button>
+            )}
           </div>
 
           {/* Auto ATS Checkbox Option */}
@@ -580,6 +711,16 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                     >
                       <BarChart3 className="w-5 h-5" />
                       {atsStatus === 'analyzing' ? 'ANALIZANDO ATS & IA...' : '📊 AUDITAR MATCH ATS & DETECCIÓN IA'}
+                    </button>
+
+                    {/* Reset Button */}
+                    <button
+                      onClick={handleResetProcess}
+                      title="Reiniciar todo y borrar CVs generados"
+                      className="rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 flex justify-center items-center gap-2 px-6 py-4 text-base font-bold shadow-[4px_4px_0px_0px_rgba(225,29,72,1)]"
+                    >
+                      <RotateCcw className="w-5 h-5 text-rose-600" />
+                      NUEVO / LIMPIAR
                     </button>
                   </div>
                 </div>
@@ -722,24 +863,48 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                       </div>
                     </div>
 
-                    {/* Missing Keywords */}
+                    {/* Missing Keywords (Interactive Selection) */}
                     <div className="rm-box p-6 bg-white">
-                      <h4 className="font-bold text-lg font-serif mb-4 flex items-center gap-2 text-orange-700">
-                        <AlertTriangle className="w-5 h-5" /> Palabras Clave Faltantes ({atsData.missing_keywords?.length || 0})
-                      </h4>
+                      <div className="flex justify-between items-center mb-2">
+                        <h4 className="font-bold text-lg font-serif flex items-center gap-2 text-orange-700">
+                          <AlertTriangle className="w-5 h-5" /> Palabras Clave Faltantes ({atsData.missing_keywords?.length || 0})
+                        </h4>
+                        {selectedKeywords.length > 0 && (
+                          <span className="rm-tag bg-orange-500 text-white text-xs px-2.5 py-0.5 font-mono font-bold">
+                            {selectedKeywords.length} seleccionada(s)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-600 font-medium mb-4">
+                        💡 Haz clic en las palabras clave que realmente poseas para marcarlas e integrarlas automáticamente al regenerar:
+                      </p>
                       <div className="flex flex-wrap gap-2">
                         {atsData.missing_keywords && atsData.missing_keywords.length > 0 ? (
-                          atsData.missing_keywords.map((kw: string, i: number) => (
-                            <span key={i} className="rm-tag bg-orange-100 border border-orange-500 text-orange-900 px-3 py-1 font-bold text-sm">
-                              + {kw}
-                            </span>
-                          ))
+                          atsData.missing_keywords.map((kw: string, i: number) => {
+                            const isSelected = selectedKeywords.includes(kw);
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => toggleKeyword(kw)}
+                                className={`rm-tag border text-sm font-bold px-3 py-1.5 transition-all flex items-center gap-1.5 cursor-pointer ${
+                                  isSelected 
+                                    ? 'bg-orange-500 border-black text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] -translate-y-0.5' 
+                                    : 'bg-orange-50 border-orange-400 text-orange-950 hover:bg-orange-100'
+                                }`}
+                              >
+                                <span>{isSelected ? '✓' : '+'}</span>
+                                <span>{kw}</span>
+                              </button>
+                            );
+                          })
                         ) : (
                           <p className="text-gray-500 text-sm">¡Excelente! No faltan palabras clave principales.</p>
                         )}
                       </div>
                     </div>
                   </div>
+
 
                   {/* Selectable AI Humanize & Actionable Tips */}
                   <div className="grid md:grid-cols-2 gap-8">
@@ -797,8 +962,9 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                       <Edit3 className="w-6 h-6 text-blue-700" /> Ajustar & Regenerar CV con Mejoras Seleccionadas
                     </h4>
                     <p className="text-sm text-gray-700 font-medium">
-                      Has seleccionado <span className="font-bold text-purple-800">{selectedTips.length}</span> consejo(s). Puedes agregar indicaciones o ajustes adicionales abajo antes de hacer clic en regenerar:
+                      Has seleccionado <span className="font-bold text-orange-700">{selectedKeywords.length} palabra(s) clave</span> y <span className="font-bold text-purple-800">{selectedTips.length} consejo(s)</span>. Puedes agregar indicaciones o ajustes adicionales abajo antes de hacer clic en regenerar:
                     </p>
+
                     <textarea 
                       value={customPrompt}
                       onChange={(e) => setCustomPrompt(e.target.value)}
