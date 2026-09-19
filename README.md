@@ -1,183 +1,308 @@
-# 🚀 Resume Tailor AI (v2.5) — ATS Match, RenderCV (Typst) & Iterative Optimizer
+# Resume Tailor AI v2.5 — Adaptador ATS multilingüe con RenderCV + Iteración
 
 <div align="center">
 
-[![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite%20%2B%20Tailwind-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://reactjs.org/)
-[![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20%2B%20Python-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![RenderCV](https://img.shields.io/badge/PDF_Engine-RenderCV%20%2B%20Typst-0055FF?style=for-the-badge&logo=python&logoColor=white)](https://github.com/sinaatalay/rendercv)
-[![Gemini](https://img.shields.io/badge/AI-Google%20Gemini%20Flash-FF5E00?style=for-the-badge&logo=google&logoColor=white)](https://aistudio.google.com/)
-[![Status](https://img.shields.io/badge/Status-Active%20v2.5-brightgreen?style=for-the-badge)]()
+[![React](https://img.shields.io/badge/Frontend-React_19_+_Vite_+_Tailwind-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![shadcn/ui](https://img.shields.io/badge/UI-shadcn--ui_new--york_+_Radix-000?logo=shadcnui)](https://ui.shadcn.com/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI_+_Python-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![RenderCV](https://img.shields.io/badge/PDF-RenderCV_+_Typst-0055FF?logo=python&logoColor=white)](https://github.com/sinaatalay/rendercv)
+[![Multi-LLM](https://img.shields.io/badge/AI-DeepSeek_%7C_OpenAI_%7C_Gemini-FF5E00)](https://aistudio.google.com/)
 
-**Genera, audita, diseña y optimiza iterativamente tu currículum contra cualquier oferta laboral (Job Description) superando filtros ATS y detectores de IA con plantillas vectoriales profesionales.**
+**Sube tu CV base + la descripción de la vacante y la IA reescribe, reorganiza y re-empaqueta tu trayectoria real en un PDF vectorial ATS-friendly, auditable e iterativo.**
 
-[Características](#-características-principales) • [Diseños & Plantillas](#-diseños-y-plantillas-pdf) • [Arquitectura](#-arquitectura-y-flujo) • [Instalación](#-guía-de-instalación) • [Agradecimientos](#-agradecimientos-y-créditos)
+[Arquitectura](#arquitectura) · [Features](#features) · [Pipeline](#pipeline-de-generacion) · [API](#endpoints) · [Setup](#instalacion-y-configuracion) · [Variables .env](#variables-de-entorno)
 
 </div>
 
 ---
 
-## 🌟 ¿Qué es Resume Tailor AI v2.5?
+## Qué es
 
-**Resume Tailor AI v2.5** es una plataforma Full-Stack avanzada diseñada para elevar el impacto de tus postulaciones laborales. No solo adapta la experiencia de tu CV en formato PDF a los requisitos de una oferta de trabajo, sino que ofrece:
-- **Compilador tipográfico ultra rápido con Typst + RenderCV.**
-- **Selección de plantillas profesionales creadas para superar filtros ATS.**
-- **Auditoría independiente ATS & Detección de tono de IA.**
-- **Ciclo de refinamiento iterativo sobre el CV generado sin pérdida de datos.**
-- **Detección y traducción de idioma automática (Español / Inglés).**
+`jd-to-resume` es una plataforma full-stack que **no inventa experiencia**: toma tu CV real (PDF) más la descripción de una vacante y produce un PDF nuevo, reestructurado, con palabras clave alineadas a la JD y un puntaje ATS verificable. Funciona con tres motores de LLM en cadena (proveedor primario OpenAI-compatible → fallback Gemini multi-modelo), cuatro plantillas tipográficas vectoriales y un ciclo de refinamiento preservando el último PDF generado como base.
+
+El frontend es una SPA con shadcn/ui (estilo new-york) sobre Radix, decorada con una capa *neo-brutalist* (`rm-box` / `rm-btn` con sombra dura 4×4). Tiene dos vistas: una landing pública y la herramienta (ToolApp) donde ocurre todo el flujo.
 
 ---
 
-## ⚡ Características Principales
+## Features
 
-### 1. 🎨 Renderizado Vectorial de Alta Calidad & Plantillas ATS
-Con el motor integrado de **RenderCV + Typst**, los currículums se compilan en milisegundos generando archivos PDF vectoriales ultra nítidos y sin distorsiones tipográficas:
-- 🟢 **SB2Nov:** El formato estándar preferido en Silicon Valley y empresas Tech.
-- 🔵 **Classic:** Diseño sobrio, tradicional y elegante ideal para cualquier sector.
-- 🟣 **ModernCV:** Formato contemporáneo con detalles sutiles a color.
-- ⚪ **Classic HTML:** Opción de renderizado web mediante Playwright.
+### 1. Tres motores LLM en cadena
+- **Primario (OpenAI-compatible).** Si defines `LLM_PROVIDER=openai_compatible|deepseek|minimax|kimi|moonshot|openrouter|groq` más `LLM_API_KEY`/`LLM_BASE_URL`, el backend lo usa primero con timeout de 45 s.
+- **Fallback automático a Gemini.** Si el primario falla o expira, pasa a `genai` y prueba `gemini-2.0-flash` → `gemini-1.5-flash` → `gemini-1.5-pro`.
+- **Parsing tolerante.** Si la IA envuelve la respuesta en ` ```json `, se limpia antes de `json.loads`. Si no es `dict`, intenta tomar el primer elemento de una lista. Defaults defensivos para todas las claves esperadas.
 
-### 2. 🎯 Adaptación y Restructuración Sin Alucinación
-- **Cero Invención de Datos:** La IA únicamente reestructura, reordena y enfatiza tu experiencia real existente en el CV base.
-- **Traducción e Idioma Automático:** Detecta el idioma de la oferta de trabajo y genera todo el contenido (resumen, viñetas y títulos de sección) en el mismo idioma de la vacante.
-- **Verbos de Acción y Métricas Cuantitativas:** Redacción orientada a resultados concretos (fórmula STAR) e integración natural de palabras clave exactas.
+### 2. PDF vectorial: RenderCV + Typst (con fallback)
+- Tres temas soportados: **`sb2nov`** (estándar Silicon Valley), **`classic`** y **`moderncv`**. Más un cuarto modo **`classic_html`** que salta RenderCV y renderiza directo con Jinja2 + Playwright.
+- Cuando `theme != "classic_html"` y el theme es válido (`sb2nov|classic|moderncv`), se compila con `rendercv.renderer.typst.generate_typst` → `rendercv.renderer.pdf_png.generate_pdf`.
+- Si RenderCV falla, cae automáticamente a `Jinja2` + `Playwright` con el template HTML embebido en `main.py` (modo "Classic HTML"). Nunca dejas al usuario sin PDF.
+- **Anti-orfanos.** `allow_page_break: false` en entries, espaciados estrictos (`space_between_items: 0.1em`, `space_above: 0.1em`) y `orphans/widows: 3` en CSS del fallback HTML.
+- **Modo 1-página.** `fit_single_page=true` reduce márgenes a `0.45 in` y `line_spacing` a `0.45em`.
+- **Salto de página manual.** `page_break_section` inyecta `#pagebreak()` en el `.typst` antes de la sección indicada.
 
-### 3. 📊 Auditoría Integral ATS & Detector de Tono IA
-- **Score ATS (% Match):** Análisis de coincidencia de competencias técnicas y blandas frente a plataformas como CompuTrabajo, Workday, LinkedIn y Greenhouse.
-- **Detección de Tono Sintético / IA:** Identifica si la redacción suena robótica o cargada de clichés de LLMs, sugiriendo cambios para humanizar el perfil.
-- **Botón "Solo Auditar ATS":** Audita directamente tu archivo PDF sin necesidad de generar una nueva versión ni consumir tokens de edición.
+### 3. Adaptación sin alucinación
+- Prompt estricto: solo usa empresas, cargos, fechas y proyectos del CV base + LinkedIn extraído. Prohibido inventar (lista explícita en el system prompt).
+- **Verbos de acción + métricas cuantitativas** en cada bullet.
+- **Detección de idioma del JD.** Todo el contenido (resumen, viñetas, *achievements*, etiquetas de sección) sale en el idioma detectado. Meses en español (`Ene 2019 – Ago 2023`) se normalizan a `YYYY-MM` para RenderCV.
+- **Categorización de skills por dominio.** El prompt obliga categorías distintas:
+  - Psicología / HR / Recruiting → *Pruebas Psicotécnicas, Metodologías de Selección, Legislación Laboral…*
+  - Software / Tech → *Lenguajes, Frameworks, Bases de Datos & Cloud…*
+  - Business / Finanzas → *Finanzas & Análisis, ERP/CRM, Gestión de Proyectos…*
+  Nunca se fuerza un set tech sobre un perfil no-tech.
+- **Localización de títulos de sección.** El LLM devuelve `section_labels` (ES/EN); el render los usa.
 
-### 4. 🔄 Refinamiento Iterativo y Memoria de Versiones
-- **Refinación sobre el PDF Generado:** Al solicitar correcciones, el backend toma como base el último PDF generado (`base_resume_filename`), preservando las mejoras acumuladas.
-- **Historial Evolutivo de Puntaje:** Compara visualmente el avance del Score ATS y la reducción de tono IA a lo largo de cada iteración (`v1`, `v2`, etc.).
+### 4. Enriquecimiento con LinkedIn
+Tres rutas, en cascada y con cache en memoria (`_linkedin_cache: dict`):
+1. **API externa** (`LINKEDIN_API_URL` + `LINKEDIN_API_KEY`, ej. ProxyCurl). GET con header Bearer.
+2. **Playwright autenticado** (`LINKEDIN_EMAIL` + `LINKEDIN_PASSWORD`). Login con selectores múltiples, scroll de la página para lazy-load, extractor JS que devuelve `{name, headline, location, about, experiences, education, skills, certifications, languages}`. Si LinkedIn devuelve `checkpoint` / 2FA, aborta y cae al paso 3.
+3. **Público anónimo.** `urllib` con User-Agent Chrome + extracción de `og:description`, JSON-LD estructurado y resumen por LLM.
+
+Tras el scrape, el LLM normaliza el HTML sucio a Markdown estructurado y se inyecta al prompt como `Extracted LinkedIn Profile Data`.
+
+### 5. Auditoría ATS & detector de tono IA
+Endpoint independiente `/api/analyze-ats`: no genera PDF, **solo audita**. Devuelve:
+- `ats_score` (0–100) + `match_level`.
+- `matched_keywords` y `missing_keywords` vs la JD.
+- `ai_detection_score` con baremo 0–20 bajo, 21–50 medio, 51–100 alto y tips de humanización.
+- `ats_formatting_score` (parseabilidad) y `actionable_tips` (ej. *"Añade 'Docker' si posees conocimientos en contenedores"*).
+
+En el frontend, si `autoValidateATS` está activo, después de generar se llama automáticamente. Los resultados alimentan el historial `scoreHistory` (ATS / AI / Format por versión).
+
+### 6. Refinamiento iterativo
+- Cada generación guarda `tailored_resume_<timestamp>.pdf` en `backend/output/`.
+- La siguiente iteración envía `base_resume_filename` y el backend toma ese PDF como input (`extract_text` con PyMuPDF). **No se parte del CV original cada vez**; se preservan las mejoras acumuladas.
+- El usuario puede marcar `selectedTips`, `selectedKeywords` y escribir `customPrompt` antes de re-generar. Esos viajan como `selected_tips`/`custom_instructions` y se inyectan al prompt con prioridad sobre las reglas por defecto.
+- Versión se incrementa en frontend (`generationVersionRef`) para graficar la evolución (ATS sube, AI baja).
+
+### 7. UX con progreso en vivo
+- `/api/generate` devuelve `StreamingResponse(media_type="text/event-stream")`. Cada yield es `data: {"step": "...", "progress": N}\n\n`.
+- Pasos reportados: `Validating Input` (10) → `Extracting Text from Resume` (20) → opcional `Extrayendo datos del perfil de LinkedIn…` (35) → `Analyzing with AI Model` (50) → `Generating Tailored Resume Content` (75) → `Formatting Professional PDF` (90) → `Finished` (100, con `download_url`).
+- Timer en segundos en la UI hasta 60 s.
 
 ---
 
-## 📐 Diseños y Plantillas PDF (RenderCV + Typst)
-
-| Plantilla | Estilo | Indicado Para |
-| :--- | :--- | :--- |
-| **SB2Nov** | Limpio, estructurado y de una sola columna | Desarrolladores, Data Science, DevOps y Tech |
-| **Classic** | Tradicional, sobrio y elegante | Administración, Finanzas, Salud, Leyes y Gerencia |
-| **ModernCV** | Moderno con acentos visuales sutiles | Marketing, Diseño, Producto y Ventas |
-| **Classic HTML** | Renderizado web flexible (Playwright) | Pruebas y personalización HTML |
-
----
-
-## 🏗️ Arquitectura del Sistema
+## Arquitectura
 
 ```mermaid
 flowchart TD
-    A[PDF Base + Oferta de Empleo JD] --> B[FastAPI Backend / Gemini AI]
-    B --> C{Elección de Motor PDF}
-    C -->|RenderCV + Typst| D[PDF Vectorial en 100ms]
-    C -->|Playwright HTML| E[PDF Web HTML]
-    D --> F[Visualización & Preview en Front-end]
-    E --> F
-    F --> G{Opciones de Usuario}
-    G -->|Botón Solo Auditar| H[Auditoría ATS & Detector IA]
-    G -->|Refinar CV| I[Refinamiento Iterativo sobre PDF Generado]
-    I -->|Prompt con Feedback + Memoria| B
+  A[CV PDF + JD + opcional LinkedIn/GitHub] --> B[ToolApp.tsx · React 19]
+  B -->|POST /api/generate| C[FastAPI · main.py]
+  C --> D[PyMuPDF extract_text]
+  D --> E{¿extract_linkedin_info?}
+  E -->|sí| F[3 rutas LinkedIn con _linkedin_cache]
+  E -->|no| G[Skip]
+  F --> H[LLM call_llm_api]
+  G --> H
+  H --> I{¿LLM_PROVIDER?}
+  I -->|deepseek / openai_compatible| J[OpenAI client 45s]
+  J -->|fallo| K[Gemini cascade]
+  I -->|gemini| K
+  K --> L[Gemini: 2.0-flash → 1.5-flash → 1.5-pro]
+  L --> M[JSON parse + defaults defensivos]
+  M --> N{¿theme?}
+  N -->|sb2nov|classic|moderncv| O[RenderCV + Typst]
+  O -->|fallo| P[Jinja2 + Playwright HTML]
+  N -->|classic_html| P
+  O --> Q[backend/output/tailored_resume_*.pdf]
+  P --> Q
+  Q --> R[GET /api/download/<filename>]
+  R --> B
+
+  B -.auditoría.-> S[POST /api/analyze-ats]
+  S --> H
+
+  B -.reset.-> T[POST /api/clear-cache]
+  T --> Q
 ```
 
 ---
 
-## 🛠️ Guía de Instalación y Uso
+## Pipeline de generación
 
-### Prerrequisitos
-- [Node.js](https://nodejs.org/) (v18+)
-- [Python 3.10+](https://www.python.org/)
-- Clave API gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey) o proveedor OpenAI compatible.
+Resumen de lo que pasa cuando presionas **Generar**:
 
----
-
-### 1. Backend (FastAPI + RenderCV / Typst)
-
-1. Ingresa a la carpeta del backend:
-   ```bash
-   cd backend
-   ```
-
-2. Crea y activa tu entorno virtual:
-   - **Windows:**
-     ```powershell
-     python -m venv venv
-     .\venv\Scripts\activate
-     ```
-   - **Linux / macOS:**
-     ```bash
-     python3 -m venv venv
-     source venv/bin/activate
-     ```
-
-3. Instala las dependencias necesarias:
-   ```bash
-   pip install -r requirements.txt
-   playwright install chromium
-   ```
-
-4. Configura tu variable de entorno en `backend/.env`:
-   ```env
-   GEMINI_API_KEY=tu_api_key_aqui
-   ```
-
-5. Inicia el servidor de backend:
-   ```bash
-   uvicorn main:app --reload --host 0.0.0.0 --port 8000
-   ```
+1. **Upload & persistencia.** El PDF se guarda temporalmente; si el frontend envía `base_resume_filename`, el backend prefiere ese archivo en `output/` (refinamiento).
+2. **Extracción de texto.** `pymupdf` (`fitz.open()` + `page.get_text()` joined).
+3. **(Opcional) LinkedIn.** Si `extract_linkedin_info=true`, se ejecuta el extractor y se concatena al prompt como bloque "Extracted LinkedIn Profile Data".
+4. **LLM con system prompt estricto.** Estructura JSON esperada: `name, location, phone, email, portfolio, linkedin, github, summary, education, skills, experience, projects, achievements, section_labels`.
+5. **Post-procesado.**
+   - Defaults para claves faltantes.
+   - Limpieza de placeholders (`github.com/janedoe`, `example.com`).
+   - Merge de `section_labels` ES/EN sobre defaults en inglés.
+   - Normalización de fechas (`clean_date_str` en `render_service.py`) y teléfonos (`sanitize_phone`, aplica prefijos `+57`/`+1`).
+6. **Render PDF.** `render_service.convert_llm_json_to_rendercv_dict()` adapta el JSON al esquema de RenderCV (`cv` + `design`), setea `allow_page_break=false`, espaciados anti-orfanos y opcionalmente endurece tipografía para 1 página. Compila Typst y genera PDF.
+7. **Persistencia.** `shutil.copy` del PDF de salida a `output/tailored_resume_<unix_ts>.pdf`.
+8. **Stream final.** SSE con `download_url: "/api/download/<filename>"`.
 
 ---
 
-### 2. Frontend (React + Vite + Tailwind CSS)
+## Endpoints
 
-1. En una segunda terminal, ingresa a la carpeta de frontend:
-   ```bash
-   cd frontend
-   ```
-
-2. Instala los paquetes de Node:
-   ```bash
-   npm install
-   ```
-
-3. Inicia la aplicación web:
-   ```bash
-   npm run dev
-   ```
-
-4. Abre tu navegador en `http://localhost:5173`.
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/` | Health check (`{"status": "AI Resume Backend is running OK!"}`). |
+| `POST` | `/api/generate` | Pipeline completo. Acepta `multipart/form-data`: `file` (PDF), `jd`, `target_role`, `github_url`, `linkedin_url`, `custom_instructions`, `base_resume_filename`, `theme` (`sb2nov` \| `classic` \| `moderncv` \| `classic_html`), `fit_single_page`, `page_break_section`, `extract_linkedin_info`. Responde **SSE** con eventos `data: {...}\n\n`. |
+| `POST` | `/api/analyze-ats` | Audita sin generar. Acepta `file` (PDF) + `jd`. Devuelve JSON: `ats_score`, `match_level`, `matched_keywords`, `missing_keywords`, `ai_detection_score`, `ai_tone_verdict`, `ai_humanize_tips`, `ats_formatting_score`, `actionable_tips`. |
+| `GET` | `/api/download/{filename}` | Sirve el PDF desde `backend/output/`. |
+| `POST` | `/api/clear-cache` | Borra todos los PDFs de `output/`. Devuelve `{deleted_files: N}`. |
 
 ---
 
-## 📂 Estructura del Proyecto
+## Estructura del proyecto
 
 ```text
 jd-to-resume/
 ├── backend/
-│   ├── main.py               # Endpoints FastAPI y pipeline de generación/auditoría
-│   ├── render_service.py     # Adaptador de datos y motor de renderizado RenderCV (Typst)
-│   ├── requirements.txt      # Dependencias (FastAPI, RenderCV, Typst, PyMuPDF, etc.)
-│   └── output/               # PDFs generados (almacenamiento persistente)
+│   ├── main.py                  # FastAPI: endpoints, LinkedIn extractor, pipeline SSE, HTML fallback
+│   ├── render_service.py        # Adaptador LLM-JSON → RenderCV dict + Typst + PDF
+│   ├── requirements.txt         # 15 deps (ver sección)
+│   ├── .env                     # Config local (gitignored)
+│   └── output/                  # PDFs generados por timestamp
 ├── frontend/
+│   ├── index.html               # <title>Resume Matcher AI</title>, fuentes Google
 │   ├── src/
-│   │   ├── ToolApp.tsx       # UI interactiva: selección de plantillas, auditoría e historial
-│   │   ├── App.tsx           # Contenedor principal de la aplicación
-│   │   └── index.css         # Estilos globales y diseño Neo-Brutalist
-│   └── package.json          # Configuración y scripts npm
-└── README.md
+│   │   ├── main.tsx             # Entry React 19
+│   │   ├── App.tsx              # Router simple landing ↔ tool (useState)
+│   │   ├── LandingPage.tsx      # Hero + marquee stack + 3 cards features
+│   │   ├── ToolApp.tsx          # UI principal: upload, ATS, refinamiento, score history
+│   │   ├── index.css            # shadcn vars + neo-brutalist .rm-box / .rm-btn
+│   │   ├── App.css
+│   │   └── lib/utils.ts         # cn() utility (estilo shadcn)
+│   ├── components.json          # shadcn/ui new-york, baseColor: zinc
+│   ├── vite.config.ts           # @vitejs/plugin-react + alias @/
+│   ├── tailwind.config.js
+│   └── package.json             # React 19.2 + Vite 8 + Tailwind 3.4
+├── README.md
+├── jakes-resume.pdf             # CV de ejemplo para probar
+└── resume-template-by-anubhav.pdf
 ```
 
 ---
 
-## 🤝 Agradecimientos y Créditos
+## Tech stack
 
-Este proyecto rinde reconocimiento y agradecimiento a las siguientes iniciativas de código abierto:
+**Backend (Python 3.10+)**
+- FastAPI + Uvicorn (ASGI)
+- PyMuPDF (`fitz`) para extraer texto del PDF
+- google-generativeai + openai (cliente OpenAI-compatible para cualquier proveedor compatible)
+- RenderCV (Python API: `build_rendercv_dictionary_and_model`, `renderer.typst.generate_typst`, `renderer.pdf_png.generate_pdf`)
+- Typst (motor tipográfico)
+- Jinja2 + Playwright (render HTML fallback)
+- python-multipart (form-data), python-dotenv, pydantic
+- *No usados actualmente pero en `requirements.txt`: `weasyprint`, `langgraph`, `langchain-core`.*
 
-1. **[VJsharan/jd-to-resume](https://github.com/VJsharan/jd-to-resume):** Proyecto base original que sirvió como inspiración técnica e inicial para la integración de Jinja + Playwright en la generación de currículums.
-2. **[Sina Atalay / RenderCV](https://github.com/sinaatalay/rendercv):** Framework open-source extraordinario de generación de CVs en YAML/Typst que proporciona la estructura base de plantillas y modelos de datos tipográficos.
-3. **[Typst Project](https://github.com/typst/typst):** Motor de marcado y compilación tipográfica moderno que permite generar PDFs vectoriales nítidos a máxima velocidad.
+**Frontend (Node 18+ / Vite 8)**
+- React 19 + TypeScript
+- Vite 8 + `@vitejs/plugin-react` + alias `@/`
+- Tailwind CSS 3.4 + `tailwindcss-animate`
+- shadcn/ui (`new-york`) sobre Radix UI: `@radix-ui/react-label`, `@radix-ui/react-progress`, `@radix-ui/react-slot`, `@radix-ui/react-toast`
+- `class-variance-authority` + `tailwind-merge` + `clsx` (patrón shadcn)
+- Framer Motion (animaciones landing + transiciones)
+- Lucide React (iconos: `Sparkles`, `Upload`, `ShieldCheck`, `BarChart3`, etc.)
 
 ---
 
-<div align="center">
-  Creado para potenciar postulaciones de alto impacto. ⭐ ¡Si este proyecto te ha sido útil, no olvides dejar tu estrella en el repositorio!
-</div>
+## Instalación y configuración
+
+### Prerrequisitos
+- Node.js 18+
+- Python 3.10+
+- Clave API de al menos un proveedor LLM (gratis en [Google AI Studio](https://aistudio.google.com/app/apikey)).
+
+### 1. Backend
+
+```bash
+cd backend
+python -m venv venv
+# Windows
+.\venv\Scripts\activate
+# Linux / macOS
+source venv/bin/activate
+
+pip install -r requirements.txt
+playwright install chromium
+```
+
+Crea `backend/.env` (ver sección siguiente) y arranca:
+
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 2. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Abre `http://localhost:5173`. El frontend habla con `http://localhost:8000` por defecto (configurable en `ToolApp.tsx`).
+
+---
+
+## Variables de entorno
+
+Crea `backend/.env` con lo que necesites. El sistema funciona con sólo Gemini; el resto es opcional.
+
+| Variable | Requerida | Descripción |
+|---|---|---|
+| `GEMINI_API_KEY` | Sí (si no hay primario) | API key de Google AI Studio. |
+| `LLM_PROVIDER` | No | `gemini` (default) \| `openai_compatible` \| `deepseek` \| `minimax` \| `kimi` \| `moonshot` \| `openrouter` \| `groq`. |
+| `LLM_API_KEY` | Sí si LLM_PROVIDER ≠ gemini | API key del proveedor primario. |
+| `OPENAI_API_KEY` | Alias alternativo | Si existe, se usa como fallback de `LLM_API_KEY`. |
+| `LLM_BASE_URL` | Condicional | Base URL del proveedor (ej. `https://api.deepseek.com/v1`). |
+| `OPENAI_BASE_URL` | Alias alternativo | Idem. |
+| `LLM_MODEL` | No | Modelo del primario. Default `gpt-4o-mini`. |
+| `OPENAI_MODEL` | Alias alternativo | Idem. |
+| `LINKEDIN_API_URL` | No | Endpoint de ProxyCurl o similar para extracción LinkedIn. |
+| `LINKEDIN_API_KEY` | No | Auth Bearer para esa API. |
+| `PROXYCURL_API_KEY` | Alias | Idem. |
+| `LINKEDIN_EMAIL` | No | Si existe, se intenta Playwright autenticado. |
+| `LINKEDIN_PASSWORD` | No | Credencial para `LINKEDIN_EMAIL`. |
+
+**Ejemplo mínimo (sólo Gemini):**
+```env
+GEMINI_API_KEY=tu_clave_gemini
+```
+
+**Ejemplo con DeepSeek primario + Gemini fallback:**
+```env
+LLM_PROVIDER=openai_compatible
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_MODEL=deepseek-chat
+GEMINI_API_KEY=tu_clave_gemini
+```
+
+**Ejemplo con LinkedIn enrichment:**
+```env
+LINKEDIN_EMAIL=tu_correo
+LINKEDIN_PASSWORD=tu_password
+```
+
+> ⚠️ Scraping autenticado de LinkedIn viola sus TOS. Úsalo bajo tu responsabilidad; la API externa (ProxyCurl / similar) es la ruta recomendada para producción.
+
+---
+
+## Cómo funciona (en una mirada)
+
+1. Abres la app y entras a la **Landing** → botón **OPEN GENERATOR**.
+2. En **ToolApp** subes tu PDF base, pegas la JD, opcionalmente añades `target_role`, URLs de GitHub/LinkedIn y marcas *Extract LinkedIn*.
+3. Eliges plantilla (`sb2nov`/`classic`/`moderncv`/`classic_html`), si quieres forzar 1 página y si quieres un corte de página antes de una sección.
+4. `Generate` → la UI muestra el progreso en vivo (SSE) hasta `Finished` y te da el botón **Download**.
+5. Activa *Auto-Validate ATS* y verás el puntaje ATS, AI tone, formato y keywords matched/missing. Eso se suma al `scoreHistory` con versión incrementada.
+6. Refina: marca tips de humanización del análisis ATS, agrega keywords faltantes, escribe una instrucción libre → `Regenerate`. El backend toma el último PDF generado como base; tus mejoras no se pierden.
+7. `Reset Process` → llama `/api/clear-cache`, limpia estado y borra los PDFs en `output/`.
+
+---
+
+## Licencia & créditos
+
+Inspirado en el proyecto open-source `VJsharan/jd-to-resume` (Jinja2 + Playwright), endurecido en esta v2.5 con:
+
+- **[RenderCV](https://github.com/sinaatalay/rendercv)** de Sina Atalay — framework CV en YAML/Typst con plantillas ATS-friendly (`sb2nov`, `classic`, `moderncv`).
+- **[Typst](https://github.com/typst/typst)** — compilador tipográfico moderno, PDFs vectoriales nítidos a alta velocidad.
+- **[shadcn/ui](https://ui.shadcn.com/)** sobre Radix UI — base de componentes para el frontend.
+- **[Framer Motion](https://www.framer.com/motion/)** — microinteracciones y transiciones de la landing.
+
+Hecho para iterar currículums sin perder la verdad de tu experiencia.
