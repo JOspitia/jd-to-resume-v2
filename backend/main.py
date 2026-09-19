@@ -269,9 +269,354 @@ async def call_llm_api(prompt_text: str) -> str:
     raise ValueError(f"Fallaron todos los modelos. Gemini: {last_err}{err_detail}")
 
 
+# In-memory cache to avoid re-extracting LinkedIn on every refinement pass
+# key: linkedin_url, value: extracted text
+_linkedin_cache: dict = {}
+
+async def extract_linkedin_profile_data(linkedin_url: str) -> str:
+    """
+    Extract LinkedIn profile data using:
+    1. External API (ProxyCurl or similar) if LINKEDIN_API_URL + LINKEDIN_API_KEY are set.
+    2. Authenticated Playwright scraping if LINKEDIN_EMAIL + LINKEDIN_PASSWORD are set.
+    3. Public/anonymous fallback scraping (limited data, as LinkedIn blocks most content).
+    """
+    if not linkedin_url or not linkedin_url.strip():
+        return ""
+
+    url = linkedin_url.strip()
+    # Normalize: ensure it points to /in/username and not a sub-section
+    if "linkedin.com/in/" not in url:
+        print(f"[LINKEDIN EXTRACTOR WARN] URL no parece ser un perfil de LinkedIn válido: {url}")
+        return f"LinkedIn URL proporcionada: {url}"
+
+    print(f"[LINKEDIN EXTRACTOR] Iniciando extracción para: {url}")
+
+    # --- Cache: return previously extracted data if available ---
+    if url in _linkedin_cache:
+        print(f"[LINKEDIN EXTRACTOR] ✅ Usando datos en caché para: {url}")
+        return _linkedin_cache[url]
+
+    # Re-read .env on each call so credentials added after server start are picked up
+    load_dotenv(override=True)
+
+    # --- Path 1: External API (ProxyCurl / Custom) ---
+    api_endpoint = os.getenv("LINKEDIN_API_URL", "").strip()
+    api_key = (os.getenv("LINKEDIN_API_KEY") or os.getenv("PROXYCURL_API_KEY") or "").strip()
+
+    if api_endpoint and api_key:
+        try:
+            import urllib.request, urllib.parse
+            req_url = f"{api_endpoint}?url={urllib.parse.quote(url, safe='')}"
+            req = urllib.request.Request(req_url, headers={"Authorization": f"Bearer {api_key}"})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                print("[LINKEDIN EXTRACTOR] ✅ Datos obtenidos desde API externa.")
+                return json.dumps(data, ensure_ascii=False)
+        except Exception as api_err:
+            print(f"[LINKEDIN EXTRACTOR WARN] API externa falló: {api_err}. Continuando con Playwright...")
+
+    # --- Path 2: Authenticated Playwright scraping ---
+    li_email = os.getenv("LINKEDIN_EMAIL", "").strip()
+    li_password = os.getenv("LINKEDIN_PASSWORD", "").strip()
+    print(f"[LINKEDIN EXTRACTOR] Credenciales configuradas: email={'\u2705 S\u00ed' if li_email else '\u274c No (configura LINKEDIN_EMAIL en .env)'}  password={'\u2705 S\u00ed' if li_password else '\u274c No (configura LINKEDIN_PASSWORD en .env)'}")
+
+    def _scrape_authenticated() -> str:
+        """Login to LinkedIn and extract full profile via Playwright."""
+        with sync_playwright() as p:
+            # Launch with stealth-friendly args to bypass bot detection
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-infobars",
+                    "--window-size=1280,900",
+                ]
+            )
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1280, "height": 900},
+                locale="es-ES",
+                extra_http_headers={
+                    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                }
+            )
+            # Mask navigator.webdriver to reduce bot detection
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {} };
+            """)
+            page = context.new_page()
+
+            try:
+                # Step 1: Login
+                print("[LINKEDIN EXTRACTOR] Iniciando sesión en LinkedIn...")
+                page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=25000)
+                time.sleep(2)
+
+                # Try multiple selector strategies for username/password (LinkedIn sometimes A/B tests UI)
+                username_sel = "#username, input[name='session_key'], input[autocomplete='username']"
+                password_sel = "#password, input[name='session_password'], input[autocomplete='current-password']"
+                submit_sel   = "button[type='submit'], .btn__primary--large"
+
+                page.wait_for_selector(username_sel, timeout=8000)
+                page.fill(username_sel, li_email)
+                time.sleep(0.8)
+                page.fill(password_sel, li_password)
+                time.sleep(0.5)
+                page.click(submit_sel)
+
+                # Wait for navigation after login
+                try:
+                    page.wait_for_url(lambda u: "feed" in u or "mynetwork" in u or "/in/" in u or "checkpoint" in u or "challenge" in u, timeout=25000)
+                except Exception:
+                    page.wait_for_load_state("networkidle", timeout=20000)
+                time.sleep(2)
+
+                current_url = page.url
+                print(f"[LINKEDIN EXTRACTOR] URL post-login: {current_url}")
+
+                # Verify login succeeded
+                if "checkpoint" in current_url or "challenge" in current_url or "security" in current_url:
+                    print("[LINKEDIN EXTRACTOR WARN] LinkedIn solicitó verificación adicional (CAPTCHA/2FA). No se puede continuar automáticamente.")
+                    browser.close()
+                    return ""
+
+                if "login" in current_url or "authwall" in current_url:
+                    print(f"[LINKEDIN EXTRACTOR ERROR] Login falló. Aún en página de login. URL: {current_url}")
+                    browser.close()
+                    return ""
+
+                print("[LINKEDIN EXTRACTOR] ✅ Sesión iniciada correctamente.")
+
+                # Step 2: Navigate to profile
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                time.sleep(3)
+
+                # Step 3: Scroll down to load all lazy sections
+                for _ in range(6):
+                    page.keyboard.press("End")
+                    time.sleep(1.2)
+
+                # Step 4: Extract structured sections using selectors
+                js_extractor = """
+                () => {
+                    const getText = (el) => el ? el.innerText.trim() : '';
+                    const getAll = (sel) => Array.from(document.querySelectorAll(sel)).map(e => e.innerText.trim()).filter(Boolean);
+
+                    // --- Name & Headline ---
+                    const name = getText(document.querySelector('h1'));
+                    const headline = getText(document.querySelector('.text-body-medium.break-words'));
+                    const location = getText(document.querySelector('.text-body-small.inline.t-black--light.break-words'));
+
+                    // --- About / Summary ---
+                    const aboutSection = document.querySelector('#about ~ div .visually-hidden, section[data-section="about"] .display-flex.ph5 span');
+                    const about = aboutSection ? aboutSection.innerText.trim() : '';
+
+                    // --- Experience ---
+                    const expContainer = document.querySelector('#experience');
+                    let experiences = [];
+                    if (expContainer) {
+                        const expParent = expContainer.closest('section') || expContainer.parentElement?.parentElement?.parentElement;
+                        if (expParent) {
+                            const items = expParent.querySelectorAll('li.artdeco-list__item');
+                            items.forEach(item => {
+                                const lines = item.innerText.split('\\n').map(l => l.trim()).filter(Boolean);
+                                experiences.push(lines.join(' | '));
+                            });
+                        }
+                    }
+
+                    // --- Education ---
+                    const eduContainer = document.querySelector('#education');
+                    let education = [];
+                    if (eduContainer) {
+                        const eduParent = eduContainer.closest('section') || eduContainer.parentElement?.parentElement?.parentElement;
+                        if (eduParent) {
+                            const items = eduParent.querySelectorAll('li.artdeco-list__item');
+                            items.forEach(item => {
+                                const lines = item.innerText.split('\\n').map(l => l.trim()).filter(Boolean);
+                                education.push(lines.join(' | '));
+                            });
+                        }
+                    }
+
+                    // --- Skills ---
+                    const skillsContainer = document.querySelector('#skills');
+                    let skills = [];
+                    if (skillsContainer) {
+                        const skillsParent = skillsContainer.closest('section') || skillsContainer.parentElement?.parentElement?.parentElement;
+                        if (skillsParent) {
+                            const items = skillsParent.querySelectorAll('li .t-bold span, li .mr1 span');
+                            items.forEach(item => skills.push(item.innerText.trim()));
+                        }
+                    }
+                    if (skills.length === 0) {
+                        // fallback: try top skills from profile card
+                        document.querySelectorAll('[data-field="skill_card_skill_topic"]').forEach(el => skills.push(el.innerText.trim()));
+                    }
+
+                    // --- Certifications / Licenses ---
+                    const certContainer = document.querySelector('#licenses_and_certifications, #certifications');
+                    let certifications = [];
+                    if (certContainer) {
+                        const certParent = certContainer.closest('section') || certContainer.parentElement?.parentElement?.parentElement;
+                        if (certParent) {
+                            const items = certParent.querySelectorAll('li.artdeco-list__item');
+                            items.forEach(item => {
+                                const lines = item.innerText.split('\\n').map(l => l.trim()).filter(Boolean);
+                                certifications.push(lines.join(' | '));
+                            });
+                        }
+                    }
+
+                    // --- Languages ---
+                    const langContainer = document.querySelector('#languages');
+                    let languages = [];
+                    if (langContainer) {
+                        const langParent = langContainer.closest('section') || langContainer.parentElement?.parentElement?.parentElement;
+                        if (langParent) {
+                            const items = langParent.querySelectorAll('li.artdeco-list__item');
+                            items.forEach(item => languages.push(item.innerText.trim()));
+                        }
+                    }
+
+                    return {
+                        name, headline, location, about,
+                        experiences, education, skills, certifications, languages
+                    };
+                }
+                """
+                data = page.evaluate(js_extractor)
+
+                # Build structured text output
+                def fmt_section(title, items):
+                    if not items: return ""
+                    body = "\\n".join(f"  - {i}" for i in items if i)
+                    return f"### {title}\\n{body}\\n" if body.strip() else ""
+
+                parts = [f"# Perfil LinkedIn Extraído"]
+                if data.get("name"): parts.append(f"**Nombre:** {data['name']}")
+                if data.get("headline"): parts.append(f"**Titular:** {data['headline']}")
+                if data.get("location"): parts.append(f"**Ubicación:** {data['location']}")
+                if data.get("about"): parts.append(f"\\n### Resumen / Acerca de\\n{data['about']}\\n")
+
+                parts.append(fmt_section("Experiencia Laboral", data.get("experiences", [])))
+                parts.append(fmt_section("Educación", data.get("education", [])))
+                parts.append(fmt_section("Habilidades", data.get("skills", [])))
+                parts.append(fmt_section("Certificaciones y Licencias", data.get("certifications", [])))
+                parts.append(fmt_section("Idiomas", data.get("languages", [])))
+
+                result = "\\n".join(p for p in parts if p)
+                print(f"[LINKEDIN EXTRACTOR] ✅ Secciones extraídas: exp={len(data.get('experiences',[]))}, skills={len(data.get('skills',[]))}, certs={len(data.get('certifications',[]))}")
+                return result
+
+            except Exception as scrape_err:
+                print(f"[LINKEDIN EXTRACTOR ERROR] Error durante scraping autenticado: {scrape_err}")
+                return ""
+            finally:
+                browser.close()
+
+    # Try authenticated scraping if credentials available
+    if li_email and li_password:
+        try:
+            raw_data = await asyncio.to_thread(_scrape_authenticated)
+            if raw_data and len(raw_data) > 100:
+                # Pass through LLM to clean and normalize
+                extraction_prompt = f"""
+Tienes el siguiente contenido extraído del perfil de LinkedIn de un candidato usando automatización de navegador.
+El contenido puede tener texto duplicado, artefactos HTML o texto crudo de la interfaz.
+
+CONTENIDO EXTRAÍDO DE LINKEDIN:
+{raw_data[:6000]}
+
+Estructura y limpia esta información para enriquecer y complementar el CV del candidato.
+Genera un resumen profesional estructurado en Markdown con las siguientes secciones (omite las vacías):
+- Nombre y Titular profesional
+- Ubicación
+- Resumen / Acerca de
+- Experiencia Laboral (con empresa, cargo, fechas y descripción de responsabilidades)
+- Educación (institución, título, fechas)
+- Habilidades (lista completa de skills mencionadas)
+- Certificaciones y Licencias (nombre, institución, fecha)
+- Idiomas
+
+IMPORTANTE: Conserva TODA la información de experiencias, cargos y certificaciones que encuentres, sin omitir ninguna.
+"""
+                structured = await call_llm_api(extraction_prompt)
+                print("[LINKEDIN EXTRACTOR] ✅ Datos de LinkedIn procesados y estructurados correctamente.")
+                _linkedin_cache[url] = structured  # Cache the result
+                return structured
+        except Exception as auth_err:
+            print(f"[LINKEDIN EXTRACTOR WARN] Scraping autenticado falló: {auth_err}. Continuando con modo público...")
+
+    # --- Path 3: Anonymous public fallback ---
+    print("[LINKEDIN EXTRACTOR] ⚠️ Sin credenciales o scraping autenticado fallido. Intentando acceso público (datos limitados)...")
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as res:
+            html_bytes = res.read()
+            raw_html = html_bytes.decode("utf-8", errors="ignore")
+
+            # Extract JSON-LD structured data if available
+            import re
+            json_ld_match = re.search(r'<script type="application/ld\+json">(.*?)</script>', raw_html, re.DOTALL)
+            json_ld_data = ""
+            if json_ld_match:
+                try:
+                    json_ld_data = json.dumps(json.loads(json_ld_match.group(1)), ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+
+            # Extract og:description meta
+            og_desc = re.search(r'<meta property="og:description" content="([^"]*)"', raw_html)
+            og_title = re.search(r'<meta property="og:title" content="([^"]*)"', raw_html)
+
+            public_text = ""
+            if og_title: public_text += f"Nombre / Titular: {og_title.group(1)}\n"
+            if og_desc: public_text += f"Descripción pública: {og_desc.group(1)}\n"
+            if json_ld_data: public_text += f"\nDatos estructurados JSON-LD:\n{json_ld_data[:3000]}"
+
+            if not public_text:
+                return (
+                    f"Perfil de LinkedIn: {url}\n"
+                    "⚠️ El perfil requiere autenticación para ver el contenido completo. "
+                    "Configura LINKEDIN_EMAIL y LINKEDIN_PASSWORD en el archivo .env para extracción completa."
+                )
+
+            extraction_prompt = f"""
+Tienes datos públicos limitados del perfil de LinkedIn de un candidato.
+Extrae toda la información profesional disponible para complementar su CV.
+
+DATOS PÚBLICOS DE LINKEDIN:
+{public_text}
+
+Genera un resumen en Markdown con la información disponible. Indica claramente si la información es limitada por ser pública.
+"""
+            return await call_llm_api(extraction_prompt)
+
+    except Exception as public_err:
+        print(f"[LINKEDIN EXTRACTOR ERROR] Acceso público falló: {public_err}")
+        return (
+            f"Perfil de LinkedIn: {url}\n"
+            "⚠️ No fue posible extraer datos. Configura LINKEDIN_EMAIL y LINKEDIN_PASSWORD en el .env para extracción completa."
+        )
+
+
+
 async def generation_pipeline(
     file_path: str, 
-    jd: str, 
+    jd: Optional[str] = None, 
     target_role: Optional[str] = None, 
     github_url: Optional[str] = None, 
     linkedin_url: Optional[str] = None, 
@@ -279,7 +624,8 @@ async def generation_pipeline(
     base_resume_filename: Optional[str] = None, 
     theme: Optional[str] = "sb2nov",
     fit_single_page: bool = False,
-    page_break_section: Optional[str] = None
+    page_break_section: Optional[str] = None,
+    extract_linkedin_info: bool = False
 ):
     try:
         # Reload .env dynamically so any new API Key is immediately picked up
@@ -300,8 +646,13 @@ async def generation_pipeline(
                 print(f"[WARN] ⚠️ base_resume_filename '{base_resume_filename}' not found in OUTPUT_DIR, falling back to original upload.")
                 print(f"[WARN]    Expected path: {candidate_path}")
 
-        yield f"data: {json.dumps({'step': 'Extracting Text from Resume', 'progress': 25})}\n\n"
+        yield f"data: {json.dumps({'step': 'Extracting Text from Resume', 'progress': 20})}\n\n"
         resume_text = extract_text(effective_file_path)
+
+        linkedin_extracted_text = ""
+        if extract_linkedin_info and linkedin_url and linkedin_url.strip():
+            yield f"data: {json.dumps({'step': 'Extrayendo datos del perfil de LinkedIn...', 'progress': 35})}\n\n"
+            linkedin_extracted_text = await extract_linkedin_profile_data(linkedin_url.strip())
         
         yield f"data: {json.dumps({'step': 'Analyzing with AI Model', 'progress': 50})}\n\n"
         
@@ -311,8 +662,8 @@ You are provided with a 'Base Resume' of a candidate and a target 'Job Descripti
 Your goal is to tailor the candidate's actual experience to align perfectly with the target role and achieve maximum ATS scores on platforms like CompuTrabajo, Workday, LinkedIn, and Greenhouse.
 
 STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
-1. ZERO HALLUCINATION & NO INVENTING DATA: You MUST ONLY use the candidate's real experiences, companies, education, degrees, dates, and projects provided in the 'Base Resume'. Absolutely DO NOT invent, hallucinate, or import fake or third-party companies, internships, jobs, dates, or projects (e.g. DO NOT add ZScore, Hackumi, Resume Analyzer, or any experience not in the Base Resume).
-2. TAILOR AND RESTRUCTURE ONLY: Rephrase, reorganize, and emphasize the candidate's real existing achievements and technical skills using strong action verbs and relevant keywords from the Job Description.
+1. ZERO HALLUCINATION & NO INVENTING DATA: You MUST ONLY use the candidate's real experiences, companies, education, degrees, dates, and projects provided in the 'Base Resume' and the 'Extracted LinkedIn Profile Data' (if provided). Absolutely DO NOT invent, hallucinate, or import fake or third-party companies, internships, jobs, dates, or projects (e.g. DO NOT add ZScore, Hackumi, Resume Analyzer, or any experience not in the Base Resume or LinkedIn data).
+2. TAILOR AND RESTRUCTURE ONLY: Rephrase, reorganize, merge, and emphasize the candidate's real existing achievements, skills, and experience from the Base Resume and extracted LinkedIn profile using strong action verbs and relevant keywords from the Job Description.
 3. TARGET ROLE ALIGNMENT: Frame the summary and highlights toward the 'Target Role' if provided. The professional summary MUST include the exact target job title when possible.
 4. STRICT 1-PAGE LAYOUT & ANTI-ORPHAN COMPACTNESS:
    - Provide 2 to 3 concise, punchy bullet points per role (do not exceed 3 unless essential).
@@ -343,9 +694,18 @@ Portfolio: ''
 
 Base Resume:
 {resume_text}
+"""
+        if linkedin_extracted_text:
+            prompt += f"""
+Extracted LinkedIn Profile Data (Use to enrich and complement the Base Resume):
+{linkedin_extracted_text}
+"""
 
-Job Description:
-{jd}
+        effective_jd = jd.strip() if (jd and jd.strip()) else "No se especificó una oferta de trabajo concreta. Realizar optimización profesional general para ATS, destacando logros y competencias clave."
+
+        prompt += f"""
+Job Description / Target Requirements:
+{effective_jd}
 """
         
         generation_config = {"response_mime_type": "application/json"}
@@ -374,7 +734,9 @@ Respond ONLY with a JSON object in this exact structure. The 'section_labels' fi
     "achievements": "Achievements"
   }
 }
-IMPORTANT: If the JD is in Spanish, the section_labels values must be in Spanish (e.g. 'Resumen Profesional', 'Educación', 'Habilidades', 'Experiencia Laboral', 'Proyectos', 'Logros'). If the JD is in English, they must be in English as shown above.
+IMPORTANT:
+1. All dates in 'dates' fields (education, experience, projects) MUST be formatted using standard numbers or 'present' (e.g. "2019-02 - 2023-08", "2023-02 - present", or "2019 - 2023"). Do NOT use month abbreviations in Spanish (like 'Feb', 'Ago', 'Ene') or Spanish words like 'Presente' in the date strings.
+2. If the JD is in Spanish, the section_labels values must be in Spanish (e.g. 'Resumen Profesional', 'Educación', 'Habilidades', 'Experiencia Laboral', 'Proyectos', 'Logros'). If the JD is in English, they must be in English as shown above.
 """
 
         
@@ -492,7 +854,7 @@ IMPORTANT: If the JD is in Spanish, the section_labels values must be in Spanish
 @app.post("/api/generate")
 async def generate_resume(
     file: UploadFile, 
-    jd: str = Form(...),
+    jd: Optional[str] = Form(None),
     target_role: Optional[str] = Form(None),
     github_url: Optional[str] = Form(None),
     linkedin_url: Optional[str] = Form(None),
@@ -500,7 +862,8 @@ async def generate_resume(
     base_resume_filename: Optional[str] = Form(None),
     theme: Optional[str] = Form("sb2nov"),
     fit_single_page: Optional[bool] = Form(False),
-    page_break_section: Optional[str] = Form(None)
+    page_break_section: Optional[str] = Form(None),
+    extract_linkedin_info: Optional[bool] = Form(False)
 ):
     # Save the original uploaded file temporarily (used as fallback if no base_resume_filename)
     temp_dir = tempfile.gettempdir()
@@ -519,7 +882,8 @@ async def generate_resume(
             base_resume_filename, 
             theme,
             fit_single_page or False,
-            page_break_section
+            page_break_section,
+            extract_linkedin_info or False
         ),
         media_type="text/event-stream"
     )
@@ -528,7 +892,7 @@ async def generate_resume(
 @app.post("/api/analyze-ats")
 async def analyze_ats(
     file: UploadFile,
-    jd: str = Form(...)
+    jd: Optional[str] = Form(None)
 ):
     try:
         load_dotenv(override=True)
@@ -539,12 +903,14 @@ async def analyze_ats(
             
         resume_text = extract_text(file_path)
         
+        effective_jd = jd.strip() if (jd and jd.strip()) else "Optimización general y mejoramiento de calidad del CV"
+        
         prompt = f"""
 You are an expert Applicant Tracking System (ATS) auditor and recruitment AI analyst (like CompuTrabajo, Workday, and Greenhouse ATS screeners).
-Your task is to analyze the candidate's Base Resume against the target Job Description (JD).
+Your task is to analyze the candidate's Base Resume against the target Job Description (JD) or General Professional Standards if no JD is provided.
 
 Perform 3 comprehensive evaluations:
-1. ATS MATCH SCORE (%): Calculate direct keyword and skill alignment between the Resume and Job Description.
+1. ATS MATCH SCORE (%): Calculate direct keyword and skill alignment between the Resume and Job Description/Professional Standards.
 2. AI WRITING DETECTION SCORE (%): Analyze the writing style of the resume. Identify if it sounds natural/human or overly robotic/AI-generated (detect AI buzzwords like 'spearheaded revolutionary synergy', 'delved into', 'testament to', etc.). Provide a risk score (0-20% = Low AI Risk/Natural, 21-50% = Medium, 51-100% = High AI Risk) and advice to humanize the tone.
 3. ATS FORMATTING & KEYWORD CHECK: Extract matched keywords, missing keywords, and actionable tips for ranking higher on platforms like CompuTrabajo.
 
@@ -569,8 +935,8 @@ Respond ONLY with a JSON object in this exact structure:
 Base Resume:
 {resume_text}
 
-Job Description:
-{jd}
+Job Description / Requirements:
+{effective_jd}
 """
         content = await call_llm_api(prompt)
         

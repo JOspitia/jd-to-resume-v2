@@ -28,6 +28,21 @@ def sanitize_phone(phone_str: str) -> Optional[str]:
             return None
     return cleaned
 
+SPANISH_MONTHS = {
+    "ene": "01", "enero": "01",
+    "feb": "02", "febrero": "02",
+    "mar": "03", "marzo": "03",
+    "abr": "04", "abril": "04",
+    "may": "05", "mayo": "05",
+    "jun": "06", "junio": "06",
+    "jul": "07", "julio": "07",
+    "ago": "08", "agosto": "08",
+    "sep": "09", "septiembre": "09", "setiembre": "09",
+    "oct": "10", "octubre": "10",
+    "nov": "11", "noviembre": "11",
+    "dic": "12", "diciembre": "12"
+}
+
 def clean_date_str(date_val: str, is_end_date: bool = False) -> str:
     """Clean date string to match RenderCV expected format (YYYY, YYYY-MM, or 'present')."""
     if not date_val:
@@ -36,9 +51,19 @@ def clean_date_str(date_val: str, is_end_date: bool = False) -> str:
     if is_end_date and cleaned in ["presente", "present", "actualidad", "actual", "actualmente", "hoy", "now"]:
         return "present"
     
-    match = re.search(r"\b(19\d\d|20\d\d)(?:-(0[1-9]|1[0-2]))?\b", cleaned)
-    if match:
-        return match.group(0)
+    # Check for direct YYYY-MM
+    match_ym = re.search(r"\b(19\d\d|20\d\d)-(0[1-9]|1[0-2])\b", cleaned)
+    if match_ym:
+        return match_ym.group(0)
+
+    # Check for Spanish or English month name + year (e.g. "Feb 2019", "Ago 2023")
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", cleaned)
+    if year_match:
+        year = year_match.group(1)
+        for m_name, m_num in SPANISH_MONTHS.items():
+            if re.search(r"\b" + m_name + r"\b", cleaned):
+                return f"{year}-{m_num}"
+        return year
         
     return "present" if is_end_date else "2020"
 

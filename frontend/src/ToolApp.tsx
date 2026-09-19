@@ -10,6 +10,8 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [targetRole, setTargetRole] = useState('');
   const [githubUrl, setGithubUrl] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
+  const [extractLinkedinInfo, setExtractLinkedinInfo] = useState(false);
+  const [step2Mode, setStep2Mode] = useState<'jd' | 'custom'>('jd');
   const [status, setStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
   const [progress, setProgress] = useState(0);
   const [stepMessage, setStepMessage] = useState('');
@@ -118,11 +120,6 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       setStatus('error');
       return;
     }
-    if (!jd.trim()) {
-      setErrorMessage("Por favor pega la oferta de empleo (Job Description).");
-      setStatus('error');
-      return;
-    }
 
     setAtsStatus('analyzing');
     setAtsErrorMessage('');
@@ -183,11 +180,6 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       setStatus('error');
       return;
     }
-    if (!jd.trim()) {
-      setErrorMessage("Please paste the job description.");
-      setStatus('error');
-      return;
-    }
 
     setStatus('generating');
     setProgress(0);
@@ -205,6 +197,9 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     if (targetRole) formData.append("target_role", targetRole);
     if (githubUrl) formData.append("github_url", githubUrl);
     if (linkedinUrl) formData.append("linkedin_url", linkedinUrl);
+    // Only extract LinkedIn info on first generation — not on refinement passes (no need to re-scrape)
+    const shouldExtractLinkedin = extractLinkedinInfo && !baseResumeFilename;
+    formData.append("extract_linkedin_info", shouldExtractLinkedin ? "true" : "false");
     if (customInstructionsOverride) {
       formData.append("custom_instructions", customInstructionsOverride);
     }
@@ -421,7 +416,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             </div>
           </motion.div>
 
-          {/* Job Description Section */}
+          {/* Job Description / Custom Requirements Section */}
           <motion.div 
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -429,13 +424,46 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             className="rm-box p-8 md:p-10 flex flex-col bg-white relative"
           >
             <div className="absolute -top-4 -left-4 rm-tag bg-orange-500 text-white px-4 py-2 text-lg">STEP_2</div>
-            <h2 className="text-2xl font-bold mb-6 font-serif mt-2">Job Description</h2>
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 mt-2">
+              <h2 className="text-xl font-bold font-serif">
+                {step2Mode === 'jd' ? 'Oferta de Trabajo (Job Description)' : 'Requerimientos de Modificación'}
+              </h2>
+              <div className="flex gap-1 bg-gray-100 p-1 border-2 border-black">
+                <button
+                  type="button"
+                  onClick={() => setStep2Mode('jd')}
+                  className={`px-3 py-1 text-xs font-bold transition-all ${
+                    step2Mode === 'jd' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  💼 Oferta de Trabajo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep2Mode('custom')}
+                  className={`px-3 py-1 text-xs font-bold transition-all ${
+                    step2Mode === 'custom' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  📝 Requerimientos CV
+                </button>
+              </div>
+            </div>
+
             <textarea 
               value={jd}
               onChange={(e) => setJd(e.target.value)}
-              placeholder="Paste the target job description requirements here..."
-              className="flex-1 w-full border-2 border-black bg-white p-5 font-sans resize-none focus:outline-none focus:ring-4 focus:ring-blue-100 min-h-[250px] text-lg placeholder-gray-500"
+              placeholder={
+                step2Mode === 'jd'
+                  ? "Pega aquí los requisitos o descripción de la oferta laboral..."
+                  : "Describe aquí las modificaciones, mejoras o requerimientos específicos que deseas aplicar a tu CV..."
+              }
+              className="flex-1 w-full border-2 border-black bg-white p-5 font-sans resize-none focus:outline-none focus:ring-4 focus:ring-blue-100 min-h-[220px] text-base placeholder-gray-500"
             />
+            <p className="mt-2 text-xs text-gray-500 italic">
+              * Si no cuentas con una oferta específica, puedes alternar a "Requerimientos CV" o dejar este campo vacío para optimización general ATS.
+            </p>
           </motion.div>
         </div>
 
@@ -470,6 +498,15 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                 placeholder="https://linkedin.com/in/..."
                 className="w-full border-2 border-black bg-white p-3 font-sans focus:outline-none focus:ring-4 focus:ring-blue-100"
               />
+              <label className="flex items-center gap-2 mt-1 text-xs font-semibold text-gray-800 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={extractLinkedinInfo} 
+                  onChange={e => setExtractLinkedinInfo(e.target.checked)}
+                  className="w-4 h-4 accent-blue-600 cursor-pointer"
+                />
+                <span>Extraer e integrar información del perfil de LinkedIn para complementar el CV</span>
+              </label>
             </div>
 
             <div className="flex flex-col gap-2">
