@@ -155,7 +155,11 @@ HTML_TEMPLATE = """
     {% for proj in projects %}
       <div class="resume-entry">
         <div class="flex-container">
-          <div><span class="item-title">{{ proj.name }}</span></div>
+          <div>
+            <span class="item-title">{{ proj.name }}</span>
+            {% if proj.url %} | <a href="{{ proj.url }}" style="color:#000;text-decoration:none;font-size:9.5pt;">{{ proj.url }}</a>{% endif %}
+            {% if proj.github_url %} | <a href="{{ proj.github_url }}" style="color:#000;text-decoration:none;font-size:9.5pt;">{{ proj.github_url }}</a>{% endif %}
+          </div>
           <div class="item-right">{{ proj.dates }}</div>
         </div>
         <ul>
@@ -197,7 +201,7 @@ class GeminiResumeOutput(BaseModel):
     education: list[dict] = Field(description="List with school, degree, dates, gpa")
     skills: list[dict] = Field(description="List with category and items (strings)")
     experience: list[dict] = Field(description="List of dicts with: company, role, dates, points (list)")
-    projects: list[dict] = Field(description="List of dicts with: name, dates, points (list)")
+    projects: list[dict] = Field(description="List of dicts with: name, dates, points (list), url (optional live URL), github_url (optional GitHub repo URL)")
     achievements: list[str] = Field(description="List of specific achievements or awards")
 
 async def call_llm_api(prompt_text: str) -> str:
@@ -682,6 +686,10 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
    - NEVER force tech/developer categories onto a non-tech profile (e.g. NEVER put 'Programming Languages' in a psychology resume).
 11. CANDIDATE LOCATION (CRITICAL FOR ATS):
    - Extract the candidate's city and country (e.g. 'Medellín, Colombia' or 'Bogotá, D.C.') from the Base Resume if present, and output it in the 'location' field.
+12. PHONE NUMBER WITH COUNTRY CODE (CRITICAL):
+   - Always output the phone number with its international dialing prefix (e.g. '+57 300 123 4567' for Colombia, '+1 555 123 4567' for USA). If the Base Resume contains a Colombian number without +57, prepend +57. Never strip the country code.
+13. PROJECTS WITH LINKS:
+   - Each project entry may include an optional 'url' field (live demo or website URL) and/or an optional 'github_url' field (GitHub repository URL). Preserve these links exactly as found in the Base Resume. If not present, omit the field or set it to empty string.
 """
         if custom_instructions and custom_instructions.strip():
             prompt += f"12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): You MUST explicitly apply the following user-selected improvements, tone humanization tips, and custom instructions above all other defaults: {custom_instructions.strip()}\n"
@@ -723,7 +731,7 @@ Respond ONLY with a JSON object in this exact structure. The 'section_labels' fi
   "education": [{"school": "Universidad Ejemplo", "degree": "Pregrado en Psicología", "dates": "2018 - 2022", "gpa": ""}],
   "skills": [{"category": "Pruebas Psicotécnicas", "items": ["16PF", "DISC", "Wartegg", "Valanti"]}],
   "experience": [{"company": "Empresa Ejemplo", "role": "Analista de Selección", "dates": "Ene 2023 - Presente", "points": ["Lideré procesos de selección...", "Evalué candidatos mediante..."]}],
-  "projects": [],
+  "projects": [{"name": "Project Name", "dates": "2025-01", "url": "", "github_url": "https://github.com/user/repo", "points": ["Built X using Y..."]}],
   "achievements": [],
   "section_labels": {
     "summary": "Professional Summary",

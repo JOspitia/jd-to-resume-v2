@@ -195,10 +195,23 @@ def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = 
             if not isinstance(item, dict):
                 continue
             date_raw = item.get("dates", "")
+            highlights = list(item.get("points", []))
+
+            # Prepend URL links as the first highlight line so they appear in the PDF
+            links = []
+            proj_url = item.get("url", "").strip()
+            proj_github = item.get("github_url", "").strip()
+            if proj_url:
+                links.append(proj_url)
+            if proj_github:
+                links.append(proj_github)
+            if links:
+                highlights = [" | ".join(links)] + highlights
+
             entry = {
                 "name": item.get("name", "").strip() or "Project",
                 "date": clean_date_str(date_raw, is_end_date=False),
-                "highlights": item.get("points", [])
+                "highlights": highlights
             }
             proj_entries.append(entry)
         if proj_entries:

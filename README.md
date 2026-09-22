@@ -99,7 +99,7 @@ flowchart TD
   K --> L[Gemini: 2.0-flash → 1.5-flash → 1.5-pro]
   L --> M[JSON parse + defaults defensivos]
   M --> N{¿theme?}
-  N -->|sb2nov|classic|moderncv| O[RenderCV + Typst]
+  N -->|sb2nov|classic|moderncv| O [RenderCV + Typst]
   O -->|fallo| P[Jinja2 + Playwright HTML]
   N -->|classic_html| P
   O --> Q[backend/output/tailored_resume_*.pdf]
