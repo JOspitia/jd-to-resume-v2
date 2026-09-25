@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw } from 'lucide-react';
+import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw, Languages, ArrowRightLeft } from 'lucide-react';
 
 
 
@@ -19,6 +19,24 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
   const [generatedPdfFilename, setGeneratedPdfFilename] = useState<string | null>(null);
+  // Translation state — populated by the SSE handler after each generation/translate pass.
+  // `forceTranslateToEnglish` is set on click and reset in handleGenerate's finally block.
+  const [forceTranslateToEnglish, setForceTranslateToEnglish] = useState<boolean>(false);
+  const [lastOutputLanguage, setLastOutputLanguage] = useState<'en' | 'es' | 'unknown'>('unknown');
+  const [auditScores, setAuditScores] = useState<{
+    ats_score?: number;
+    ai_detection_score?: number;
+    match_level?: string;
+    ai_tone_verdict?: string;
+    ats_formatting_score?: number;
+    matched_keywords?: string[];
+    missing_keywords?: string[];
+  } | null>(null);
+  const [translationMeta, setTranslationMeta] = useState<{
+    source_language?: string;
+    target_language?: string;
+    forced?: boolean;
+  } | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<string>('sb2nov');
   const [fitSinglePage, setFitSinglePage] = useState<boolean>(true);
   const [pageBreakSection, setPageBreakSection] = useState<string>('none');
@@ -100,6 +118,10 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setSelectedKeywords([]);
     setCustomPrompt('');
     generationVersionRef.current = 0;
+    setForceTranslateToEnglish(false);
+    setLastOutputLanguage('unknown');
+    setAuditScores(null);
+    setTranslationMeta(null);
 
 
     if (fileInputRef.current) {
@@ -224,6 +246,17 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       formData.append("base_resume_filename", baseResumeFilename);
     }
 
+    // Translation flag — only true on the click that initiates translation.
+    // Cleared in the finally block so subsequent refinements do not accidentally re-translate.
+    if (forceTranslateToEnglish) {
+      formData.append("force_language", "en");
+      // Translate the LAST-GENERATED PDF (preserves iterative tailoring decisions).
+      // If no PDF has been generated yet, backend falls back to the original upload.
+      if (generatedPdfFilename) {
+        formData.append("base_resume_filename", generatedPdfFilename);
+      }
+    }
+
     try {
       const response = await fetch("http://localhost:8000/api/generate", {
         method: "POST",
@@ -268,6 +301,41 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                   setGeneratedPdfFilename(filename);
                   setStatus('success');
 
+                  // Translation meta + audit scores arrive on the same SSE event
+                  // when force_language='en' triggered the translation path (REQ-4).
+                  if (data.translation) {
+                    setTranslationMeta(data.translation);
+                    const srcLang = (data.translation.source_language as 'en' | 'es' | 'unknown') || 'unknown';
+                    const tgtLang = (data.translation.target_language as 'en' | 'es') || 'es';
+                    setLastOutputLanguage(srcLang === 'en' ? 'en' : tgtLang);
+                  } else if (forceTranslateToEnglish) {
+                    // Defensive fallback: backend didn't echo translation meta
+                    // but the click that just succeeded was a translation pass.
+                    setLastOutputLanguage('en');
+                  } else if (lastOutputLanguage === 'unknown') {
+                    // Default user base assumption: original CVs are Spanish.
+                    setLastOutputLanguage('es');
+                  }
+
+                  if (data.audit_scores) {
+                    setAuditScores(data.audit_scores);
+                    setAtsData(data.audit_scores);
+                    setAtsStatus('success');
+                    generationVersionRef.current += 1;
+                    setScoreHistory(prev => [
+                      ...prev,
+                      {
+                        version: generationVersionRef.current,
+                        ats: data.audit_scores.ats_score ?? 0,
+                        ai: data.audit_scores.ai_detection_score ?? 0,
+                        format: data.audit_scores.ats_formatting_score ?? 95,
+                        label: data.translation?.forced
+                          ? 'EN'
+                          : (generationVersionRef.current === 1 ? 'Original' : `Refinado v${generationVersionRef.current - 1}`),
+                      }
+                    ]);
+                  }
+
                   // Auto re-audit: always re-audit on refinement passes; on first gen only if checkbox enabled
                   if (autoValidateATS || baseResumeFilename) {
                     handleValidateATS();
@@ -283,6 +351,10 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     } catch (err: any) {
       setErrorMessage(err.message || "An unexpected error occurred.");
       setStatus('error');
+    } finally {
+      // Always clear the translation flag so the next generation reverts to JD-driven
+      // language unless the user explicitly clicks Translate to English again.
+      setForceTranslateToEnglish(false);
     }
   };
 
@@ -797,6 +869,25 @@ className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex jus
     { atsStatus === 'analyzing' ? 'ANALIZANDO ATS & IA...' : '📊 AUDITAR MATCH ATS & DETECCIÓN IA'}
 </button>
 
+  {/* Translate to English — only renders after a successful generation.
+      Disabled when the last output is already English or while a generation is in flight. */}
+  <button
+    onClick={() => {
+      setForceTranslateToEnglish(true);
+      handleGenerate();
+    }}
+    disabled={lastOutputLanguage === 'en' || status === 'generating'}
+    title={
+      lastOutputLanguage === 'en'
+        ? 'CV already in English'
+        : 'This may take 30-90s'
+    }
+    className="rm-btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+  >
+    <Languages className="w-5 h-5" />
+    Translate to English
+  </button>
+
 {/* Reset Button */ }
 <button
                       onClick={ handleResetProcess }
@@ -807,6 +898,33 @@ className = "rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 f
     NUEVO / LIMPIAR
     </button>
     </div>
+
+              {/* Translation re-audit badge — visible only after a forced translation pass.
+                  Mirrors the visual language of the existing AUDITORÍA ATS & TONO HUMANO block
+                  but is compact and inline. REQ-4 + REQ-7 disable-state wires here. */}
+              {auditScores && translationMeta?.forced && lastOutputLanguage === 'en' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rm-box p-4 bg-white border-2 border-emerald-600 inline-flex items-center gap-4"
+                >
+                  <span className="font-mono font-bold text-xs uppercase text-emerald-900 tracking-wider">
+                    Re-audit (EN)
+                  </span>
+                  <span className={`text-3xl font-black font-mono ${(auditScores.ats_score ?? 0) >= 80 ? 'text-green-600' : (auditScores.ats_score ?? 0) >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                    ATS: {auditScores.ats_score ?? '-'}
+                  </span>
+                  <span className="text-gray-300">|</span>
+                  <span className={`text-3xl font-black font-mono ${(auditScores.ai_detection_score ?? 0) <= 20 ? 'text-green-600' : (auditScores.ai_detection_score ?? 0) <= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                    IA: {auditScores.ai_detection_score ?? '-'}
+                  </span>
+                  {auditScores.match_level && (
+                    <span className="rm-tag bg-black text-white text-xs px-3 py-1 font-bold">
+                      Nivel {auditScores.match_level}
+                    </span>
+                  )}
+                </motion.div>
+              )}
     </div>
               )}
 </motion.div>
