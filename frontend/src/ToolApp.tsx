@@ -66,6 +66,31 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     };
   }, [status, atsStatus]);
 
+  // Persist contact URLs to localStorage so the user does not have to retype
+  // them every time they open the app. Loaded on mount, written on change,
+  // cleared by the explicit Reset button.
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem('jd-to-resume.contact');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.githubUrl === 'string') setGithubUrl(parsed.githubUrl);
+        if (typeof parsed.linkedinUrl === 'string') setLinkedinUrl(parsed.linkedinUrl);
+        if (typeof parsed.portfolioUrl === 'string') setPortfolioUrl(parsed.portfolioUrl);
+      }
+    } catch {
+      // Ignore corrupt localStorage entries silently.
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('jd-to-resume.contact', JSON.stringify({ githubUrl, linkedinUrl, portfolioUrl }));
+    } catch {
+      // localStorage may be disabled (private mode, quota); persistence is best-effort.
+    }
+  }, [githubUrl, linkedinUrl, portfolioUrl]);
+
   // Score history — tracks ATS evolution across regeneration versions
   type ScoreEntry = { version: number; ats: number; ai: number; format: number; label: string };
   const [scoreHistory, setScoreHistory] = useState<ScoreEntry[]>([]);
@@ -104,6 +129,11 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setGithubUrl('');
     setLinkedinUrl('');
     setPortfolioUrl('');
+    try {
+      localStorage.removeItem('jd-to-resume.contact');
+    } catch {
+      // best-effort
+    }
     setStatus('idle');
     setProgress(0);
     setStepMessage('');

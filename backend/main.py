@@ -1,4 +1,14 @@
 import os
+import sys
+import io
+
+# Force UTF-8 stdout/stderr on Windows so print() with non-ASCII chars
+# (emojis, accented chars, etc.) does not raise UnicodeEncodeError against
+# the default cp1252 codec.
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+
 import json
 import asyncio
 from typing import Optional
@@ -12,6 +22,7 @@ from jinja2 import Template
 from playwright.sync_api import sync_playwright
 import tempfile
 import time
+import re
 
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
@@ -190,6 +201,106 @@ HTML_TEMPLATE = """
 def extract_text(file_path: str) -> str:
     doc = fitz.open(file_path)
     return " ".join([page.get_text() for page in doc])
+
+
+# --- Header extraction from a Base Resume ----------------------------------------
+# Pulls contact fields out of the raw PDF text so they survive regeneration even
+# when the user does not retype them in the form. Uses targeted regex patterns
+# that bias toward precision over recall — a missed field is better than a wrong
+# one, since the LLM can still see the full text in the prompt and the user can
+# correct any false negative manually.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PHONE_RE = re.compile(r"(\+?\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}")
+_GITHUB_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/[A-Za-z0-9._-]+/?", re.IGNORECASE)
+_LINKEDIN_RE = re.compile(r"(?:https?://)?(?:www\.)?linkedin\.com/in/[A-Za-z0-9._-]+/?", re.IGNORECASE)
+_PORTFOLIO_RE = re.compile(r"(?:https?://)?(?:www\.)?[A-Za-z0-9-]+\.(?:com|net|org|io|dev|me|co|app|page|site|xyz|store|portfolio)(?:/[A-Za-z0-9._~:/?#@!$&'()*+,;=-]*)?", re.IGNORECASE)
+
+
+def _extract_header_from_pdf_text(resume_text: str) -> dict:
+    """
+    Best-effort extraction of contact fields from the Base Resume plain text.
+    Returns a dict with keys: email, phone, github, linkedin, portfolio,
+    has_placeholder_github, has_placeholder_linkedin, has_placeholder_portfolio.
+    Each value is a string (possibly empty) — callers decide how to merge with
+    form-provided values. The *_placeholder booleans flag words like "GitHub"
+    or "LinkedIn" appearing as bare tokens (no URL) so the UI can warn the user
+    that the resume had placeholders but no real URLs were found.
+    """
+    if not resume_text:
+        return {
+            "email": "", "phone": "", "github": "", "linkedin": "", "portfolio": "",
+            "has_placeholder_github": False, "has_placeholder_linkedin": False, "has_placeholder_portfolio": False,
+        }
+
+    # Email: prefer the first match that doesn't look like an example/noreply
+    email_match = ""
+    for m in _EMAIL_RE.finditer(resume_text):
+        candidate = m.group(0)
+        if "example" in candidate.lower() or "noreply" in candidate.lower():
+            continue
+        email_match = candidate
+        break
+
+    # Phone: prefer + prefix and 10+ digits
+    phone_match = ""
+    for m in _PHONE_RE.finditer(resume_text):
+        candidate = m.group(0)
+        digits = re.sub(r"\D", "", candidate)
+        if len(digits) >= 10:
+            phone_match = candidate.strip()
+            break
+
+    github_match = _GITHUB_RE.search(resume_text)
+    linkedin_match = _LINKEDIN_RE.search(resume_text)
+
+    # Portfolio: scan URL-like strings, exclude github/linkedin/email domains
+    portfolio_match = ""
+    seen_domains = set()
+    if github_match:
+        seen_domains.add("github.com")
+    if linkedin_match:
+        seen_domains.add("linkedin.com")
+    for m in _PORTFOLIO_RE.finditer(resume_text):
+        candidate = m.group(0)
+        candidate_lower = candidate.lower()
+        if any(d in candidate_lower for d in seen_domains):
+            continue
+        if any(skip in candidate_lower for skip in ["example.com", "test.com", "yourname", "placeholder"]):
+            continue
+        # Normalize to https:// if no scheme
+        if not candidate_lower.startswith("http"):
+            candidate = "https://" + candidate
+        portfolio_match = candidate
+        break
+
+    # Detect placeholder words: a line containing only "LinkedIn | GitHub | Portafolio"
+    # or similar where each platform is just a token, not a URL. We flag them so
+    # the UI can warn the user to fill the form.
+    has_placeholder_github = False
+    has_placeholder_linkedin = False
+    has_placeholder_portfolio = False
+    if not github_match:
+        # Look for the word "github" alone in a header-ish context (first 5 lines).
+        # Use word boundary + not part of "github.io" or similar domains.
+        first_lines = "\n".join(resume_text.split("\n")[:8])
+        has_placeholder_github = bool(re.search(r"\bgithub\b", first_lines, re.IGNORECASE)) and not github_match
+    if not linkedin_match:
+        first_lines = "\n".join(resume_text.split("\n")[:8])
+        has_placeholder_linkedin = bool(re.search(r"\blinkedin\b", first_lines, re.IGNORECASE)) and not linkedin_match
+    if not portfolio_match:
+        first_lines = "\n".join(resume_text.split("\n")[:8])
+        has_placeholder_portfolio = bool(re.search(r"\bportafolio\b|\bportfolio\b", first_lines, re.IGNORECASE)) and not portfolio_match
+
+    return {
+        "email": email_match,
+        "phone": phone_match,
+        "github": github_match.group(0) if github_match else "",
+        "linkedin": linkedin_match.group(0) if linkedin_match else "",
+        "portfolio": portfolio_match,
+        "has_placeholder_github": has_placeholder_github,
+        "has_placeholder_linkedin": has_placeholder_linkedin,
+        "has_placeholder_portfolio": has_placeholder_portfolio,
+    }
 
 class GeminiResumeOutput(BaseModel):
     name: str = Field(description="Full Name")
@@ -708,7 +819,8 @@ async def generation_pipeline(
     JD language. See _build_language_override for the exact wording.
     """
     if force_language:
-        print(f"[TRANSLATE] 🌐 force_language='{force_language}' — LANGUAGE OVERRIDE will be applied to system prompt (both preamble and tail).")
+        print(f"[TRANSLATE] force_language='{force_language}' — LANGUAGE OVERRIDE will be applied to system prompt (both preamble and tail).")
+    print(f"[INPUT] github_url='{github_url}', linkedin_url='{linkedin_url}', portfolio_url='{portfolio_url}' (received from frontend form)")
     try:
         # Reload .env dynamically so any new API Key is immediately picked up
         load_dotenv(override=True)
@@ -745,6 +857,25 @@ async def generation_pipeline(
 
         yield f"data: {json.dumps({'step': 'Extracting Text from Resume', 'progress': 20})}\n\n"
         resume_text = extract_text(effective_file_path)
+
+        # Extract contact header from the Base Resume so it survives regeneration
+        # even when the user does not retype it in the form.
+        extracted_header = _extract_header_from_pdf_text(resume_text)
+        effective_github = (github_url.strip() if github_url and github_url.strip() else extracted_header["github"])
+        effective_linkedin = (linkedin_url.strip() if linkedin_url and linkedin_url.strip() else extracted_header["linkedin"])
+        effective_portfolio = (portfolio_url.strip() if portfolio_url and portfolio_url.strip() else extracted_header["portfolio"])
+        print(f"[HEADER] github='{effective_github or '(empty)'}', linkedin='{effective_linkedin or '(empty)'}', portfolio='{effective_portfolio or '(empty)'}', email='{extracted_header['email'] or '(empty)'}', phone='{extracted_header['phone'] or '(empty)'}'")
+        # Warn if the PDF had placeholder tokens (e.g. "LinkedIn") but no URL was found
+        # and the user did not provide one in the form. CV will be missing that link.
+        missing_placeholders = []
+        if extracted_header["has_placeholder_github"] and not effective_github:
+            missing_placeholders.append("github")
+        if extracted_header["has_placeholder_linkedin"] and not effective_linkedin:
+            missing_placeholders.append("linkedin")
+        if extracted_header["has_placeholder_portfolio"] and not effective_portfolio:
+            missing_placeholders.append("portfolio")
+        if missing_placeholders:
+            print(f"[HEADER] WARN: PDF had placeholder tokens but no URLs found for: {', '.join(missing_placeholders)}. User should fill the form with real URLs.")
 
         linkedin_extracted_text = ""
         if extract_linkedin_info and linkedin_url and linkedin_url.strip():
@@ -867,9 +998,19 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
         prompt += f"""
 {language_override_block}
 Target Role: {target_role if target_role else 'Not specified'}
-GitHub: {github_url if github_url else ''}
-LinkedIn: {linkedin_url if linkedin_url else ''}
-Portfolio: {portfolio_url if portfolio_url else ''}
+GitHub: {effective_github}
+LinkedIn: {effective_linkedin}
+Portfolio: {effective_portfolio}
+
+CONTACT HEADER PROTECTED FIELDS (DO NOT MODIFY, REMOVE, OR INVENT):
+- email: {extracted_header["email"]}
+- phone: {extracted_header["phone"]}
+- github: {effective_github}
+- linkedin: {effective_linkedin}
+- portfolio: {effective_portfolio}
+These values were extracted from the Base Resume and MUST be preserved verbatim
+in the output JSON. If the Base Resume text does not contain one of them, leave
+that field empty (do not invent placeholder URLs like 'github.com/janedoe').
 
 Base Resume:
 {resume_text}
@@ -1033,28 +1174,39 @@ IMPORTANT:
 
 
         # If user explicitly left GitHub / LinkedIn / Portfolio empty or they contain dummy placeholders, remove them
-        # User input overrides if provided
-        if github_url and github_url.strip():
-            parsed_data["github"] = github_url.strip()
-        elif not github_url:
-            # Check if LLM generated dummy or empty github
-            gh_val = str(parsed_data.get("github", "")).strip()
-            if not gh_val or any(dummy in gh_val.lower() for dummy in ["github.com/janedoe", "github.com/...", "example", "none"]):
-                parsed_data["github"] = ""
+        # User input overrides if provided; if not provided, fall back to values extracted from the Base Resume
+        # so the contact header survives regeneration even when the user does not retype it.
+        gh_val = str(parsed_data.get("github", "")).strip()
+        is_dummy_gh = any(dummy in gh_val.lower() for dummy in ["github.com/janedoe", "github.com/...", "example", "none"]) if gh_val else True
+        if effective_github:
+            parsed_data["github"] = effective_github
+        elif is_dummy_gh or not gh_val:
+            parsed_data["github"] = ""
 
-        if linkedin_url and linkedin_url.strip():
-            parsed_data["linkedin"] = linkedin_url.strip()
-        elif not linkedin_url:
-            li_val = str(parsed_data.get("linkedin", "")).strip()
-            if not li_val or any(dummy in li_val.lower() for dummy in ["linkedin.com/in/janedoe", "linkedin.com/in/...", "example", "none"]):
-                parsed_data["linkedin"] = ""
+        li_val = str(parsed_data.get("linkedin", "")).strip()
+        is_dummy_li = any(dummy in li_val.lower() for dummy in ["linkedin.com/in/janedoe", "linkedin.com/in/...", "example", "none"]) if li_val else True
+        if effective_linkedin:
+            parsed_data["linkedin"] = effective_linkedin
+        elif is_dummy_li or not li_val:
+            parsed_data["linkedin"] = ""
 
-        if portfolio_url and portfolio_url.strip():
-            parsed_data["portfolio"] = portfolio_url.strip()
-        elif not portfolio_url:
-            port_val = str(parsed_data.get("portfolio", "")).strip()
-            if not port_val or any(dummy in port_val.lower() for dummy in ["janedoe.com", "example.com", "none"]):
-                parsed_data["portfolio"] = ""
+        port_val = str(parsed_data.get("portfolio", "")).strip()
+        is_dummy_port = any(dummy in port_val.lower() for dummy in ["janedoe.com", "example.com", "none"]) if port_val else True
+        if effective_portfolio:
+            parsed_data["portfolio"] = effective_portfolio
+        elif is_dummy_port or not port_val:
+            parsed_data["portfolio"] = ""
+
+        # Same fallback for email and phone if the LLM dropped them
+        em_val = str(parsed_data.get("email", "")).strip()
+        if not em_val or any(d in em_val.lower() for d in ["example.com", "your.email", "placeholder"]):
+            if extracted_header.get("email"):
+                parsed_data["email"] = extracted_header["email"]
+
+        ph_val = str(parsed_data.get("phone", "")).strip()
+        if not ph_val or all(c in "0-" for c in ph_val):
+            if extracted_header.get("phone"):
+                parsed_data["phone"] = extracted_header["phone"]
 
 
         # Extract localized section headings from LLM output (fallback to English if missing)
