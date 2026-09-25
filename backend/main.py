@@ -88,7 +88,7 @@ HTML_TEMPLATE = """
     {% if email %}{% set _ = items.append(email) %}{% endif %}
     {% if linkedin %}{% set _ = items.append('<a href="' ~ linkedin ~ '">LinkedIn</a>') %}{% endif %}
     {% if github %}{% set _ = items.append('<a href="' ~ github ~ '">GitHub</a>') %}{% endif %}
-    {% if portfolio %}{% set _ = items.append('<a href="' ~ portfolio ~ '">Portfolio</a>') %}{% endif %}
+    {% if portfolio %}{% set _ = items.append('<a href="' ~ portfolio ~ '">' ~ (labels.portfolio if (labels and 'portfolio' in labels) else ('Portafolio' if (labels and labels.summary != 'Professional Summary') else 'Portfolio')) ~ '</a>') %}{% endif %}
     {{ items|join(' | ') }}
   </div>
 
@@ -158,7 +158,7 @@ HTML_TEMPLATE = """
           <div>
             <span class="item-title">{{ proj.name }}</span>
             {% if proj.url %} | <a href="{{ proj.url }}" style="color:#000;text-decoration:none;font-size:9.5pt;">{{ proj.url }}</a>{% endif %}
-            {% if proj.github_url %} | <a href="{{ proj.github_url }}" style="color:#000;text-decoration:none;font-size:9.5pt;">{{ proj.github_url }}</a>{% endif %}
+            {% if proj.github_url and proj.github_url != proj.url %} | <a href="{{ proj.github_url }}" style="color:#000;text-decoration:none;font-size:9.5pt;">{{ proj.github_url }}</a>{% endif %}
           </div>
           <div class="item-right">{{ proj.dates }}</div>
         </div>
@@ -616,20 +616,20 @@ Genera un resumen en Markdown con la información disponible. Indica claramente 
             "⚠️ No fue posible extraer datos. Configura LINKEDIN_EMAIL y LINKEDIN_PASSWORD en el .env para extracción completa."
         )
 
-
-
 async def generation_pipeline(
     file_path: str, 
     jd: Optional[str] = None, 
     target_role: Optional[str] = None, 
     github_url: Optional[str] = None, 
     linkedin_url: Optional[str] = None, 
+    portfolio_url: Optional[str] = None, 
     custom_instructions: Optional[str] = None, 
     base_resume_filename: Optional[str] = None, 
     theme: Optional[str] = "sb2nov",
     fit_single_page: bool = False,
     page_break_section: Optional[str] = None,
-    extract_linkedin_info: bool = False
+    extract_linkedin_info: bool = False,
+    strict_edits_only: bool = False
 ):
     try:
         # Reload .env dynamically so any new API Key is immediately picked up
@@ -660,7 +660,24 @@ async def generation_pipeline(
         
         yield f"data: {json.dumps({'step': 'Analyzing with AI Model', 'progress': 50})}\n\n"
         
-        prompt = f"""
+        if strict_edits_only:
+            user_requested_changes = custom_instructions.strip() if (custom_instructions and custom_instructions.strip()) else (jd.strip() if (jd and jd.strip()) else "No explicit changes specified.")
+            prompt = f"""
+You are an expert resume editor operating strictly in CONSERVATIVE SURGICAL EDIT MODE.
+Your task is to take the provided Base Resume and perform ONLY the explicit change(s) requested by the user below.
+
+USER REQUESTED MODIFICATIONS (CRITICAL — APPLY ONLY THESE):
+{user_requested_changes}
+
+STRICT SURGICAL EDIT RULES (ABSOLUTE HIGHEST PRIORITY — OVERRIDES ALL OTHER DEFAULTS):
+1. DO NOT REWRITE, REPHRASE, OR ALTER THE PROFESSIONAL SUMMARY UNLESS THE USER'S REQUEST EXPLICITLY ASKS TO MODIFY THE SUMMARY. If the summary is not mentioned in the requested modifications, keep the 'summary' field 100% IDENTICAL to the Base Resume text.
+2. DO NOT REWRITE OR REPHRASE ANY EXPERIENCE BULLET POINTS, DATES, ROLES, EDUCATION, OR SKILLS THAT WERE NOT EXPLICITLY TARGETED BY THE USER's REQUEST.
+3. Keep ALL untouched text, experience entries, dates, education, skills, and section contents 100% EXACTLY IDENTICAL to the provided Base Resume.
+4. ZERO HALLUCINATION: Do NOT invent or import any fake data, third-party companies, or fake projects.
+5. DATE CONSISTENCY: Format ongoing roles/studies strictly as "YYYY-MM - Actualidad" (Spanish) or "YYYY-MM - Present" (English).
+"""
+        else:
+            prompt = f"""
 You are a professional technical recruiter and resume writer specialized in ATS optimization.
 You are provided with a 'Base Resume' of a candidate and a target 'Job Description' (JD).
 Your goal is to tailor the candidate's actual experience to align perfectly with the target role and achieve maximum ATS scores on platforms like CompuTrabajo, Workday, LinkedIn, and Greenhouse.
@@ -668,37 +685,82 @@ Your goal is to tailor the candidate's actual experience to align perfectly with
 STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
 1. ZERO HALLUCINATION & NO INVENTING DATA: You MUST ONLY use the candidate's real experiences, companies, education, degrees, dates, and projects provided in the 'Base Resume' and the 'Extracted LinkedIn Profile Data' (if provided). Absolutely DO NOT invent, hallucinate, or import fake or third-party companies, internships, jobs, dates, or projects (e.g. DO NOT add ZScore, Hackumi, Resume Analyzer, or any experience not in the Base Resume or LinkedIn data).
 2. TAILOR AND RESTRUCTURE ONLY: Rephrase, reorganize, merge, and emphasize the candidate's real existing achievements, skills, and experience from the Base Resume and extracted LinkedIn profile using strong action verbs and relevant keywords from the Job Description.
-3. TARGET ROLE ALIGNMENT: Frame the summary and highlights toward the 'Target Role' if provided. The professional summary MUST include the exact target job title when possible.
-4. STRICT 1-PAGE LAYOUT & ANTI-ORPHAN COMPACTNESS:
-   - Provide 2 to 3 concise, punchy bullet points per role (do not exceed 3 unless essential).
-   - Ensure bullet points are self-contained and max 1 to 2 lines each so they never spill solitary orphan lines onto a next page.
-   - Keep the professional summary to 2-3 focused lines.
-5. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly.
-6. ATS KEYWORD DENSITY: Naturally integrate the most important technical keywords, tools, and soft-skill terms from the Job Description into the bullet points and summary. Prioritize exact-match keywords over synonyms when possible (e.g. if JD says 'React.js' use 'React.js', not just 'React').
-7. STRONG ACTION VERBS: Every bullet point MUST start with a powerful, past-tense action verb (e.g. Desarrollé, Optimicé, Implementé, Lideré, Diseñé, Automaticé, Reduje, Incrementé, Escalé, Migré, Construí, Configuré, Integré). Avoid passive voice and weak starters like 'Responsible for' or 'Helped with'.
-8. QUANTIFIABLE METRICS: Include specific numbers, percentages, dollar amounts, or time savings wherever the Base Resume hints at them (e.g. 'Optimicé consultas SQL reduciendo tiempos de respuesta en un 40%', 'Automaticé 15 flujos de trabajo'). If exact numbers are unknown, use plausible specific estimates based on context.
-9. ATS FORMATTING COMPLIANCE: The output data must produce a clean, single-column, ATS-parseable layout. Do NOT include tables, graphics, columns, text boxes, headers/footers with contact info, or special characters that confuse ATS parsers. Use standard section names that ATS systems recognize (Experience, Education, Skills, Projects).
+3. PAGE LENGTH & COMPACTNESS RULE:
+   - If candidate has less than 5 years of experience, strictly fit into a 1-page layout.
+   - If candidate has more than 5 years of experience, maximum 2 pages.
+   - Provide 2 to 3 concise bullet points per role. Ensure bullet points are self-contained (1-2 lines) so they never leave solitary orphan lines.
+4. PROFESSIONAL SUMMARY ENGAGEMENT:
+   - Provide an engaging, high-impact professional summary of exactly 3 lines that hooks the recruiter in seconds, incorporating the target role and key value proposition.
+5. WORK EXPERIENCE REWRITING & ACHIEVEMENT FORMULA (CRITICAL - MANDATORY FOR EVERY BULLET POINT):
+   - You MUST aggressively rewrite EVERY SINGLE bullet point in the `experience` list (`points` array). DO NOT copy-paste raw text from the base resume.
+   - Redact all achievements and bullet points strictly using Google's XYZ Formula: "Accomplished [X] as measured by [Y], by doing [Z]" (ACCIÓN + CONTEXTO/MÉTODO + RESULTADO MEDIBLE en números, %, o ahorro de tiempo/costos).
+   - Every single bullet point in `experience` MUST start with a strong high-impact action verb:
+     * Spanish: Diseñé, Implementé, Refactoricé, Desplegué, Migré, Optimicé, Automaticé, Incrementé, Reduje, Agilicé, Maximicé, Consolidé, Lideré, Construí.
+     * English: Engineered, Architected, Implemented, Spearheaded, Optimized, Automated, Streamlined, Reduced, Scaled, Deployed, Refactored.
+   - ABSOLUTELY PROHIBITED: Passive or lazy phrasing like "Responsable de...", "Encargado de...", "Trabajé en...", "Desarrollo de...", or "Responsibilities included...". You must convert all passive duties into active quantifiable accomplishments.
+   - If exact metrics/numbers are not provided in the base text, estimate or frame the realistic positive impact (e.g., "mejorando la eficiencia operativa", "reduciendo errores de despliegue", "optimizando tiempos de respuesta") while keeping all candidate facts accurate.
+6. TONE & HUMANITY:
+   - Professional, authoritative, yet authentic and human tone without sounding like a robotic generic template.
+7. ATS KEYWORD DENSITY & INTEGRATION:
+   - Naturally integrate key technical and domain keywords from the target job description into bullet points and summary. Prioritize exact matches.
+8. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly.
+9. ATS FORMATTING COMPLIANCE: Clean, single-column layout parseable by ATS parsers. Standard section headings.
 10. DOMAIN-AWARE INTELLIGENT SKILLS CATEGORIZATION:
-   - Categorize skills strictly according to the candidate's actual profession/domain and the target role:
-     * For Psychology / HR / Talent Acquisition / Recruiting: Group into categories such as 'Pruebas Psicotécnicas & Evaluación', 'Metodologías de Selección & Entrevista', 'Legislación Laboral & Contratación', 'Sistemas ATS & Portales de Empleo', 'Gestión del Talento'.
-     * For Software / Engineering / Tech: Group into 'Lenguajes de Programación', 'Frameworks & Librerías', 'Bases de Datos & Cloud', 'Herramientas & DevOps'.
-     * For Business / Finance / Administration: Group into 'Finanzas & Análisis', 'Herramientas ERP/CRM', 'Gestión de Proyectos', 'Normativa & Auditoría'.
-   - NEVER force tech/developer categories onto a non-tech profile (e.g. NEVER put 'Programming Languages' in a psychology resume).
-11. CANDIDATE LOCATION (CRITICAL FOR ATS):
-   - Extract the candidate's city and country (e.g. 'Medellín, Colombia' or 'Bogotá, D.C.') from the Base Resume if present, and output it in the 'location' field.
-12. PHONE NUMBER WITH COUNTRY CODE (CRITICAL):
-   - Always output the phone number with its international dialing prefix (e.g. '+57 300 123 4567' for Colombia, '+1 555 123 4567' for USA). If the Base Resume contains a Colombian number without +57, prepend +57. Never strip the country code.
-13. PROJECTS WITH LINKS:
-   - Each project entry may include an optional 'url' field (live demo or website URL) and/or an optional 'github_url' field (GitHub repository URL). Preserve these links exactly as found in the Base Resume. If not present, omit the field or set it to empty string.
+   - Categorize skills strictly according to the candidate's actual profession/domain and the target role (e.g. tech vs non-tech).
+11. CANDIDATE LOCATION & PHONE FORMAT:
+   - City and Country (e.g., 'Medellín, Colombia') and phone number with international dialing prefix.
+12. PROJECTS & LINKS:
+   - Support links for live demos, GitHub, and portfolio websites.
+   - NEVER put the exact same GitHub URL into both 'url' and 'github_url'. 'url' is strictly for live demo sites (e.g. Vercel/Netlify); if no live site exists, leave 'url': ''.
+13. ATS ADVANCED REFINEMENT & ANTI-SPAM RULES (ats_optimization):
+   - AVOID KEYWORD STUFFING: Do NOT repeat the exact same tool or term in more than 2 sections without varying the phrasing/context. Avoid robotic repetition of niche internal names (e.g. generalise or group obscure internal tool names like "Gentle AI" -> "orquestadores de agentes IA").
+   - VERIFY TOOL NAMES & RELEVANCE: Ensure every tool or orchestrator mentioned is recognizable, real, and relevant to the target role.
+   - DATE CONSISTENCY & ONGOING ROLES: If a degree or job started in the past or current month (e.g. "2026-08" when current date is September 2026) and is ongoing, format it as "2026-08 - Actualidad" (Spanish) or "2026-08 - Present" (English). ONLY use "Inicio: YYYY-MM" if the start date is strictly in a future month that has not arrived yet.
+   - PROFESSIONAL HEADLINE MATCH: Integrate a clear professional headline/title right under the name or within the summary header matching the target role (e.g., "Fullstack Developer | Python · React · FastAPI").
+   - SEPARATE CERTIFICATIONS: Clearly distinguish between "Certificaciones completadas" and "Certificaciones en curso".
+   - VARY PHRASING: Redact mentions of skills/tools using synonyms and varied context across summary, experience, and projects to avoid triggering AI-generated text detectors or spam filters.
+   - TARGET ROLE ALIGNMENT IN PREVIOUS ROLES: Reflect the target job title/role (or close industry equivalent) in previous experience aliases where applicable (e.g., adding "Fullstack Developer" if formal title was generic).
+14. KEYWORD GAP DETECTION & AUTOMATIC SKILL ENRICHMENT (keyword_gap_detection):
+   - Detect every technology, framework, tool, protocol, or testing library mentioned in Experience or Projects (e.g. FastAPI, Playwright, SSE, Ant Design, Cloudflare, CI/CD, REST APIs / Swagger-OpenAPI, Jest, JUnit, Cypress, Selenium, Android/Java) that is NOT listed in the `skills` array.
+   - AUTOMATICALLY add these exact technical keyword strings to the `skills` array under their proper category (e.g. "Lenguajes & Frameworks", "DevOps & Automatización", "Bases de Datos & Cloud", "Comunicación & Integraciones").
+   - ATS parsers match exact strings: never leave a tool mentioned in projects/experience out of the candidate's explicit `skills` list.
+15. HUMAN BURSTINESS & SYNTACTIC DIVERSITY (anti_ai_detector_burstiness):
+   - CRITICAL TO PASS AI DETECTORS: Do NOT repeat the exact same sentence pattern (e.g., "Desarrollé [X] mediante [Y] logrando [Z]") across project bullet points or experience entries. Monotonous repetition of syntactic structure drops burstiness/perplexity and triggers AI content detectors.
+   - MANDATORY STRUCTURAL ROTATION: Alternate bullet point structures across projects and roles using 4 distinct narrative patterns:
+     * Pattern A (Outcome-First): "Incrementé la velocidad de respuesta en 40% al refactorizar los endpoints..."
+     * Pattern B (Challenge/Context-First): "Ante cuellos de botella en el procesamiento masivo de datos, diseñé una arquitectura de colas..."
+     * Pattern C (Action/Architectural-First): "Lideré el despliegue del sistema distribuido sobre AWS, reduciendo la latencia a menos de 100ms..."
+     * Pattern D (Tool/Solution-First): "Mediante FastAPI y PostgreSQL, automaticé los flujos de facturación eliminando 15 horas semanales de trabajo manual..."
+   - Vary sentence length and rhythmic cadence naturally (some short 1-line statements, some 2-line contextual achievements) to emulate authentic human authorship.
+16. SEPARATE ACHIEVEMENTS VS IN-PROGRESS FORMATION (split_achievements_vs_inprogress):
+   - Keep ONLY completed, verifiable certifications or honors in the `achievements` array (e.g. "Diplomado Big Data y BI", "Curso Ágiles Design Thinking y Scrum").
+   - Move all certifications or degrees currently in progress (e.g., "AZ-900", "AWS Cloud Practitioner (en curso)") out of `achievements` and place them either in `education` or as a category in `skills` labeled "Formación Complementaria (En Curso)".
+17. SYNTACTIC VARIATION IN PROJECTS & EXPERIENCE (vary_bullet_syntax):
+   - PROHIBITED: Do NOT use the exact same template "Verbo + objeto + mediante/con + tecnología... Implementé el stack con X, logrando Y en Z%" in more than 2 consecutive bullet points across projects or experience.
+   - Use problem-first openings (e.g., "Los equipos de bodega carecían de visibilidad en tiempo real; construí una plataforma con Laravel y React que..."), metric-first openings ("Reduje en 40% los costos..."), and alternate short vs long sentences between projects.
+18. NATURAL HUMAN LANGUAGE MARKERS (natural_language_markers):
+   - Introduce subtle natural human phrasing without losing professionalism.
+   - Avoid monotonous repetitive transitions like "Implementé el stack con" or starting 4 consecutive bullets with "Desarrollé".
+   - Rotate opening action phrases: "Construí", "Diseñé e implementé", "Lideré el desarrollo de", "Refactoricé", "Desplegué", "Migré".
+19. CERTIFICATION EVIDENCE & VERIFIABLE LINKS (certification_evidence_link):
+   - Whenever verifiable links or badges (Credly, LinkedIn Learning, university credentials) exist in the base text for certifications/achievements, explicitly preserve and format them (e.g. "Diplomado en Big Data y BI [Credly Badge / Link]") to maximize human credibility and pass external ATS verification.
+20. STRICT REPETITION BAN IN PROJECTS (anti_repetition_project_footprint):
+   - STRICTLY FORBIDDEN: NEVER repeat the phrase "Implementé el stack con...", "Desarrollé una...", or "Construí una..." across multiple project bullet points. Repeating identical transition phrases across projects is the #1 footprint detected by AI content checkers.
+   - MANDATORY UNIQUE NARRATIVE PER PROJECT: Every project MUST use a completely distinct opening and transition structure:
+     * Project 1 (Architectural/Innovation Opening): "Arquitecturé una plataforma de optimización de CVs basada en la orquestación de LLMs y renderizado Typst..."
+     * Project 2 (Problem/Business Opening): "Para resolver la falta de visibilidad del inventario en tiempo real, diseñé un sistema de monitoreo..."
+     * Project 3 (Technical Integration Opening): "Mediante la integración de Playwright, FastAPI y SSE, automaticé las pruebas E2E..."
+     * Project 4 (Metric/Performance Opening): "Reduje los tiempos de respuesta en 45% al implementar mecanismos de caché con Redis..."
+   - NO REPEATED WORDS OR PHRASES: Ensure zero phrase overlap or repeated opening verbs between projects to achieve high human perplexity and burstiness.
 """
-        if custom_instructions and custom_instructions.strip():
+        if custom_instructions and custom_instructions.strip() and not strict_edits_only:
             prompt += f"12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): You MUST explicitly apply the following user-selected improvements, tone humanization tips, and custom instructions above all other defaults: {custom_instructions.strip()}\n"
 
         prompt += f"""
 Target Role: {target_role if target_role else 'Not specified'}
 GitHub: {github_url if github_url else ''}
 LinkedIn: {linkedin_url if linkedin_url else ''}
-Portfolio: ''
+Portfolio: {portfolio_url if portfolio_url else ''}
 
 Base Resume:
 {resume_text}
@@ -709,7 +771,7 @@ Extracted LinkedIn Profile Data (Use to enrich and complement the Base Resume):
 {linkedin_extracted_text}
 """
 
-        effective_jd = jd.strip() if (jd and jd.strip()) else "No se especificó una oferta de trabajo concreta. Realizar optimización profesional general para ATS, destacando logros y competencias clave."
+        effective_jd = jd.strip() if (jd and jd.strip()) else "No Job Description provided. Perform a comprehensive ATS resume enhancement focused on impact, Google XYZ achievement formula (Action + Context + Measurable Result), strong action verbs, clean structure, and domain-relevant technical skills."
 
         prompt += f"""
 Job Description / Target Requirements:
@@ -730,7 +792,7 @@ Respond ONLY with a JSON object in this exact structure. The 'section_labels' fi
   "summary": "Concise 2-line summary tailored to JD...",
   "education": [{"school": "Universidad Ejemplo", "degree": "Pregrado en Psicología", "dates": "2018 - 2022", "gpa": ""}],
   "skills": [{"category": "Pruebas Psicotécnicas", "items": ["16PF", "DISC", "Wartegg", "Valanti"]}],
-  "experience": [{"company": "Empresa Ejemplo", "role": "Analista de Selección", "dates": "Ene 2023 - Presente", "points": ["Lideré procesos de selección...", "Evalué candidatos mediante..."]}],
+  "experience": [{"company": "Empresa Ejemplo", "role": "Analista de Selección", "dates": "2023-01 - Actualidad", "points": ["Lideré procesos de selección...", "Evalué candidatos mediante..."]}],
   "projects": [{"name": "Project Name", "dates": "2025-01", "url": "", "github_url": "https://github.com/user/repo", "points": ["Built X using Y..."]}],
   "achievements": [],
   "section_labels": {
@@ -739,12 +801,15 @@ Respond ONLY with a JSON object in this exact structure. The 'section_labels' fi
     "skills": "Skills",
     "experience": "Work Experience",
     "projects": "Projects",
-    "achievements": "Achievements"
+    "achievements": "Achievements",
+    "portfolio": "Portfolio"
   }
 }
 IMPORTANT:
-1. All dates in 'dates' fields (education, experience, projects) MUST be formatted using standard numbers or 'present' (e.g. "2019-02 - 2023-08", "2023-02 - present", or "2019 - 2023"). Do NOT use month abbreviations in Spanish (like 'Feb', 'Ago', 'Ene') or Spanish words like 'Presente' in the date strings.
-2. If the JD is in Spanish, the section_labels values must be in Spanish (e.g. 'Resumen Profesional', 'Educación', 'Habilidades', 'Experiencia Laboral', 'Proyectos', 'Logros'). If the JD is in English, they must be in English as shown above.
+1. DATE FORMATTING & LOCALIZATION (CRITICAL FOR ATS PARSING):
+   - Active / Ongoing Studies & Jobs: If a job or degree started in the past or current date (e.g. "2026-08" when current date is September 2026) and is ongoing, format it as "2026-08 - Actualidad" (Spanish) or "2026-08 - Present" (English).
+   - Future Studies & Jobs ONLY: ONLY use "Inicio: YYYY-MM" if the start date is strictly in a future month that has not arrived yet. Do NOT use "Presente" or "Hoy".
+2. If the JD is in Spanish, the section_labels values must be in Spanish (e.g. 'Resumen Profesional', 'Educación', 'Habilidades', 'Experiencia Laboral', 'Proyectos', 'Logros', 'Portafolio'). If the JD is in English, they must be in English ('Professional Summary', 'Education', 'Skills', 'Work Experience', 'Projects', 'Achievements', 'Portfolio').
 """
 
         
@@ -798,9 +863,12 @@ IMPORTANT:
             if not li_val or any(dummy in li_val.lower() for dummy in ["linkedin.com/in/janedoe", "linkedin.com/in/...", "example", "none"]):
                 parsed_data["linkedin"] = ""
 
-        port_val = str(parsed_data.get("portfolio", "")).strip()
-        if not port_val or any(dummy in port_val.lower() for dummy in ["janedoe.com", "example.com", "none"]):
-            parsed_data["portfolio"] = ""
+        if portfolio_url and portfolio_url.strip():
+            parsed_data["portfolio"] = portfolio_url.strip()
+        elif not portfolio_url:
+            port_val = str(parsed_data.get("portfolio", "")).strip()
+            if not port_val or any(dummy in port_val.lower() for dummy in ["janedoe.com", "example.com", "none"]):
+                parsed_data["portfolio"] = ""
 
 
         # Extract localized section headings from LLM output (fallback to English if missing)
@@ -866,12 +934,14 @@ async def generate_resume(
     target_role: Optional[str] = Form(None),
     github_url: Optional[str] = Form(None),
     linkedin_url: Optional[str] = Form(None),
+    portfolio_url: Optional[str] = Form(None),
     custom_instructions: Optional[str] = Form(None),
     base_resume_filename: Optional[str] = Form(None),
     theme: Optional[str] = Form("sb2nov"),
     fit_single_page: Optional[bool] = Form(False),
     page_break_section: Optional[str] = Form(None),
-    extract_linkedin_info: Optional[bool] = Form(False)
+    extract_linkedin_info: Optional[bool] = Form(False),
+    strict_edits_only: Optional[bool] = Form(False)
 ):
     # Save the original uploaded file temporarily (used as fallback if no base_resume_filename)
     temp_dir = tempfile.gettempdir()
@@ -886,12 +956,14 @@ async def generate_resume(
             target_role, 
             github_url, 
             linkedin_url, 
+            portfolio_url,
             custom_instructions, 
             base_resume_filename, 
             theme,
             fit_single_page or False,
             page_break_section,
-            extract_linkedin_info or False
+            extract_linkedin_info or False,
+            strict_edits_only or False
         ),
         media_type="text/event-stream"
     )

@@ -203,7 +203,7 @@ def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = 
             proj_github = item.get("github_url", "").strip()
             if proj_url:
                 links.append(proj_url)
-            if proj_github:
+            if proj_github and proj_github != proj_url:
                 links.append(proj_github)
             if links:
                 highlights = [" | ".join(links)] + highlights
