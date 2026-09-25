@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 from typing import Optional
-from fastapi import FastAPI, UploadFile, Form, BackgroundTasks
+from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -15,6 +15,7 @@ import time
 
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
+from language import detect_language
 
 load_dotenv()
 
@@ -616,25 +617,87 @@ Genera un resumen en Markdown con la información disponible. Indica claramente 
             "⚠️ No fue posible extraer datos. Configura LINKEDIN_EMAIL y LINKEDIN_PASSWORD en el .env para extracción completa."
         )
 
+def _build_language_override(target_language: str, source_language: str) -> str:
+    """
+    Build the LANGUAGE OVERRIDE block prepended to the system prompt when
+    force_language is set. Priority is absolute over rule 8 (LANGUAGE MATCHING).
+    """
+    return f"""
+LANGUAGE OVERRIDE (ABSOLUTE PRIORITY — overrides rule 8 LANGUAGE MATCHING):
+- The user explicitly requested the output CV in English ({target_language}).
+- IGNORE the source JD language and the base resume source language ({source_language}).
+- Produce ALL text fields (summary, experience[*].points, projects[*].points, skills[*].category,
+  skills[*].items, education[*].degree, achievements[*], section_labels) in ENGLISH.
+- Never mix languages in the same document.
+
+DO NOT TRANSLATE (keep verbatim):
+- Brand names: BBVA, Mercadona, Carrefour, Google, Microsoft, Amazon, Mercado Libre, Rappi, Glovo, etc.
+- Product names: iPhone, Android, RenderCV, Typst, Playwright, FastAPI, LangGraph, LangChain, etc.
+- Tech stack: React, Python, TypeScript, JavaScript, FastAPI, AWS, Docker, Kubernetes, PostgreSQL,
+  Postgres, Redis, GraphQL, REST, OpenAI, Gemini, Vite, Tailwind, shadcn/ui, etc.
+  NEVER use Spanish variants (e.g. "Reaccionar", "Pitón") — always English canonical names.
+- Proper nouns (cities): keep in local script (Medellín, Bogotá, Madrid, Sevilla, A Coruña).
+  Do NOT anglicise accents.
+- Proper nouns (countries): use EN convention (España → Spain, México → Mexico; Colombia and
+  Argentina stay the same in EN).
+- Certification credential codes: AZ-900, AWS Cloud Practitioner, PMP, CISSP, etc. Keep verbatim.
+
+MUST TRANSLATE / ADAPT:
+- Honorifics: Sr. / Sra. → OMIT (do not render).
+- Ongoing dates: "Actualmente", "Presente", "Hoy" → "Present".
+- Spanish vocational training degrees:
+    * "Ciclo Formativo de Grado Superior" / "CFGS" → "Higher Vocational Training".
+    * "Formación Profesional" / "FP" (generic) → "Vocational Degree".
+    * "Grado Medio" → "Vocational Degree (Intermediate level)".
+    * "Grado Superior" → "Higher Vocational Training".
+- National IDs:
+    * "DNI" → "National ID (DNI)".
+    * "Cédula de ciudadanía" → "National ID (Cédula)".
+    * "Cédula de identidad" → "National ID".
+    * "NIE" → "Foreign Resident ID (NIE)".
+- Driver's license: "Carnet de conducir B" / "Licencia de conducir B" → "Driver's license (Category B)".
+- Phone numbers: keep the original digits verbatim. Do NOT invent a +1 US prefix when the digits
+  are Spanish/Colombian/etc. — the existing sanitize_phone in render_service.py handles prefix.
+
+ANTI-AI REAFFIRMATION (applies EQUALLY to English output):
+- burstiness, vary_bullet_syntax, anti_repetition_project_footprint, natural_language_markers
+  (rules 15, 17, 18, 20) continue to apply with equal force.
+- DO NOT substitute the Spanish pattern examples with English AI clichés:
+  NEVER use: "spearheaded", "delved into", "tackled", "orchestrated synergy",
+  "navigated complexities", "synergized", "leveraged stakeholder value", "testament to".
+- USE the four EN-native narrative patterns instead, varied across consecutive bullets:
+  * Pattern A (Outcome-First): "Reduced response latency by 40% by refactoring the FastAPI endpoints..."
+  * Pattern B (Challenge-First): "Faced with 8s p99 latency on the checkout flow, I rebuilt the queue layer with Redis Streams..."
+  * Pattern C (Action-First): "Led the migration of the legacy monolith to Kubernetes, decommissioning 12 services over 4 months..."
+  * Pattern D (Tool-First): "Through Playwright + FastAPI + SSE, automated E2E coverage for 40 critical user paths..."
+- Vary sentence length and cadence: mix 1-line statements with 2-line contextual achievements.
+
+SECTION LABELS:
+- section_labels MUST be in English: "Professional Summary", "Education", "Skills",
+  "Work Experience", "Projects", "Achievements", "Portfolio".
+"""
+
+
 async def generation_pipeline(
-    file_path: str, 
-    jd: Optional[str] = None, 
-    target_role: Optional[str] = None, 
-    github_url: Optional[str] = None, 
-    linkedin_url: Optional[str] = None, 
-    portfolio_url: Optional[str] = None, 
-    custom_instructions: Optional[str] = None, 
-    base_resume_filename: Optional[str] = None, 
+    file_path: str,
+    jd: Optional[str] = None,
+    target_role: Optional[str] = None,
+    github_url: Optional[str] = None,
+    linkedin_url: Optional[str] = None,
+    portfolio_url: Optional[str] = None,
+    custom_instructions: Optional[str] = None,
+    base_resume_filename: Optional[str] = None,
     theme: Optional[str] = "sb2nov",
     fit_single_page: bool = False,
     page_break_section: Optional[str] = None,
     extract_linkedin_info: bool = False,
-    strict_edits_only: bool = False
+    strict_edits_only: bool = False,
+    force_language: Optional[str] = None
 ):
     try:
         # Reload .env dynamically so any new API Key is immediately picked up
         load_dotenv(override=True)
-        
+
         yield f"data: {json.dumps({'step': 'Validating Input', 'progress': 10})}\n\n"
         await asyncio.sleep(0.5)
 
@@ -650,6 +713,21 @@ async def generation_pipeline(
                 print(f"[WARN] ⚠️ base_resume_filename '{base_resume_filename}' not found in OUTPUT_DIR, falling back to original upload.")
                 print(f"[WARN]    Expected path: {candidate_path}")
 
+        # Language-detection guardrail (REQ-3): if the user asked for English but the
+        # source CV is already English, short-circuit before any LLM call so the
+        # expensive translation round-trip is never executed.
+        source_language = "unknown"
+        if force_language == "en":
+            detection_path = effective_file_path
+            try:
+                source_language = detect_language(extract_text(detection_path))
+            except Exception as detect_err:
+                print(f"[WARN] Language detection failed for '{detection_path}': {detect_err}. Falling back to 'unknown'.")
+                source_language = "unknown"
+            print(f"[INFO] force_language='{force_language}', detected source_language='{source_language}', detection_path='{detection_path}'")
+            if source_language == "en":
+                raise ValueError("E_CV_ALREADY_ENGLISH::CV already in English")
+
         yield f"data: {json.dumps({'step': 'Extracting Text from Resume', 'progress': 20})}\n\n"
         resume_text = extract_text(effective_file_path)
 
@@ -662,7 +740,14 @@ async def generation_pipeline(
         
         if strict_edits_only:
             user_requested_changes = custom_instructions.strip() if (custom_instructions and custom_instructions.strip()) else (jd.strip() if (jd and jd.strip()) else "No explicit changes specified.")
+            language_override_block = ""
+            if force_language == "en":
+                language_override_block = _build_language_override(
+                    target_language="en",
+                    source_language=source_language,
+                )
             prompt = f"""
+{language_override_block}
 You are an expert resume editor operating strictly in CONSERVATIVE SURGICAL EDIT MODE.
 Your task is to take the provided Base Resume and perform ONLY the explicit change(s) requested by the user below.
 
@@ -677,7 +762,14 @@ STRICT SURGICAL EDIT RULES (ABSOLUTE HIGHEST PRIORITY — OVERRIDES ALL OTHER DE
 5. DATE CONSISTENCY: Format ongoing roles/studies strictly as "YYYY-MM - Actualidad" (Spanish) or "YYYY-MM - Present" (English).
 """
         else:
+            language_override_block = ""
+            if force_language == "en":
+                language_override_block = _build_language_override(
+                    target_language="en",
+                    source_language=source_language,
+                )
             prompt = f"""
+{language_override_block}
 You are a professional technical recruiter and resume writer specialized in ATS optimization.
 You are provided with a 'Base Resume' of a candidate and a target 'Job Description' (JD).
 Your goal is to tailor the candidate's actual experience to align perfectly with the target role and achieve maximum ATS scores on platforms like CompuTrabajo, Workday, LinkedIn, and Greenhouse.
@@ -918,8 +1010,23 @@ IMPORTANT:
                     browser.close()
 
             await asyncio.to_thread(render_pdf_sync)
-            
-        yield f"data: {json.dumps({'step': 'Finished', 'progress': 100, 'download_url': f'/api/download/{output_filename}'})}\n\n"
+
+        # Auto re-audit (REQ-4): when force_language='en' triggered the translation
+        # path, internally invoke the ATS audit against the freshly rendered PDF so
+        # the user sees new ats_score / ai_detection_score in the same response.
+        # Graceful degradation: audit failure leaves audit_scores=None (additive
+        # payload keeps back-compat for old clients that only read download_url).
+        audit_scores = None
+        translation_meta = None
+        if force_language == "en":
+            yield f"data: {json.dumps({'step': 'Auditing translated CV', 'progress': 95})}\n\n"
+            try:
+                audit_scores = await _run_internal_audit(output_path, jd=jd, custom_instructions=custom_instructions)
+            except Exception as audit_err:
+                print(f"[WARN] Auto re-audit failed: {audit_err}")
+            translation_meta = {"source_language": source_language, "target_language": "en", "forced": True}
+
+        yield f"data: {json.dumps({'step': 'Finished', 'progress': 100, 'download_url': f'/api/download/{output_filename}', 'audit_scores': audit_scores, 'translation': translation_meta})}\n\n"
         
     except Exception as e:
         import traceback
@@ -927,9 +1034,77 @@ IMPORTANT:
         traceback.print_exc()
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
+
+async def _run_internal_audit(pdf_path: str, jd: Optional[str], custom_instructions: Optional[str]) -> dict:
+    """
+    Re-invoke the ATS audit internally against the freshly rendered PDF.
+    Reuses the same prompt body as POST /api/analyze-ats (lines ~988-1020).
+    Returns the parsed dict (already with defensive defaults).
+    """
+    resume_text = extract_text(pdf_path)
+    effective_jd = jd.strip() if (jd and jd.strip()) else (
+        custom_instructions.strip() if (custom_instructions and custom_instructions.strip()) else
+        "Optimización general y mejoramiento de calidad del CV"
+    )
+    prompt = f"""
+You are an expert Applicant Tracking System (ATS) auditor and recruitment AI analyst (like CompuTrabajo, Workday, and Greenhouse ATS screeners).
+Your task is to analyze the candidate's Base Resume against the target Job Description (JD) or General Professional Standards if no JD is provided.
+
+Perform 3 comprehensive evaluations:
+1. ATS MATCH SCORE (%): Calculate direct keyword and skill alignment between the Resume and Job Description/Professional Standards.
+2. AI WRITING DETECTION SCORE (%): Analyze the writing style of the resume. Identify if it sounds natural/human or overly robotic/AI-generated (detect AI buzzwords like 'spearheaded revolutionary synergy', 'delved into', 'testament to', etc.). Provide a risk score (0-20% = Low AI Risk/Natural, 21-50% = Medium, 51-100% = High AI Risk) and advice to humanize the tone.
+3. ATS FORMATTING & KEYWORD CHECK: Extract matched keywords, missing keywords, and actionable tips for ranking higher on platforms like CompuTrabajo.
+
+STRICT INSTRUCTION: Detect the language of the Job Description/Resume (e.g. Spanish). Generate ALL feedback, tips, and verdicts strictly in that language.
+
+Respond ONLY with a JSON object in this exact structure:
+{{
+  "ats_score": 85,
+  "match_level": "Alto",
+  "matched_keywords": ["Python", "FastAPI", "React", "SQL"],
+  "missing_keywords": ["Docker", "Pytest", "CI/CD"],
+  "ai_detection_score": 15,
+  "ai_tone_verdict": "Bajo Riesgo de IA - Redacción Humana y Natural",
+  "ai_humanize_tips": ["El lenguaje es directo, conciso y fácil de leer por reclutadores."],
+  "ats_formatting_score": 95,
+  "actionable_tips": [
+    "Añade la palabra clave 'Docker' si posees conocimientos en contenedores.",
+    "Destaca métricas de rendimiento en tus experiencias clave."
+  ]
+}}
+
+Base Resume:
+{resume_text}
+
+Job Description / Requirements:
+{effective_jd}
+"""
+    content = await call_llm_api(prompt)
+
+    clean_content = content.strip()
+    if "```" in clean_content:
+        import re as _re
+        match = _re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
+        if match:
+            clean_content = match.group(1)
+
+    try:
+        parsed = json.loads(clean_content)
+    except Exception:
+        parsed = json.loads(content)
+
+    if isinstance(parsed, list) and len(parsed) > 0:
+        parsed = parsed[0]
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Internal audit response was not a dict")
+
+    return parsed
+
+
 @app.post("/api/generate")
 async def generate_resume(
-    file: UploadFile, 
+    file: UploadFile,
     jd: Optional[str] = Form(None),
     target_role: Optional[str] = Form(None),
     github_url: Optional[str] = Form(None),
@@ -941,29 +1116,39 @@ async def generate_resume(
     fit_single_page: Optional[bool] = Form(False),
     page_break_section: Optional[str] = Form(None),
     extract_linkedin_info: Optional[bool] = Form(False),
-    strict_edits_only: Optional[bool] = Form(False)
+    strict_edits_only: Optional[bool] = Form(False),
+    force_language: Optional[str] = Form(None)
 ):
+    # Validate force_language early so unsupported values are rejected with HTTP 422
+    # before any upload work or LLM call happens.
+    if force_language is not None and force_language not in {"en"}:
+        raise HTTPException(
+            status_code=422,
+            detail=f"force_language must be 'en' or omitted, got {force_language!r}"
+        )
+
     # Save the original uploaded file temporarily (used as fallback if no base_resume_filename)
     temp_dir = tempfile.gettempdir()
     file_path = os.path.join(temp_dir, file.filename)
     with open(file_path, "wb") as f:
          f.write(await file.read())
-         
+
     return StreamingResponse(
         generation_pipeline(
-            file_path, 
-            jd, 
-            target_role, 
-            github_url, 
-            linkedin_url, 
+            file_path,
+            jd,
+            target_role,
+            github_url,
+            linkedin_url,
             portfolio_url,
-            custom_instructions, 
-            base_resume_filename, 
+            custom_instructions,
+            base_resume_filename,
             theme,
             fit_single_page or False,
             page_break_section,
             extract_linkedin_info or False,
-            strict_edits_only or False
+            strict_edits_only or False,
+            force_language,
         ),
         media_type="text/event-stream"
     )
