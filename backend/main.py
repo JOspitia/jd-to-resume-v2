@@ -1,4 +1,14 @@
 import os
+import sys
+import io
+
+# Force UTF-8 stdout/stderr on Windows so print() with non-ASCII chars
+# (emojis, accented chars, etc.) does not raise UnicodeEncodeError against
+# the default cp1252 codec.
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+
 import json
 import asyncio
 from typing import Optional
@@ -12,6 +22,7 @@ from jinja2 import Template
 from playwright.sync_api import sync_playwright
 import tempfile
 import time
+import re
 
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
@@ -189,7 +200,163 @@ HTML_TEMPLATE = """
 
 def extract_text(file_path: str) -> str:
     doc = fitz.open(file_path)
-    return " ".join([page.get_text() for page in doc])
+    # Concatenate plain text plus all /Link annotations so that PDF hyperlinks
+    # that render as bare labels (e.g. "LinkedIn") are also surfaced as their
+    # real URLs in the extracted text. The LLM and our header extractor can
+    # then see them.
+    text_parts = []
+    for page in doc:
+        text_parts.append(page.get_text())
+        try:
+            for link in page.get_links():
+                uri = link.get("uri", "").strip()
+                if uri:
+                    text_parts.append(" " + uri)
+        except Exception:
+            # Some PDFs have malformed link structures; skip silently.
+            pass
+    extracted = " ".join(text_parts)
+    # Debug: log any linked URLs we found so the user can verify their PDF
+    # actually has the /Link annotations we expect.
+    urls_found = []
+    for page in doc:
+        try:
+            for link in page.get_links():
+                uri = link.get("uri", "").strip()
+                if uri:
+                    urls_found.append(uri)
+        except Exception:
+            pass
+    if urls_found:
+        print(f"[EXTRACT] PDF /Link URIs found ({len(urls_found)}): {urls_found[:10]}")
+    return extracted
+
+
+# --- Header extraction from a Base Resume ----------------------------------------
+# Pulls contact fields out of the raw PDF text so they survive regeneration even
+# when the user does not retype them in the form. Uses targeted regex patterns
+# that bias toward precision over recall — a missed field is better than a wrong
+# one, since the LLM can still see the full text in the prompt and the user can
+# correct any false negative manually.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PHONE_RE = re.compile(r"(\+?\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}")
+_GITHUB_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/[A-Za-z0-9._-]+/?", re.IGNORECASE)
+_LINKEDIN_RE = re.compile(r"(?:https?://)?(?:www\.)?linkedin\.com/in/[A-Za-z0-9._-]+/?", re.IGNORECASE)
+_PORTFOLIO_RE = re.compile(r"(?:https?://)?(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)?\.(?:com|net|org|io|dev|me|co|app|page|site|xyz|store|portfolio)(?:/[A-Za-z0-9._~:/?#@!$&'()*+,;=-]*)?", re.IGNORECASE)
+# Common email providers that look like domains but are not portfolio sites.
+# When matching _PORTFOLIO_RE, exclude any candidate whose host matches one of these.
+_PORTFOLIO_EXCLUDE_DOMAINS = {
+    "gmail.com", "yahoo.com", "yahoo.es", "hotmail.com", "outlook.com",
+    "live.com", "icloud.com", "me.com", "aol.com", "protonmail.com",
+    "mail.com", "zoho.com", "yandex.com", "yandex.ru",
+}
+
+
+def _extract_header_from_pdf_text(resume_text: str) -> dict:
+    """
+    Best-effort extraction of contact fields from the Base Resume plain text.
+    Returns a dict with keys: email, phone, github, linkedin, portfolio,
+    has_placeholder_github, has_placeholder_linkedin, has_placeholder_portfolio.
+    Each value is a string (possibly empty) — callers decide how to merge with
+    form-provided values. The *_placeholder booleans flag words like "GitHub"
+    or "LinkedIn" appearing as bare tokens (no URL) so the UI can warn the user
+    that the resume had placeholders but no real URLs were found.
+    """
+    if not resume_text:
+        return {
+            "email": "", "phone": "", "github": "", "linkedin": "", "portfolio": "",
+            "has_placeholder_github": False, "has_placeholder_linkedin": False, "has_placeholder_portfolio": False,
+        }
+
+    # Email: prefer the first match that doesn't look like an example/noreply
+    email_match = ""
+    for m in _EMAIL_RE.finditer(resume_text):
+        candidate = m.group(0)
+        if "example" in candidate.lower() or "noreply" in candidate.lower():
+            continue
+        email_match = candidate
+        break
+
+    # Phone: prefer + prefix and 10+ digits
+    phone_match = ""
+    for m in _PHONE_RE.finditer(resume_text):
+        candidate = m.group(0)
+        digits = re.sub(r"\D", "", candidate)
+        if len(digits) >= 10:
+            phone_match = candidate.strip()
+            break
+
+    github_match = _GITHUB_RE.search(resume_text)
+    linkedin_match = _LINKEDIN_RE.search(resume_text)
+
+    # Portfolio: scan URL-like strings, exclude github/linkedin/email domains
+    portfolio_match = ""
+    seen_domains = set(_PORTFOLIO_EXCLUDE_DOMAINS)
+    if github_match:
+        seen_domains.add("github.com")
+    if linkedin_match:
+        seen_domains.add("linkedin.com")
+    # Always exclude the email's domain — it will appear in the text as
+    # `something@gmail.com` and our regex will match the bare `gmail.com`.
+    if email_match and "@" in email_match:
+        email_domain = email_match.split("@", 1)[1].strip().lower()
+        if email_domain:
+            seen_domains.add(email_domain)
+    print(f"[EXTRACT] portfolio exclusion set: {sorted(seen_domains)}")
+    for m in _PORTFOLIO_RE.finditer(resume_text):
+        candidate = m.group(0)
+        candidate_lower = candidate.lower()
+        # Pull the host portion (between optional scheme and first /)
+        host_match = re.match(r"(?:https?://)?(?:www\.)?([^/]+)", candidate_lower)
+        host = host_match.group(1) if host_match else candidate_lower
+        # Filter out matches that are part of an email address (preceded by '@' or '.' or alphanumeric)
+        match_start = m.start()
+        if match_start > 0:
+            char_before = resume_text[match_start - 1]
+            if char_before in "@.0123456789abcdefghijklmnopqrstuvwxyz":
+                # Part of a longer string (probably email or path). Skip.
+                continue
+        if host in seen_domains:
+            print(f"[EXTRACT] portfolio skip (excluded domain): '{candidate}' host='{host}'")
+            continue
+        if any(skip in candidate_lower for skip in ["example.com", "test.com", "yourname", "placeholder"]):
+            print(f"[EXTRACT] portfolio skip (skip word): '{candidate}'")
+            continue
+        # Normalize to https:// if no scheme
+        if not candidate_lower.startswith("http"):
+            candidate = "https://" + candidate
+        print(f"[EXTRACT] portfolio MATCHED: '{candidate}' (host='{host}')")
+        portfolio_match = candidate
+        break
+
+    # Detect placeholder words: a line containing only "LinkedIn | GitHub | Portafolio"
+    # or similar where each platform is just a token, not a URL. We flag them so
+    # the UI can warn the user to fill the form.
+    has_placeholder_github = False
+    has_placeholder_linkedin = False
+    has_placeholder_portfolio = False
+    if not github_match:
+        # Look for the word "github" alone in a header-ish context (first 5 lines).
+        # Use word boundary + not part of "github.io" or similar domains.
+        first_lines = "\n".join(resume_text.split("\n")[:8])
+        has_placeholder_github = bool(re.search(r"\bgithub\b", first_lines, re.IGNORECASE)) and not github_match
+    if not linkedin_match:
+        first_lines = "\n".join(resume_text.split("\n")[:8])
+        has_placeholder_linkedin = bool(re.search(r"\blinkedin\b", first_lines, re.IGNORECASE)) and not linkedin_match
+    if not portfolio_match:
+        first_lines = "\n".join(resume_text.split("\n")[:8])
+        has_placeholder_portfolio = bool(re.search(r"\bportafolio\b|\bportfolio\b", first_lines, re.IGNORECASE)) and not portfolio_match
+
+    return {
+        "email": email_match,
+        "phone": phone_match,
+        "github": github_match.group(0) if github_match else "",
+        "linkedin": linkedin_match.group(0) if linkedin_match else "",
+        "portfolio": portfolio_match,
+        "has_placeholder_github": has_placeholder_github,
+        "has_placeholder_linkedin": has_placeholder_linkedin,
+        "has_placeholder_portfolio": has_placeholder_portfolio,
+    }
 
 class GeminiResumeOutput(BaseModel):
     name: str = Field(description="Full Name")
@@ -619,8 +786,12 @@ Genera un resumen en Markdown con la información disponible. Indica claramente 
 
 def _build_language_override(target_language: str, source_language: str) -> str:
     """
-    Build the LANGUAGE OVERRIDE block prepended to the system prompt when
+    Build the LANGUAGE OVERRIDE block prepended AND appended to the system prompt when
     force_language is set. Priority is absolute over rule 8 (LANGUAGE MATCHING).
+
+    The block is intentionally aggressive: it ignores the JD language even if the JD
+    is in Spanish, because the user explicitly requested a forced translation via
+    the Translate to English button.
     """
     return f"""
 LANGUAGE OVERRIDE (ABSOLUTE PRIORITY — overrides rule 8 LANGUAGE MATCHING):
@@ -629,6 +800,7 @@ LANGUAGE OVERRIDE (ABSOLUTE PRIORITY — overrides rule 8 LANGUAGE MATCHING):
 - Produce ALL text fields (summary, experience[*].points, projects[*].points, skills[*].category,
   skills[*].items, education[*].degree, achievements[*], section_labels) in ENGLISH.
 - Never mix languages in the same document.
+- Even if the JD is in Spanish, English wins. Even if rule 8 says otherwise, this wins.
 
 DO NOT TRANSLATE (keep verbatim):
 - Brand names: BBVA, Mercadona, Carrefour, Google, Microsoft, Amazon, Mercado Libre, Rappi, Glovo, etc.
@@ -694,6 +866,17 @@ async def generation_pipeline(
     strict_edits_only: bool = False,
     force_language: Optional[str] = None
 ):
+    """
+    The end-to-end generation pipeline. Returns an SSE stream of progress events and
+    ends with a `Finished` event containing the download URL.
+
+    When `force_language='en'`, prepends AND appends a LANGUAGE OVERRIDE block to the
+    system prompt so the output CV is generated in English regardless of the source
+    JD language. See _build_language_override for the exact wording.
+    """
+    if force_language:
+        print(f"[TRANSLATE] force_language='{force_language}' — LANGUAGE OVERRIDE will be applied to system prompt (both preamble and tail).")
+    print(f"[INPUT] github_url='{github_url}', linkedin_url='{linkedin_url}', portfolio_url='{portfolio_url}' (received from frontend form)")
     try:
         # Reload .env dynamically so any new API Key is immediately picked up
         load_dotenv(override=True)
@@ -731,6 +914,25 @@ async def generation_pipeline(
         yield f"data: {json.dumps({'step': 'Extracting Text from Resume', 'progress': 20})}\n\n"
         resume_text = extract_text(effective_file_path)
 
+        # Extract contact header from the Base Resume so it survives regeneration
+        # even when the user does not retype it in the form.
+        extracted_header = _extract_header_from_pdf_text(resume_text)
+        effective_github = (github_url.strip() if github_url and github_url.strip() else extracted_header["github"])
+        effective_linkedin = (linkedin_url.strip() if linkedin_url and linkedin_url.strip() else extracted_header["linkedin"])
+        effective_portfolio = (portfolio_url.strip() if portfolio_url and portfolio_url.strip() else extracted_header["portfolio"])
+        print(f"[HEADER] github='{effective_github or '(empty)'}', linkedin='{effective_linkedin or '(empty)'}', portfolio='{effective_portfolio or '(empty)'}', email='{extracted_header['email'] or '(empty)'}', phone='{extracted_header['phone'] or '(empty)'}'")
+        # Warn if the PDF had placeholder tokens (e.g. "LinkedIn") but no URL was found
+        # and the user did not provide one in the form. CV will be missing that link.
+        missing_placeholders = []
+        if extracted_header["has_placeholder_github"] and not effective_github:
+            missing_placeholders.append("github")
+        if extracted_header["has_placeholder_linkedin"] and not effective_linkedin:
+            missing_placeholders.append("linkedin")
+        if extracted_header["has_placeholder_portfolio"] and not effective_portfolio:
+            missing_placeholders.append("portfolio")
+        if missing_placeholders:
+            print(f"[HEADER] WARN: PDF had placeholder tokens but no URLs found for: {', '.join(missing_placeholders)}. User should fill the form with real URLs.")
+
         linkedin_extracted_text = ""
         if extract_linkedin_info and linkedin_url and linkedin_url.strip():
             yield f"data: {json.dumps({'step': 'Extrayendo datos del perfil de LinkedIn...', 'progress': 35})}\n\n"
@@ -760,6 +962,7 @@ STRICT SURGICAL EDIT RULES (ABSOLUTE HIGHEST PRIORITY — OVERRIDES ALL OTHER DE
 3. Keep ALL untouched text, experience entries, dates, education, skills, and section contents 100% EXACTLY IDENTICAL to the provided Base Resume.
 4. ZERO HALLUCINATION: Do NOT invent or import any fake data, third-party companies, or fake projects.
 5. DATE CONSISTENCY: Format ongoing roles/studies strictly as "YYYY-MM - Actualidad" (Spanish) or "YYYY-MM - Present" (English).
+{language_override_block}
 """
         else:
             language_override_block = ""
@@ -795,7 +998,7 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
    - Professional, authoritative, yet authentic and human tone without sounding like a robotic generic template.
 7. ATS KEYWORD DENSITY & INTEGRATION:
    - Naturally integrate key technical and domain keywords from the target job description into bullet points and summary. Prioritize exact matches.
-8. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly.
+8. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly. [OVERRIDDEN when force_language is set — see LANGUAGE OVERRIDE block at the end of this prompt.]
 9. ATS FORMATTING COMPLIANCE: Clean, single-column layout parseable by ATS parsers. Standard section headings.
 10. DOMAIN-AWARE INTELLIGENT SKILLS CATEGORIZATION:
    - Categorize skills strictly according to the candidate's actual profession/domain and the target role (e.g. tech vs non-tech).
@@ -849,14 +1052,102 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
             prompt += f"12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): You MUST explicitly apply the following user-selected improvements, tone humanization tips, and custom instructions above all other defaults: {custom_instructions.strip()}\n"
 
         prompt += f"""
+{language_override_block}
 Target Role: {target_role if target_role else 'Not specified'}
-GitHub: {github_url if github_url else ''}
-LinkedIn: {linkedin_url if linkedin_url else ''}
-Portfolio: {portfolio_url if portfolio_url else ''}
+GitHub: {effective_github}
+LinkedIn: {effective_linkedin}
+Portfolio: {effective_portfolio}
+
+CONTACT HEADER PROTECTED FIELDS (DO NOT MODIFY, REMOVE, OR INVENT):
+- email: {extracted_header["email"]}
+- phone: {extracted_header["phone"]}
+- github: {effective_github}
+- linkedin: {effective_linkedin}
+- portfolio: {effective_portfolio}
+These values were extracted from the Base Resume and MUST be preserved verbatim
+in the output JSON. If the Base Resume text does not contain one of them, leave
+that field empty (do not invent placeholder URLs like 'github.com/janedoe').
 
 Base Resume:
 {resume_text}
 """
+        # When force_language='en', strip contradictory language rules from the prompt
+        # so the LLM cannot fall back to "use JD language" or "use Spanish verbs".
+        # We remove rule 8 (LANGUAGE MATCHING) entirely and the Spanish-verb examples
+        # in rule 5/15/17/18/20 — the LANGUAGE OVERRIDE block (preamble + tail) carries
+        # the full English-only instruction set.
+        if force_language == "en":
+            prompt = prompt.replace(
+                "8. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly. [OVERRIDDEN when force_language is set — see LANGUAGE OVERRIDE block at the end of this prompt.]",
+                "8. LANGUAGE: ABSOLUTE OVERRIDE APPLIES — see LANGUAGE OVERRIDE block. Do not detect or follow the JD language."
+            )
+            # Spanish verb examples in rule 5: force English-only examples
+            prompt = prompt.replace(
+                "Spanish: Diseñé, Implementé, Refactoricé, Despliegué, Migré, Optimicé, Automaticé, Incrementé, Reduje, Agilicé, Maximicé, Consolidé, Lideré, Construí.",
+                "English (only): Engineered, Architected, Implemented, Spearheaded, Optimized, Automated, Streamlined, Reduced, Scaled, Deployed, Refactored, Designed, Built, Led, Migrated."
+            )
+            # Replace Spanish anti-AI examples in rules 15, 17, 18, 20 with English equivalents
+            prompt = prompt.replace(
+                'e.g., "Desarrollé [X] mediante [Y] logrando [Z]")',
+                'e.g., "Engineered [X] through [Y] achieving [Z]")'
+            )
+            prompt = prompt.replace(
+                'e.g., "Incrementé la velocidad de respuesta en 40% al refactorizar los endpoints..."',
+                'e.g., "Reduced response latency by 40% through endpoint refactoring..."'
+            )
+            prompt = prompt.replace(
+                'e.g., "Ante cuellos de botella en el procesamiento masivo de datos, diseñé una arquitectura de colas..."',
+                'e.g., "Facing throughput bottlenecks in data pipelines, designed a queue-based architecture..."'
+            )
+            prompt = prompt.replace(
+                'e.g., "Lideré el despliegue del sistema distribuido sobre AWS, reduciendo la latencia a menos de 100ms..."',
+                'e.g., "Led the deployment of the distributed system on AWS, cutting latency below 100ms..."'
+            )
+            prompt = prompt.replace(
+                'e.g., "Mediante FastAPI y PostgreSQL, automaticé los flujos de facturación eliminando 15 horas semanales de trabajo manual..."',
+                'e.g., "Through FastAPI and PostgreSQL, automated billing flows eliminating 15 hours of manual work per week..."'
+            )
+            prompt = prompt.replace(
+                'e.g., "Los equipos de bodega carecían de visibilidad en tiempo real; construí una plataforma con Laravel y React que..."',
+                'e.g., "Warehouse teams lacked real-time visibility; built a Laravel + React platform that..."'
+            )
+            prompt = prompt.replace(
+                'e.g., "Reduje en 40% los costos..."',
+                'e.g., "Cut costs by 40%..."'
+            )
+            prompt = prompt.replace(
+                'e.g., "Implementé el stack con X, logrando Y en Z%"',
+                'e.g., "Built the stack with X, achieving Y in Z%"'
+            )
+            prompt = prompt.replace(
+                'e.g., "Implementé el stack con" or starting 4 consecutive bullets with "Desarrollé"',
+                'e.g., "Built the stack with" or starting 4 consecutive bullets with "Engineered"'
+            )
+            prompt = prompt.replace(
+                '"Construí", "Diseñé e implementé", "Lideré el desarrollo de", "Refactoricé", "Desplegué", "Migré"',
+                '"Built", "Designed and implemented", "Led the development of", "Refactored", "Deployed", "Migrated"'
+            )
+            prompt = prompt.replace(
+                '"Implementé el stack con...", "Desarrollé una...", or "Construí una..."',
+                '"Built the stack with...", "Developed a...", or "Engineered a..."'
+            )
+            prompt = prompt.replace(
+                '* Project 1 (Architectural/Innovation Opening): "Arquitecturé una plataforma de optimización de CVs basada en la orquestación de LLMs y renderizado Typst..."',
+                '* Project 1 (Architectural/Innovation Opening): "Architected a CV optimization platform based on LLM orchestration and Typst rendering..."'
+            )
+            prompt = prompt.replace(
+                '* Project 2 (Problem/Business Opening): "Para resolver la falta de visibilidad del inventario en tiempo real, diseñé un sistema de monitoreo..."',
+                '* Project 2 (Problem/Business Opening): "To solve the lack of real-time inventory visibility, designed a monitoring system..."'
+            )
+            prompt = prompt.replace(
+                '* Project 3 (Technical Integration Opening): "Mediante la integración de Playwright, FastAPI y SSE, automaticé las pruebas E2E..."',
+                '* Project 3 (Technical Integration Opening): "Through Playwright, FastAPI, and SSE integration, automated E2E tests..."'
+            )
+            prompt = prompt.replace(
+                '* Project 4 (Metric/Performance Opening): "Reduje los tiempos de respuesta en 45% al implementar mecanismos de caché con Redis..."',
+                '* Project 4 (Metric/Performance Opening): "Reduced response times by 45% through Redis caching mechanisms..."'
+            )
+            print(f"[TRANSLATE] ✂️ Stripped contradictory language rules from prompt (rule 8 + Spanish verb examples).")
         if linkedin_extracted_text:
             prompt += f"""
 Extracted LinkedIn Profile Data (Use to enrich and complement the Base Resume):
@@ -939,28 +1230,39 @@ IMPORTANT:
 
 
         # If user explicitly left GitHub / LinkedIn / Portfolio empty or they contain dummy placeholders, remove them
-        # User input overrides if provided
-        if github_url and github_url.strip():
-            parsed_data["github"] = github_url.strip()
-        elif not github_url:
-            # Check if LLM generated dummy or empty github
-            gh_val = str(parsed_data.get("github", "")).strip()
-            if not gh_val or any(dummy in gh_val.lower() for dummy in ["github.com/janedoe", "github.com/...", "example", "none"]):
-                parsed_data["github"] = ""
+        # User input overrides if provided; if not provided, fall back to values extracted from the Base Resume
+        # so the contact header survives regeneration even when the user does not retype it.
+        gh_val = str(parsed_data.get("github", "")).strip()
+        is_dummy_gh = any(dummy in gh_val.lower() for dummy in ["github.com/janedoe", "github.com/...", "example", "none"]) if gh_val else True
+        if effective_github:
+            parsed_data["github"] = effective_github
+        elif is_dummy_gh or not gh_val:
+            parsed_data["github"] = ""
 
-        if linkedin_url and linkedin_url.strip():
-            parsed_data["linkedin"] = linkedin_url.strip()
-        elif not linkedin_url:
-            li_val = str(parsed_data.get("linkedin", "")).strip()
-            if not li_val or any(dummy in li_val.lower() for dummy in ["linkedin.com/in/janedoe", "linkedin.com/in/...", "example", "none"]):
-                parsed_data["linkedin"] = ""
+        li_val = str(parsed_data.get("linkedin", "")).strip()
+        is_dummy_li = any(dummy in li_val.lower() for dummy in ["linkedin.com/in/janedoe", "linkedin.com/in/...", "example", "none"]) if li_val else True
+        if effective_linkedin:
+            parsed_data["linkedin"] = effective_linkedin
+        elif is_dummy_li or not li_val:
+            parsed_data["linkedin"] = ""
 
-        if portfolio_url and portfolio_url.strip():
-            parsed_data["portfolio"] = portfolio_url.strip()
-        elif not portfolio_url:
-            port_val = str(parsed_data.get("portfolio", "")).strip()
-            if not port_val or any(dummy in port_val.lower() for dummy in ["janedoe.com", "example.com", "none"]):
-                parsed_data["portfolio"] = ""
+        port_val = str(parsed_data.get("portfolio", "")).strip()
+        is_dummy_port = any(dummy in port_val.lower() for dummy in ["janedoe.com", "example.com", "none"]) if port_val else True
+        if effective_portfolio:
+            parsed_data["portfolio"] = effective_portfolio
+        elif is_dummy_port or not port_val:
+            parsed_data["portfolio"] = ""
+
+        # Same fallback for email and phone if the LLM dropped them
+        em_val = str(parsed_data.get("email", "")).strip()
+        if not em_val or any(d in em_val.lower() for d in ["example.com", "your.email", "placeholder"]):
+            if extracted_header.get("email"):
+                parsed_data["email"] = extracted_header["email"]
+
+        ph_val = str(parsed_data.get("phone", "")).strip()
+        if not ph_val or all(c in "0-" for c in ph_val):
+            if extracted_header.get("phone"):
+                parsed_data["phone"] = extracted_header["phone"]
 
 
         # Extract localized section headings from LLM output (fallback to English if missing)
@@ -1253,4 +1555,5 @@ async def clear_cache():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 

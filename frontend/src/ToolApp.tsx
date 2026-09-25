@@ -66,6 +66,31 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     };
   }, [status, atsStatus]);
 
+  // Persist contact URLs to localStorage so the user does not have to retype
+  // them every time they open the app. Loaded on mount, written on change,
+  // cleared by the explicit Reset button.
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem('jd-to-resume.contact');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.githubUrl === 'string') setGithubUrl(parsed.githubUrl);
+        if (typeof parsed.linkedinUrl === 'string') setLinkedinUrl(parsed.linkedinUrl);
+        if (typeof parsed.portfolioUrl === 'string') setPortfolioUrl(parsed.portfolioUrl);
+      }
+    } catch {
+      // Ignore corrupt localStorage entries silently.
+    }
+  }, []);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('jd-to-resume.contact', JSON.stringify({ githubUrl, linkedinUrl, portfolioUrl }));
+    } catch {
+      // localStorage may be disabled (private mode, quota); persistence is best-effort.
+    }
+  }, [githubUrl, linkedinUrl, portfolioUrl]);
+
   // Score history — tracks ATS evolution across regeneration versions
   type ScoreEntry = { version: number; ats: number; ai: number; format: number; label: string };
   const [scoreHistory, setScoreHistory] = useState<ScoreEntry[]>([]);
@@ -104,6 +129,11 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setGithubUrl('');
     setLinkedinUrl('');
     setPortfolioUrl('');
+    try {
+      localStorage.removeItem('jd-to-resume.contact');
+    } catch {
+      // best-effort
+    }
     setStatus('idle');
     setProgress(0);
     setStepMessage('');
@@ -199,7 +229,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const handleGenerate = async (customInstructionsOverride?: string, baseResumeFilename?: string) => {
+  const handleGenerate = async (customInstructionsOverride?: string, baseResumeFilename?: string, forceTranslate?: boolean) => {
     if (!file) {
       setErrorMessage("Please select a resume PDF to upload.");
       setStatus('error');
@@ -213,6 +243,12 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     // Reset the generated filename only on a brand-new generation (not refinement)
     if (!baseResumeFilename) {
       setGeneratedPdfFilename(null);
+    }
+
+    // Sync the state flag from the explicit parameter so the rest of this function
+    // reads the correct value (avoids the React useState closure race).
+    if (forceTranslate !== undefined) {
+      setForceTranslateToEnglish(forceTranslate);
     }
 
     // Create form data
@@ -247,8 +283,10 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     }
 
     // Translation flag — only true on the click that initiates translation.
+    // Use the local `forceTranslate` parameter (or the state) to decide.
     // Cleared in the finally block so subsequent refinements do not accidentally re-translate.
-    if (forceTranslateToEnglish) {
+    const shouldTranslate = forceTranslate !== undefined ? forceTranslate : forceTranslateToEnglish;
+    if (shouldTranslate) {
       formData.append("force_language", "en");
       // Translate the LAST-GENERATED PDF (preserves iterative tailoring decisions).
       // If no PDF has been generated yet, backend falls back to the original upload.
@@ -354,7 +392,9 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     } finally {
       // Always clear the translation flag so the next generation reverts to JD-driven
       // language unless the user explicitly clicks Translate to English again.
-      setForceTranslateToEnglish(false);
+      if (shouldTranslate) {
+        setForceTranslateToEnglish(false);
+      }
     }
   };
 
@@ -768,6 +808,27 @@ className = "rm-btn bg-white hover:bg-rose-50 border-2 border-black text-rose-70
     LIMPIAR / NUEVO
     </button>
             )}
+            { /* Translate to English — always visible. Enabled as soon as a PDF is loaded,
+                so the user can translate the uploaded CV directly without first running the
+                full tailoring pipeline. When no PDF is uploaded, the button is disabled. */ }
+            <button
+              onClick={() => {
+                if (!file) return;
+                handleGenerate(undefined, undefined, true);
+              }}
+              disabled={!file || lastOutputLanguage === 'en' || status === 'generating'}
+              title={
+                !file
+                  ? 'Upload a PDF resume first'
+                  : lastOutputLanguage === 'en'
+                  ? 'CV already in English'
+                  : 'This may take 30-90s'
+              }
+              className="rm-btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-5 text-lg flex items-center gap-2 font-bold"
+            >
+              <Languages className="w-5 h-5" />
+              Translate to English
+            </button>
 </div>
 
 {/* Auto ATS Checkbox Option */ }
