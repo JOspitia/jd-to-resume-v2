@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw, Languages, ArrowRightLeft } from 'lucide-react';
+import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw, Languages } from 'lucide-react';
 
 
 
@@ -876,7 +876,7 @@ className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex jus
       setForceTranslateToEnglish(true);
       handleGenerate();
     }}
-    disabled={lastOutputLanguage === 'en' || status === 'generating'}
+    disabled={lastOutputLanguage === 'en'}
     title={
       lastOutputLanguage === 'en'
         ? 'CV already in English'
@@ -1182,7 +1182,7 @@ className = "rm-box p-8 md:p-10 bg-white border-4 border-black relative"
     <Edit3 className="w-6 h-6 text-blue-700" /> Ajustar & Regenerar CV con Mejoras Seleccionadas
       </h4>
       < p className = "text-sm text-gray-700 font-medium" >
-        Has seleccionado < span className = "font-bold text-orange-700" > { selectedKeywords.length } palabra(s) clave < /span> y <span className="font-bold text-purple-800">{selectedTips.length} consejo(s)</span >.Puedes agregar indicaciones o ajustes adicionales abajo antes de hacer clic en regenerar:
+        Has seleccionado <span className="font-bold text-orange-700">{selectedKeywords.length} palabra(s) clave</span> y <span className="font-bold text-purple-800">{selectedTips.length} consejo(s)</span>. Puedes agregar indicaciones o ajustes adicionales abajo antes de hacer clic en regenerar:
 </p>
 
   < textarea
