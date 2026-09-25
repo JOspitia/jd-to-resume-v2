@@ -900,12 +900,12 @@ style = {{ width: `${progress}%` }}
             < p className = "text-xl text-gray-800" > Your tailored, ATS - friendly PDF is ready for review.</p>
               </div>
 
-              < div className = "flex flex-col md:flex-row justify-center gap-4 w-full" >
+              < div className = "grid grid-cols-1 md:grid-cols-2 gap-4 w-full" >
               <a 
                       href= { downloadUrl }
                       target = "_blank"
   rel = "noreferrer"
-  className = "rm-btn bg-white hover:bg-gray-50 flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+  className = "rm-btn bg-white hover:bg-gray-50 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
     >
     <Eye className="w-5 h-5" /> PREVIEW
       </a>
@@ -914,7 +914,7 @@ style = {{ width: `${progress}%` }}
   href = { downloadUrl }
   download = "Tailored_Resume.pdf"
   target = "_blank"
-  className = "rm-btn bg-orange-500 text-white hover:bg-orange-600 flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+  className = "rm-btn bg-orange-500 text-white hover:bg-orange-600 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
     >
     <Download className="w-5 h-5" /> DOWNLOAD PDF
       </a>
@@ -924,7 +924,7 @@ style = {{ width: `${progress}%` }}
                       onClick={ handleValidateATS }
   disabled = { atsStatus === 'analyzing'
 }
-className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
   >
   <BarChart3 className="w-5 h-5" />
     { atsStatus === 'analyzing' ? 'ANALIZANDO ATS & IA...' : '📊 AUDITAR MATCH ATS & DETECCIÓN IA'}
@@ -943,7 +943,7 @@ className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex jus
         ? 'CV already in English'
         : 'This may take 30-90s'
     }
-    className="rm-btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+    className="rm-btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
   >
     <Languages className="w-5 h-5" />
     Translate to English
@@ -953,7 +953,7 @@ className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex jus
 <button
                       onClick={ handleResetProcess }
 title = "Reiniciar todo y borrar CVs generados"
-className = "rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 flex justify-center items-center gap-2 px-6 py-4 text-base font-bold shadow-[4px_4px_0px_0px_rgba(225,29,72,1)]"
+className = "rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 md:col-span-2 flex justify-center items-center gap-2 px-6 py-4 text-base font-bold shadow-[4px_4px_0px_0px_rgba(225,29,72,1)]"
   >
   <RotateCcw className="w-5 h-5 text-rose-600" />
     NUEVO / LIMPIAR
