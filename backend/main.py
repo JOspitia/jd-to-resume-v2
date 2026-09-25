@@ -200,7 +200,36 @@ HTML_TEMPLATE = """
 
 def extract_text(file_path: str) -> str:
     doc = fitz.open(file_path)
-    return " ".join([page.get_text() for page in doc])
+    # Concatenate plain text plus all /Link annotations so that PDF hyperlinks
+    # that render as bare labels (e.g. "LinkedIn") are also surfaced as their
+    # real URLs in the extracted text. The LLM and our header extractor can
+    # then see them.
+    text_parts = []
+    for page in doc:
+        text_parts.append(page.get_text())
+        try:
+            for link in page.get_links():
+                uri = link.get("uri", "").strip()
+                if uri:
+                    text_parts.append(" " + uri)
+        except Exception:
+            # Some PDFs have malformed link structures; skip silently.
+            pass
+    extracted = " ".join(text_parts)
+    # Debug: log any linked URLs we found so the user can verify their PDF
+    # actually has the /Link annotations we expect.
+    urls_found = []
+    for page in doc:
+        try:
+            for link in page.get_links():
+                uri = link.get("uri", "").strip()
+                if uri:
+                    urls_found.append(uri)
+        except Exception:
+            pass
+    if urls_found:
+        print(f"[EXTRACT] PDF /Link URIs found ({len(urls_found)}): {urls_found[:10]}")
+    return extracted
 
 
 # --- Header extraction from a Base Resume ----------------------------------------
@@ -213,7 +242,14 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_RE = re.compile(r"(\+?\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}")
 _GITHUB_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/[A-Za-z0-9._-]+/?", re.IGNORECASE)
 _LINKEDIN_RE = re.compile(r"(?:https?://)?(?:www\.)?linkedin\.com/in/[A-Za-z0-9._-]+/?", re.IGNORECASE)
-_PORTFOLIO_RE = re.compile(r"(?:https?://)?(?:www\.)?[A-Za-z0-9-]+\.(?:com|net|org|io|dev|me|co|app|page|site|xyz|store|portfolio)(?:/[A-Za-z0-9._~:/?#@!$&'()*+,;=-]*)?", re.IGNORECASE)
+_PORTFOLIO_RE = re.compile(r"(?:https?://)?(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)?\.(?:com|net|org|io|dev|me|co|app|page|site|xyz|store|portfolio)(?:/[A-Za-z0-9._~:/?#@!$&'()*+,;=-]*)?", re.IGNORECASE)
+# Common email providers that look like domains but are not portfolio sites.
+# When matching _PORTFOLIO_RE, exclude any candidate whose host matches one of these.
+_PORTFOLIO_EXCLUDE_DOMAINS = {
+    "gmail.com", "yahoo.com", "yahoo.es", "hotmail.com", "outlook.com",
+    "live.com", "icloud.com", "me.com", "aol.com", "protonmail.com",
+    "mail.com", "zoho.com", "yandex.com", "yandex.ru",
+}
 
 
 def _extract_header_from_pdf_text(resume_text: str) -> dict:
@@ -255,21 +291,41 @@ def _extract_header_from_pdf_text(resume_text: str) -> dict:
 
     # Portfolio: scan URL-like strings, exclude github/linkedin/email domains
     portfolio_match = ""
-    seen_domains = set()
+    seen_domains = set(_PORTFOLIO_EXCLUDE_DOMAINS)
     if github_match:
         seen_domains.add("github.com")
     if linkedin_match:
         seen_domains.add("linkedin.com")
+    # Always exclude the email's domain — it will appear in the text as
+    # `something@gmail.com` and our regex will match the bare `gmail.com`.
+    if email_match and "@" in email_match:
+        email_domain = email_match.split("@", 1)[1].strip().lower()
+        if email_domain:
+            seen_domains.add(email_domain)
+    print(f"[EXTRACT] portfolio exclusion set: {sorted(seen_domains)}")
     for m in _PORTFOLIO_RE.finditer(resume_text):
         candidate = m.group(0)
         candidate_lower = candidate.lower()
-        if any(d in candidate_lower for d in seen_domains):
+        # Pull the host portion (between optional scheme and first /)
+        host_match = re.match(r"(?:https?://)?(?:www\.)?([^/]+)", candidate_lower)
+        host = host_match.group(1) if host_match else candidate_lower
+        # Filter out matches that are part of an email address (preceded by '@' or '.' or alphanumeric)
+        match_start = m.start()
+        if match_start > 0:
+            char_before = resume_text[match_start - 1]
+            if char_before in "@.0123456789abcdefghijklmnopqrstuvwxyz":
+                # Part of a longer string (probably email or path). Skip.
+                continue
+        if host in seen_domains:
+            print(f"[EXTRACT] portfolio skip (excluded domain): '{candidate}' host='{host}'")
             continue
         if any(skip in candidate_lower for skip in ["example.com", "test.com", "yourname", "placeholder"]):
+            print(f"[EXTRACT] portfolio skip (skip word): '{candidate}'")
             continue
         # Normalize to https:// if no scheme
         if not candidate_lower.startswith("http"):
             candidate = "https://" + candidate
+        print(f"[EXTRACT] portfolio MATCHED: '{candidate}' (host='{host}')")
         portfolio_match = candidate
         break
 
@@ -1499,4 +1555,5 @@ async def clear_cache():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
