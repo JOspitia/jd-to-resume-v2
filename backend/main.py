@@ -1622,6 +1622,79 @@ async def render_from_yaml(
     }
 
 
+@app.post("/api/analyze-yaml")
+async def analyze_yaml(
+    yaml_content: str = Form(...),
+    jd: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None),
+):
+    """
+    Audit-only endpoint for a user-edited YAML. No PDF render.
+
+    The frontend uses this when the user clicks `VALIDAR YAML` in the
+    YAML editor panel: it serializes the parsed dict back to a
+    plain-text narrative via `_serialize_resume_data_as_text` and
+    runs the same per-game audit prompt as `/api/analyze-ats`
+    (delegated to `_run_audit_against_text`).
+
+    Spec coverage:
+      S8 (yaml-editor feature): accepts yaml_content (required) and
+        optional jd. Serializes the parsed dict into a narrative and
+        runs the same audit LLM prompt as /api/analyze-ats. No PDF
+        render. The frontend takes care of adding a 'YAML vN' entry
+        to scoreHistory on success.
+      S10 (multi-domain integration): domain_game propagates so the
+        audit uses the selected game's vocabulary (no 'add Docker'
+        on HR / Psychology CVs).
+    """
+    # Validate domain_game against the same contract as the other endpoints.
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
+        )
+
+    # Parse the YAML.
+    if not yaml_content or not yaml_content.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="yaml_content is required and must not be empty"
+        )
+    try:
+        parsed_data = _pyyaml.safe_load(yaml_content)
+    except _pyyaml.YAMLError as ye:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {ye}")
+    if not isinstance(parsed_data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected a YAML mapping at the top level, got {type(parsed_data).__name__}"
+        )
+
+    # Serialize the parsed dict to a plain-text narrative that mirrors
+    # what `extract_text` would yield from a rendered PDF. The audit
+    # LLM sees the same shape regardless of whether the input is a
+    # rendered PDF or a user-edited YAML dict.
+    narrative = _serialize_resume_data_as_text(parsed_data)
+
+    # Compose jd_text: prefer the JD the user supplied, fall back to a
+    # generic Spanish default.
+    effective_jd = (jd or "").strip() or "Optimización general y mejoramiento de calidad del CV"
+
+    # Resolve the domain game and run the audit.
+    audit_game = get_game(domain_game)
+    try:
+        return await _run_audit_against_text(
+            resume_text=narrative,
+            jd_text=effective_jd,
+            audit_game=audit_game,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
 @app.get("/api/download/{filename}")
 async def download_resume(filename: str):
     file_path = os.path.join(OUTPUT_DIR, filename)
