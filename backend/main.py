@@ -1899,6 +1899,10 @@ async def repair_yaml(
                     "yaml": llm_yaml,
                     "repairs": repairs + [f"LLM still returned invalid YAML: {syntax_err2}"],
                     "schema_errors": [syntax_err2 or "yaml.safe_load failed"],
+                    "error": (
+                        f"La IA no pudo producir YAML con sintaxis válida. "
+                        f"Editá el YAML manualmente. Error del parser: {syntax_err2 or 'yaml.safe_load failed'}"
+                    ),
                 }
             repairs.append("LLM produced valid YAML syntax.")
             yaml_text = llm_yaml
@@ -1921,6 +1925,10 @@ async def repair_yaml(
                     "yaml": llm_yaml,
                     "repairs": repairs + [f"LLM returned YAML that still fails syntax: {syntax_err2}"],
                     "schema_errors": [syntax_err2 or "yaml.safe_load failed"],
+                    "error": (
+                        f"La IA no pudo arreglar la sintaxis del YAML. "
+                        f"Error del parser: {syntax_err2 or 'yaml.safe_load failed'}"
+                    ),
                 }
             cleaned2, schema_err2 = _validate_yaml_schema(parsed2)
             if schema_err2 or cleaned2 is None:
@@ -1930,6 +1938,10 @@ async def repair_yaml(
                     "yaml": llm_yaml,
                     "repairs": repairs + ["LLM returned YAML that still fails schema validation."],
                     "schema_errors": [schema_err2 or "schema validation failed"],
+                    "error": (
+                        f"La IA no pudo arreglar el schema del YAML. "
+                        f"Editá manualmente. Error de schema: {schema_err2 or 'schema validation failed'}"
+                    ),
                 }
             repairs.append("LLM produced YAML that passes schema validation.")
             yaml_text = llm_yaml

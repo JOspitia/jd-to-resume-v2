@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Profile } from './useProfile';
 import type { Generation } from './useGeneration';
 import type { Audit } from './useAudit';
+import { validateYaml } from '../lib/yamlValidator';
 
 /**
  * useYamlEditor — T3 of the UX refactor (specs S5, S6).
@@ -89,13 +90,74 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       setYamlError('No hay contenido YAML para renderizar.');
       return;
     }
+
+    // --- Auto-cleanup: if the YAML is broken, ask the IA to fix it first. ---
+    let renderableYaml = yamlContent;
+    const validation = validateYaml(yamlContent);
+    if (!validation.valid) {
+      setYamlRepairing(true);
+      setStepMessage(
+        `YAML inválido (línea ${validation.line ?? '?'}): la IA lo está arreglando...`,
+      );
+      try {
+        const repairFormData = new FormData();
+        repairFormData.append('yaml_content', yamlContent);
+        if (domainGame) repairFormData.append('domain_game', domainGame);
+
+        const repairRes = await fetch(
+          'http://localhost:8000/api/repair-yaml',
+          { method: 'POST', body: repairFormData },
+        );
+        if (!repairRes.ok) {
+          const errText = await repairRes.text().catch(() => '');
+          throw new Error(
+            `repair-yaml failed (${repairRes.status}): ${errText || repairRes.statusText}`,
+          );
+        }
+        const repairData = await repairRes.json();
+        if (typeof repairData?.yaml === 'string' && repairData.yaml.trim()) {
+          // Validate the IA's output LOCALLY before accepting it. The IA
+          // sometimes claims the YAML is valid but produces indentation
+          // errors (e.g. `items:` at column 1 instead of under a list
+          // item). We refuse the repair and show the user the actual
+          // error so they can fix it manually.
+          const reparValidation = validateYaml(repairData.yaml);
+          if (!reparValidation.valid) {
+            setYamlRepairing(false);
+            setYamlError(
+              `La IA no pudo reparar el YAML: el resultado sigue inválido (línea ${reparValidation.line ?? '?'}): ${reparValidation.error}. Editá manualmente o volvé a intentar.`,
+            );
+            return;
+          }
+          renderableYaml = repairData.yaml;
+          setYamlContent(repairData.yaml);
+          const repairs = Array.isArray(repairData.repairs) ? repairData.repairs : [];
+          setYamlRepairNotice(
+            repairs.length > 0
+              ? `Tu YAML tenía errores. La IA los corrigió: ${repairs.join(' · ')}`
+              : 'La IA revisó tu YAML y lo devolvió sin cambios.',
+          );
+        } else if (repairData?.error) {
+          throw new Error(repairData.error);
+        } else {
+          throw new Error('La IA no pudo reparar el YAML (respuesta vacía).');
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setYamlRepairing(false);
+        setYamlError(`No se pudo auto-arreglar el YAML: ${msg}`);
+        return;
+      }
+      setYamlRepairing(false);
+    }
+
     setYamlError('');
     setStatus('generating');
     setProgress(0);
     setStepMessage('Renderizando CV desde YAML...');
 
     const formData = new FormData();
-    formData.append('yaml_content', yamlContent);
+    formData.append('yaml_content', renderableYaml);
     formData.append('theme', selectedTheme);
     formData.append('fit_single_page', fitSinglePage ? 'true' : 'false');
     if (pageBreakSection && pageBreakSection !== 'none') {
@@ -272,7 +334,26 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       const data = await res.json();
 
       if (typeof data?.yaml === 'string') {
+        // Validate the IA's output LOCALLY before accepting it. The IA
+        // sometimes claims the YAML is valid but produces indentation
+        // errors (e.g. `items:` at column 1 instead of under a list
+        // item). We refuse the repair and show the user the actual
+        // error so they can fix it manually.
+        const reparValidation = validateYaml(data.yaml);
+        if (!reparValidation.valid) {
+          setYamlRepairing(false);
+          setYamlError(
+            `La IA no pudo reparar el YAML: el resultado sigue inválido (línea ${reparValidation.line ?? '?'}): ${reparValidation.error}. Editá manualmente o volvé a intentar.`,
+          );
+          return;
+        }
         setYamlContent(data.yaml);
+      } else if (data?.error) {
+        setYamlError(data.error);
+        return;
+      } else {
+        setYamlError('La IA no pudo reparar el YAML (respuesta vacía).');
+        return;
       }
       const noticeParts: string[] = [];
       if (Array.isArray(data?.repairs) && data.repairs.length > 0) {
