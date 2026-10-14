@@ -66,6 +66,17 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [yamlContent, setYamlContent] = useState<string | null>(null);
   const [yamlReady, setYamlReady] = useState(false);
   const [yamlError, setYamlError] = useState('');
+  // Repair flow — see handleRepairYaml (below). Used by the "🤖 Reparar YAML con IA"
+  // button to display a transient notice ("Cambios aplicados: …") after the user
+  // requests an AI-assisted YAML repair.
+  const [yamlRepairing, setYamlRepairing] = useState(false);
+  const [yamlRepairNotice, setYamlRepairNotice] = useState('');
+  // Snapshot of the YAML that produced the currently-displayed PDF. Set on a
+  // successful `handleRenderFromYaml`. Used by `handleReopenYamlEditor` so the
+  // user can re-open the YAML editor after the CV is generated and iterate
+  // (edit → re-render → open again → re-edit). Independent of `yamlContent`,
+  // which represents the live textarea state and gets cleared on success.
+  const [lastGeneratedYaml, setLastGeneratedYaml] = useState<string | null>(null);
 
   // Live timer for loading states (seconds counter up to 60s)
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -211,6 +222,11 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     const formData = new FormData();
     formData.append("file", fileToAudit);
     formData.append("jd", jd);
+    // T6 of multi-domain: propagate the active profile so the backend builds
+    // the audit prompt with the right SKILL_TAXONOMY (hr_recruiting /
+    // psychology / tech). Without this, /api/analyze-ats falls back to the
+    // "tech" game and the LLM audits the HR CV against tech keywords.
+    if (domainGame) formData.append("domain_game", domainGame);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second (1 minute) timeout
@@ -307,7 +323,14 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       setStatus('success');
       setStepMessage('CV renderizado');
       setProgress(100);
+      // Snapshot the YAML that produced this PDF so the user can re-open
+      // the editor later (via the "✏️ Modificar YAML y regenerar" button
+      // on the success card). Keeps the iteration loop alive.
+      if (yamlContent) {
+        setLastGeneratedYaml(yamlContent);
+      }
       // Close the YAML editor and reset the flag (S4).
+      setYamlContent(null);
       setYamlReady(false);
       setEditBeforeGenerate(false);
       // Track the new version in scoreHistory as the next refinado.
@@ -418,6 +441,74 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       setYamlError(msg);
       setAtsStatus('error');
     }
+  };
+
+  // AI-assisted YAML repair: when the user accidentally broke the YAML
+  // (indentation, missing colons, wrong types inside experience/skills/etc),
+  // POST /api/repair-yaml attempts a local validation first and only hits
+  // the LLM when needed. Replaces the textarea content with the repaired
+  // YAML and shows a brief summary of what changed.
+  const handleRepairYaml = async () => {
+    if (!yamlContent) {
+      setYamlError('El YAML está vacío. Pegá o generá una respuesta primero.');
+      return;
+    }
+    setYamlRepairing(true);
+    setYamlRepairNotice('');
+    setYamlError('');
+
+    try {
+      const formData = new FormData();
+      formData.append('yaml_content', yamlContent);
+
+      const res = await fetch('http://localhost:8000/api/repair-yaml', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) throw new Error('No se pudo conectar con el endpoint de reparación YAML.');
+      const data = await res.json();
+
+      if (typeof data?.yaml === 'string') {
+        setYamlContent(data.yaml);
+      }
+      const noticeParts: string[] = [];
+      if (Array.isArray(data?.repairs) && data.repairs.length > 0) {
+        noticeParts.push('Cambios aplicados: ' + data.repairs.join(' · '));
+      }
+      if (Array.isArray(data?.schema_errors) && data.schema_errors.length > 0) {
+        noticeParts.push('Errores restantes que la IA no pudo resolver: ' + data.schema_errors.join(' · '));
+      }
+      setYamlRepairNotice(noticeParts.join('\n') || (data?.ok ? 'YAML válido — sin cambios.' : 'Reparación parcial.'));
+    } catch (err: any) {
+      setYamlError(err.message || 'Error al reparar el YAML.');
+    } finally {
+      setYamlRepairing(false);
+    }
+  };
+
+  // Reopen the YAML editor after a CV has been generated. Restores the
+  // snapshot of the YAML that produced the currently-displayed PDF into the
+  // editable textarea so the user can iterate: edit → re-render → repeat.
+  // No LLM call here — the snapshot is in memory.
+  const handleReopenYamlEditor = () => {
+    if (!lastGeneratedYaml) {
+      setYamlError('No hay un YAML previo para re-abrir. Regenerá el CV desde el checkbox "Editar antes de generar".');
+      return;
+    }
+    setYamlContent(lastGeneratedYaml);
+    setYamlReady(true);
+    setYamlError('');
+    setEditBeforeGenerate(false);
+  };
+
+  // Dismiss the YAML editor without re-rendering. Returns the user to the
+  // success card. Used as an explicit exit from the editor panel.
+  const handleCloseYamlEditor = () => {
+    setYamlContent(null);
+    setYamlReady(false);
+    setYamlError('');
+    setYamlRepairNotice('');
+    setEditBeforeGenerate(false);
   };
 
   const handleGenerate = async (customInstructionsOverride?: string, baseResumeFilename?: string, forceTranslate?: boolean) => {
@@ -586,6 +677,15 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                           : (generationVersionRef.current === 1 ? 'Original' : `Refinado v${generationVersionRef.current - 1}`),
                       }
                     ]);
+                  }
+
+                  // Snapshot the YAML that produced this PDF so the user can
+                  // re-open the editor after a non-edit-before-generate pass.
+                  // The backend emits `data.yaml` on the Finished event for
+                  // the direct path; the edit_before_generate path returns
+                  // earlier with its own yaml_ready event and snapshots there.
+                  if (typeof data.yaml === 'string' && data.yaml) {
+                    setLastGeneratedYaml(data.yaml);
                   }
 
                   // Auto re-audit: always re-audit on refinement passes; on first gen only if checkbox enabled
@@ -1057,7 +1157,7 @@ className = "rm-btn bg-blue-700 hover:bg-blue-800 text-white disabled:opacity-70
 
 {/* Standalone ATS-only audit button */ }
 <button
-              onClick={ handleValidateATS }
+              onClick={ () => handleValidateATS() }
               disabled = { atsStatus === 'analyzing' || !file }
               title = { !file ? 'Sube un PDF primero' : 'Auditar el CV actual sin generar uno nuevo' }
 className = "rm-btn bg-yellow-400 hover:bg-yellow-500 text-black disabled:opacity-50 disabled:cursor-not-allowed px-8 py-5 text-lg flex items-center gap-3"
@@ -1187,6 +1287,21 @@ style = {{ width: `${progress}%` }}
             < p className = "text-xl text-gray-800" > Your tailored, ATS - friendly PDF is ready for review.</p>
               </div>
 
+              {/* Primary CTA: edit the YAML that produced this CV. Sits above
+                  the secondary action grid so the iteration loop is the most
+                  discoverable next step after generation. Hidden until the
+                  first render produces a YAML snapshot. */ }
+              { lastGeneratedYaml && (
+                <button
+                  onClick={ handleReopenYamlEditor }
+                  title="Abre el editor YAML con el contenido que generó este CV"
+                  className="rm-btn bg-emerald-600 text-white hover:bg-emerald-700 px-8 py-4 text-lg font-bold flex items-center gap-3 w-full md:w-auto"
+                >
+                  <Code2 className="w-5 h-5" />
+                  ✏️ Editar YAML directamente
+                </button>
+              ) }
+
               < div className = "grid grid-cols-1 md:grid-cols-2 gap-4 w-full" >
               <a 
                       href= { downloadUrl }
@@ -1208,7 +1323,7 @@ style = {{ width: `${progress}%` }}
 
   {/* Manual ATS & AI Validation Button */ }
   <button
-                      onClick={ handleValidateATS }
+                      onClick={ () => handleValidateATS() }
   disabled = { atsStatus === 'analyzing'
 }
 className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
@@ -1295,11 +1410,7 @@ className = "rm-box p-8 mt-8 mx-auto max-w-4xl bg-white"
       <h3 className="text-2xl font-bold font-serif" > Editor de YAML </h3>
         < button
 type = "button"
-onClick = {() => {
-  setYamlReady(false);
-  setEditBeforeGenerate(false);
-  setYamlError('');
-}}
+onClick = { handleCloseYamlEditor }
 className = "text-sm font-mono text-gray-600 hover:text-rose-700"
         >
   ✕ Cerrar
@@ -1348,9 +1459,25 @@ className = {`rm-btn bg-yellow-100 border-2 border-black text-black px-6 py-3 fo
   <ShieldCheck className="w-4 h-4" />
     VALIDAR YAML (Sin generar CV)
     </button>
-  </div>
+    < button
+  type = "button"
+  onClick = { handleRepairYaml }
+  disabled = { yamlRepairing }
+  title = "Pide a la IA que arregle la sintaxis/estructura del YAML sin modificar los datos factuales"
+  className = {`rm-btn bg-purple-100 border-2 border-purple-700 text-purple-900 px-6 py-3 font-bold flex items-center gap-2 ${yamlRepairing ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+  <Sparkles className="w-4 h-4" />
+    { yamlRepairing ? 'REPARANDO YAML…' : 'REPARAR YAML (IA)' }
+    </button>
+    </div>
 
-  <p className="mt-4 text-xs font-mono text-gray-500" >
+    { yamlRepairNotice && (
+      <div className="mt-4 p-3 bg-purple-50 border-2 border-purple-400 text-purple-900 text-xs whitespace-pre-line font-mono" >
+        { yamlRepairNotice }
+      </div>
+    ) }
+
+    < p className = "mt-4 text-xs font-mono text-gray-500" >
     El backend usa la YAML exactamente como está acá para renderizar. Si el YAML no es válido el endpoint
     devuelve HTTP 400 con el error del parser.
   </p>

@@ -12,6 +12,56 @@
 >     `render-from-yaml` y `analyze-yaml` también reciben `domain_game`
 >     para que el audit use el vocabulario del dominio.
 
+## Estado actual
+
+**9/11 tasks done, 2 blocked.** 10 commits sobre `feat/multi-domain-tailoring` HEAD. Branch **pusheada** a `origin/feat/yaml-editor`. PR sugerido: `feat/yaml-editor` → `main` (después de mergear `feat/multi-domain-tailoring`).
+
+| # | Task | Specs | Estado | Commit |
+|---|---|---|---|---|
+| T1 | DRY refactor de audit prompt (`_run_audit_against_text`) | S9 | ✅ done | `b80680e` |
+| T2 | `yaml_helpers` module + roundtrip tests | S8, S9 | ✅ done | `02351f7` (23 tests en `test_yaml_helpers.py`) |
+| T3 | `edit_before_generate` flag + SSE `yaml_ready` event | S2, S5, S7 | ✅ done | `8c20c9d` |
+| T4 | Endpoint `POST /api/render-from-yaml` | S6 | ✅ done | `40dffd8` |
+| T5 | Endpoint `POST /api/analyze-yaml` (domain-aware) | S8, S10 | ✅ done | `a2782ea` |
+| T6 | Frontend state + checkbox + SSE handler | S1, S2, S4 | ✅ done | `265e6ef` (tsc clean) |
+| T7 | Editor panel con 3 botones + handlers | S3, S4 | ✅ done | `1fad68f` (tsc clean) |
+| T8 | Audit-after-render cuando `autoValidateATS` está activo | S9 FE (WIP T9) | ✅ done | `7567c24` (tsc clean) |
+| T9 | Endpoint tests con mocks (`test_yaml_endpoints.py`, 14 tests) | S6, S8, S9 FE | 🟦 **blocked** | Test file commiteado en `a218594`. Pytest falla en la colección porque los stubs `sys.modules` a nivel de módulo rompen `stop_global_capturing`. Fix: mover los stubs a `conftest.py`. |
+| T10 | README con sección "Editor YAML (v2.7+)" | (doc) | ✅ done | `29ec8dd` |
+| T11 | Smoke end-to-end + tag `v2.7.0` | S1, S2, S6 | 🟦 **blocked** | Necesita API key de LLM en `backend/.env` + vos corriendo el stack localmente + generando un PDF con el editor activo por cada dominio. El sandbox no puede levantar FastAPI ni hacer LLM calls. |
+
+## Verificación
+
+```
+$ git log --oneline feat/multi-domain-tailoring..feat/yaml-editor
+a218594 chore(yaml): add T9 endpoint test file + L6 verification note
+29ec8dd docs(yaml): add YAML Editor section + update Endpoints table for v2.7
+7567c24 feat(yaml): audit-after-render when autoValidateATS is on
+1fad68f feat(yaml): editor panel with 3 action buttons + handlers
+265e6ef feat(yaml): frontend state + checkbox + SSE handler for yaml_ready
+a2782ea feat(yaml): add /api/analyze-yaml endpoint (domain-aware)
+40dffd8 feat(yaml): add /api/render-from-yaml endpoint
+8c20c9d feat(yaml): add edit_before_generate flag + SSE yaml_ready event
+02351f7 refactor(yaml): extract yaml_helpers module + add roundtrip tests
+b80680e refactor(audit): unify audit path in _run_audit_against_text
+
+$ cd backend && pytest tests/ -q
+............................ 48 passed in 0.05s
+
+$ cd frontend && ./node_modules/.bin/tsc --noEmit --project tsconfig.json
+(no output = 0 errors)
+```
+
+`domain_game` propaga end-to-end (heredado del feature multi-domain):
+- `generate_resume()` lee `domain_game` del Form → emite `yaml_ready` con los `section_labels_es/en` del juego seleccionado.
+- `render_from_yaml()` lee `domain_game` del Form → usa los `section_labels` del juego para los headers del PDF renderizado.
+- `analyze_yaml()` lee `domain_game` del Form → compone el prompt de audit con la `SKILL_TAXONOMY` y seeds del juego (no 'add Docker' en CVs de Psi/HR).
+
+## Dependencias
+
+Este feature depende de `feat/multi-domain-tailoring` mergeado primero (T1 de yaml-editor usa `_run_audit_against_text` que vino del refactor de multi-domain). El orden de merge recomendado: multi-domain → yaml-editor → tag `v2.7.0`.
+
+
 ## Specs (verbatim de `edit-before-generate-yaml.md`)
 
 **S1** — Checkbox labelled `Editar respuesta de la IA antes de generar el CV (formato YAML)` cerca del toggle `Validar automáticamente match ATS`.
