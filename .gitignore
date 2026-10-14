@@ -8,6 +8,7 @@ dist/
 dist-ssr/
 build/
 *.local
+*.atl
 
 # IDEs and OS
 .vscode/
@@ -26,6 +27,10 @@ build/
 !knowledge_base.txt
 !README.md
 !*.md
+
+# Learning notes / personal study guides that don't belong to the project
+/*PLAYWRIGHT*.md
+/*FASTAPI*.md
 
 # Output & RenderCV temp files
 backend/output/
