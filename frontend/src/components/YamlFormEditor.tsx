@@ -135,25 +135,25 @@ function ContactSection({
     <SectionCard title="Datos de contacto">
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Nombre completo">
-          <TextInput value={data.name} onChange={(v) => set('name', v)} placeholder="Julieth Andrea Caicedo" />
+          <TextInput value={data.name} onChange={(v) => set('name', v)} placeholder="Juan Andrés Pérez Ocampo" />
         </Field>
         <Field label="Ubicación">
-          <TextInput value={data.location} onChange={(v) => set('location', v)} placeholder="Cali, Colombia" />
+          <TextInput value={data.location} onChange={(v) => set('location', v)} placeholder="Ciudad, País" />
         </Field>
         <Field label="Teléfono">
-          <TextInput type="tel" value={data.phone} onChange={(v) => set('phone', v)} placeholder="+57 311 477 0585" />
+          <TextInput type="tel" value={data.phone} onChange={(v) => set('phone', v)} placeholder="+00 000 000 0000" />
         </Field>
         <Field label="Email">
-          <TextInput type="email" value={data.email} onChange={(v) => set('email', v)} placeholder="email@example.com" />
+          <TextInput type="email" value={data.email} onChange={(v) => set('email', v)} placeholder="nombre@ejemplo.com" />
         </Field>
         <Field label="LinkedIn" span={2}>
-          <TextInput type="url" value={data.linkedin} onChange={(v) => set('linkedin', v)} placeholder="https://linkedin.com/in/..." />
+          <TextInput type="url" value={data.linkedin} onChange={(v) => set('linkedin', v)} placeholder="https://linkedin.com/in/usuario" />
         </Field>
         <Field label="GitHub">
-          <TextInput type="url" value={data.github} onChange={(v) => set('github', v)} placeholder="https://github.com/..." />
+          <TextInput type="url" value={data.github} onChange={(v) => set('github', v)} placeholder="https://github.com/usuario" />
         </Field>
         <Field label="Portafolio">
-          <TextInput type="url" value={data.portfolio} onChange={(v) => set('portfolio', v)} placeholder="https://..." />
+          <TextInput type="url" value={data.portfolio} onChange={(v) => set('portfolio', v)} placeholder="https://miportafolio.com" />
         </Field>
       </div>
     </SectionCard>
@@ -180,7 +180,7 @@ function SummarySection({ value, onChange }: { value: string; onChange: (v: stri
         onChange={onChange}
         inputRef={ref}
         rows={5}
-        placeholder="Psicóloga Organizacional | Analista de Contratación con +2 años cerrando vacantes..."
+        placeholder="Ingeniero de Sistemas | Full-Stack Developer con +3 años construyendo aplicaciones web escalables con Python, React y Docker. Enfoque en clean code, testing y DevOps."
       />
       <div className="flex justify-between items-center -mt-1">
         <button
@@ -291,7 +291,7 @@ function SkillsSection({
                 <TextInput
                   value={s.category}
                   onChange={(v) => update(i, { category: v })}
-                  placeholder="Selección & Contratación"
+                  placeholder="Backend & APIs"
                 />
               </Field>
               <Field label="Items (uno por línea)">
@@ -299,7 +299,7 @@ function SkillsSection({
                   value={itemsToText(s.items)}
                   onChange={(v) => updateItems(i, v)}
                   rows={4}
-                  placeholder={'Reclutamiento y selección de personal\nAtracción de talento\nEntrevistas por competencias'}
+                  placeholder={'Python & FastAPI\nReact & TypeScript\nPostgreSQL & Docker\nCI/CD con GitHub Actions'}
                 />
               </Field>
               <div className="flex justify-end">
@@ -351,7 +351,7 @@ function BulletTextarea({
           }
           inputRef={ref}
           rows={5}
-          placeholder={'Coordiné el equipo de psicología asegurando soporte integral...'}
+          placeholder={'Desarrollé APIs REST con FastAPI y PostgreSQL atendiendo +50 req/s con tiempo de respuesta <100ms. Reduje el time-to-deploy en 60% con pipeline CI/CD en GitHub Actions.'}
         />
       </Field>
       <div className="flex justify-between items-center -mt-1">
