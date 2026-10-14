@@ -1810,17 +1810,32 @@ def _validate_yaml_schema(parsed: dict):
 
 async def _ask_llm_to_repair_yaml_async(broken_yaml: str, schema_errors: list[str], domain_game: Optional[str]) -> str:
     domain_line = f"\nTARGET DOMAIN (vocabulary hint): {domain_game}\n" if domain_game else ""
-    prompt = f"""You are a strict YAML repair engine. The user pasted a YAML document
-that needs to be repaired. You will receive:
-  - The broken YAML.
-  - The validation errors reported by our schema.
-  - The schema the YAML MUST satisfy.
+    prompt = f"""You are a strict, FAITHFUL YAML repair engine. The user has hand-edited a YAML document and broken its syntax. Your ONLY job is to fix the syntax — NOT to rewrite or improve the content.
 
-TASK
-1. Fix indentation, list syntax, string quoting, key naming, and type mismatches.
-2. Do NOT modify factual content (names, dates, schools, tool names, numbers).
-3. If a list entry is malformed, drop it ONLY if it cannot be salvaged without invention.
-4. Output ONLY the repaired YAML. No prose, no fences, no explanations.{domain_line}
+GOLDEN RULE — PRESERVE EVERY WORD
+If the user's bullet says "Aporto experiencia en atracción: candidatos calificados" you keep that exact text. You only fix the trailing colon if it breaks YAML parsing (e.g., by wrapping the value in double quotes). You do NOT remove it, rephrase it, or replace it with something "better". Treat every value the user wrote as sacred.
+
+WHAT TO FIX (syntax only)
+  - Indentation: normalize to 2 spaces.
+  - String quoting: if a value contains a colon, hyphen, or another YAML special char without quotes, wrap the value in double quotes. Example: `point: Aporto experiencia: en atracción` becomes `point: "Aporto experiencia: en atracción"`.
+  - List syntax: ensure each list item starts with `- `.
+  - Missing colons: add them where the schema requires.
+  - Type mismatches: a list that became a string should be split back into list items IF the content supports it. If the content is a single sentence, wrap it in a one-item list.
+
+WHAT NEVER TO DO
+  - Do NOT remove any key, value, or list item, even if it looks redundant.
+  - Do NOT add content the user did not write.
+  - Do NOT rephrase, summarize, "improve", or "translate" the user's text.
+  - Do NOT merge or split sections.
+  - Do NOT change the language of any value (Spanish stays Spanish, English stays English).
+  - Do NOT drop a malformed entry "just because it looks hard" — escape it as a quoted string first.
+
+If a value is truly unsalvageable (e.g., the user wrote a control character like \\x00 in the middle of a string), escape it as a quoted YAML string rather than dropping it.
+
+OUTPUT FORMAT
+  - Output ONLY the repaired YAML.
+  - No prose, no fences, no explanations, no markdown.
+  - The output must be valid YAML that parses with yaml.safe_load.{domain_line}
 
 VALIDATION ERRORS:
 {chr(10).join(f"- {e}" for e in schema_errors)}
