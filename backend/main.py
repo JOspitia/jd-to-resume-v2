@@ -106,17 +106,24 @@ HTML_TEMPLATE = """
      "linkedin.com/in/julieth-andrea-caicedo-" / "goyeneche". The link
      annotation survives but the extracted text does not, and ATS parsers
      read the text layer, so a wrapped URL parses as a broken one.
-     On its own line the URL gets the whole page width, and `nowrap` makes a
-     mid-token break impossible even with an unusually long slug. */
+
+     `nowrap` keeps each URL from breaking mid-token, which is what protects
+     the slug. The links are separated with a flex gap so that when they do not
+     all fit they wrap BETWEEN links — a new line starting at a clean URL — and
+     never inside one. Using inline-block plus nowrap instead made the block
+     overflow its centred container, which defeats text-align and stacks the
+     links on separate internal lines. */
   .profile-links {
-    text-align: center; font-size: 10.5pt; margin-bottom: 8px;
-    word-break: keep-all; overflow-wrap: normal;
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
+    gap: 0 6pt; font-size: 10.5pt; margin-bottom: 8px;
   }
   .profile-links a {
     color: #000; text-decoration: none; white-space: nowrap;
-    display: inline-block; vertical-align: top;
   }
-  .profile-links .sep { padding: 0 4pt; }
+  /* Explicit "|" between URLs. Drawn with ::after so it cannot affect layout —
+     the flex gap already handles spacing — while still landing in the extracted
+     text layer as a delimiter a naive parser can split on. */
+  .profile-links a:not(:last-child)::after { content: " |"; }
 
   /* Optional candidate photo. Laid out as a bordered circle in the header row
      so it matches what RenderCV's photo_position:left renders. */
@@ -171,13 +178,14 @@ HTML_TEMPLATE = """
   </div>
 
   {# Profile URLs on a dedicated full-width line — see .profile-links in the
-     stylesheet for why a photo must not share the line with them. #}
+     stylesheet for why a photo must not share the line with them. The flex
+     gap supplies the separator, so no pipe markup is needed. #}
   {% set links = [] %}
   {% if linkedin %}{% set _ = links.append('<a href="' ~ (linkedin | e) ~ '">' ~ (linkedin | ats_link('linkedin')) ~ '</a>') %}{% endif %}
   {% if github %}{% set _ = links.append('<a href="' ~ (github | e) ~ '">' ~ (github | ats_link('github')) ~ '</a>') %}{% endif %}
   {% if portfolio %}{% set _ = links.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
   {% if links %}
-  <div class="profile-links">{{ links|join('<span class="sep">|</span>')|safe }}</div>
+  <div class="profile-links">{{ links|join('')|safe }}</div>
   {% endif %}
 
   {% if summary %}
