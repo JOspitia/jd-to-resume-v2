@@ -1808,43 +1808,103 @@ def _validate_yaml_schema(parsed: dict):
     return cleaned, None
 
 
+def _content_tokens(text: str) -> set:
+    """
+    Extract the meaningful tokens (words, numbers) from a YAML document so two
+    versions can be compared for content drift. YAML syntax itself — indentation,
+    colons, quotes, list dashes — is deliberately discarded.
+    """
+    # Drop line-leading list markers so "- Python" and "Python" tokenize alike.
+    cleaned = re.sub(r"^\s*-\s+", " ", text, flags=re.MULTILINE)
+    words = re.findall(r"[\wÀ-ÿ]{3,}", cleaned, flags=re.UNICODE)
+    return {w.lower() for w in words}
+
+
+def _content_drift(original: str, repaired: str) -> Optional[str]:
+    """
+    Returns None when a repair preserved the user's text, or a human-readable
+    reason when it did not.
+
+    This is the programmatic guarantee behind the product promise: editing the
+    YAML by hand and pressing "Generar CV" never rewrites what the user wrote.
+    The LLM is asked to fix structure only; this check enforces it, because a
+    prompt instruction alone is not a guarantee.
+
+    Returns a reason string when content was lost or invented.
+    """
+    before = _content_tokens(original)
+    after = _content_tokens(repaired)
+    if not before:
+        return None
+
+    # A word the user split across two lines ("selecci\n  ón") is rejoined by the
+    # repair, so test substring presence against a whitespace-stripped blob
+    # instead of exact token equality.
+    after_flat = re.sub(r"\s+", "", repaired).lower()
+
+    lost = sorted(w for w in before if w not in after and w not in after_flat)
+    if lost:
+        sample = ", ".join(lost[:8])
+        noun = "palabra" if len(lost) == 1 else "palabras"
+        return (
+            f"la reparación perdió {len(lost)} {noun} de tu texto "
+            f"({sample}{'…' if len(lost) > 8 else ''})"
+        )
+
+    # A pure syntax fix (indentation, quoting, list markers, colons) adds zero
+    # words by definition. Anything new is therefore invented content, so the
+    # allowance is exactly zero. There is no legitimate structural token a
+    # YAML syntax repair would introduce.
+    added = sorted(after - before)
+    if added:
+        sample = ", ".join(added[:8])
+        noun = "palabra" if len(added) == 1 else "palabras"
+        verb = "estaba" if len(added) == 1 else "estaban"
+        return (
+            f"la reparación agregó {len(added)} {noun} que no {verb} en tu texto "
+            f"({sample}{'…' if len(added) > 8 else ''})"
+        )
+
+    return None
+
+
 async def _ask_llm_to_repair_yaml_async(broken_yaml: str, schema_errors: list[str], domain_game: Optional[str]) -> str:
-    domain_line = f"\nTARGET DOMAIN (vocabulary hint): {domain_game}\n" if domain_game else ""
-    prompt = f"""You are a strict, FAITHFUL YAML repair engine. The user has hand-edited a YAML document and broken its syntax. Your ONLY job is to fix the syntax — NOT to rewrite or improve the content.
+    domain_line = f"\nTARGET DOMAIN (structural hint only — do not change any wording): {domain_game}\n" if domain_game else ""
+    prompt = f"""You are a YAML SYNTAX repair engine. The user hand-edited a YAML document and broke its structure. Your job is to make it parse. You are NOT a writing assistant.
 
-GOLDEN RULE — PRESERVE EVERY WORD
-If the user's bullet says "Aporto experiencia en atracción: candidatos calificados" you keep that exact text. You only fix the trailing colon if it breaks YAML parsing (e.g., by wrapping the value in double quotes). You do NOT remove it, rephrase it, or replace it with something "better". Treat every value the user wrote as sacred.
+CONTEXT — WHY THIS MATTERS
+This document is a finished resume the user wrote by hand. They pressed "Generar CV" and want a PDF of EXACTLY what they wrote. You exist only because the file will not parse. Once it parses, your work is done.
 
-WHAT TO FIX (syntax only)
-  - Indentation: normalize to 2 spaces.
-  - String quoting: if a value contains a colon, hyphen, or another YAML special char without quotes, wrap the value in double quotes. Example: `point: Aporto experiencia: en atracción` becomes `point: "Aporto experiencia: en atracción"`.
-  - MULTILINE TEXT (VERY IMPORTANT): a long value like `summary` that got split across several lines by the user MUST be converted to a YAML block scalar. Use `>-` (folded, keeps it as one flowing paragraph) for prose like the summary, or `|-` (literal, preserves line breaks) for bullet-like content. Example:
+THE ONLY THINGS YOU MAY CHANGE
+  - Indentation.
+  - Quoting and escaping of values (wrap a value in double quotes if it contains a colon, a leading dash, a `#`, or a quote).
+  - Multiline values: convert a value the user split across lines into a block scalar. Use `>-` for prose, `|-` when the line breaks are meaningful. Example:
       WRONG: `summary: Psicóloga Organizacional con más de 2 años\n  de experiencia en selección`
       RIGHT: `summary: >-\n    Psicóloga Organizacional con más de 2 años\n    de experiencia en selección`
-    NEVER leave a multi-line plain scalar — that is what produces `bad indentation of a sequence entry`.
-  - List syntax: ensure each list item starts with `- `.
-  - Missing colons: add them where the schema requires.
-  - Type mismatches: a list that became a string should be split back into list items IF the content supports it. If the content is a single sentence, wrap it in a one-item list.
+  - List markers, so every item starts with `- `.
+  - Colons and separators.
+  - Empty lists written as `key: []` on one line.
 
-WHAT NEVER TO DO
-  - Do NOT remove any key, value, or list item, even if it looks redundant.
-  - Do NOT add content the user did not write.
-  - Do NOT rephrase, summarize, "improve", or "translate" the user's text.
-  - Do NOT merge or split sections.
-  - Do NOT change the language of any value (Spanish stays Spanish, English stays English).
-  - Do NOT drop a malformed entry "just because it looks hard" — escape it as a quoted string first.
+THE THINGS YOU MUST NOT DO
+  - Do not rewrite, rephrase, translate, or "improve" any sentence.
+  - Do not shorten, expand, summarize, or reorder.
+  - Do not change dates, numbers, names, companies, tools, or URLs.
+  - Do not add information the user did not write.
+  - Do not delete information, even if it looks redundant or misspelled.
+  - Do not change the language of any value.
+  - Do not merge or split sections. Do not add or remove keys.
+  - Do not convert one sentence into a list of sentences, or a list into a sentence.
 
-If a value is truly unsalvageable (e.g., the user wrote a control character like \\x00 in the middle of a string), escape it as a quoted YAML string rather than dropping it.
+SELF-CHECK BEFORE ANSWERING
+Re-read your output and confirm every word of the input appears, unchanged. If you cannot fix the structure without altering a single word, output the original text with only the indentation and quoting corrected.
 
-OUTPUT FORMAT
-  - Output ONLY the repaired YAML.
-  - No prose, no fences, no explanations, no markdown.
-  - The output must be valid YAML that parses with yaml.safe_load.{domain_line}
+OUTPUT
+Only the repaired YAML. No prose, no markdown fences, no explanation.{domain_line}
 
 VALIDATION ERRORS:
 {chr(10).join(f"- {e}" for e in schema_errors)}
 
-EXPECTED SCHEMA (see STRICT RULES below):
+EXPECTED STRUCTURE:
 {_YAML_SCHEMA_DESCRIPTION}
 
 BROKEN YAML:
@@ -1911,6 +1971,21 @@ async def repair_yaml(
             repairs.append("LLM produced valid YAML syntax.")
             yaml_text = llm_yaml
             parsed = parsed2
+            # Hard guarantee: the repair must not have rewritten the user's
+            # text. A prompt instruction is not enough on its own.
+            drift = _content_drift(original_yaml, llm_yaml)
+            if drift:
+                return {
+                    "ok": False,
+                    "yaml": original_yaml,
+                    "repairs": repairs,
+                    "schema_errors": [f"El texto fue modificado: {drift}"],
+                    "error": (
+                        f"La IA reparó la sintaxis pero {drift}. "
+                        f"Se devolvió tu texto original sin tocar — corregí la sintaxis a mano."
+                    ),
+                }
+            repairs.append("Texto verificado: sin cambios de contenido.")
         else:
             yaml_text = original_yaml
 
@@ -1949,18 +2024,50 @@ async def repair_yaml(
                 }
             repairs.append("LLM produced YAML that passes schema validation.")
             yaml_text = llm_yaml
+            # Same content guarantee on the schema-repair pass. Compare against
+            # what we actually sent (the locally-valid text) so the original
+            # user's words are never lost across two chained repairs.
+            drift = _content_drift(yaml_text, llm_yaml)
+            if drift:
+                return {
+                    "ok": False,
+                    "yaml": original_yaml,
+                    "repairs": repairs,
+                    "schema_errors": [f"El texto fue modificado: {drift}"],
+                    "error": (
+                        f"La IA reparó la estructura pero {drift}. "
+                        f"Se devolvió tu texto original sin tocar — corregí a mano."
+                    ),
+                }
+            repairs.append("Texto verificado: sin cambios de contenido.")
 
-        # Both validations passed (either locally or after LLM repair).
+        # Both validations passed (either locally or after an LLM repair).
         # Re-serialize through yaml.safe_dump so the output is ALWAYS block-style
         # and human-readable. The LLM frequently answers with JSON (technically
         # valid YAML) which renders as one unreadable line in the textarea.
+        # yaml_text is guaranteed parseable at this point, and safe_dump is
+        # faithful to the parsed structure, so this cannot alter content.
         try:
-            normalized = _yaml_safe_dump_unicode(parsed if repairs == [] else _pyyaml.safe_load(yaml_text))
+            normalized = _yaml_safe_dump_unicode(_pyyaml.safe_load(yaml_text))
             if normalized.strip() != yaml_text.strip():
                 repairs.append("Re-formateado a YAML legible (bloques y saltos de línea).")
             yaml_text = normalized
         except Exception as fmt_err:
             print(f"[WARN] Could not normalize repaired YAML formatting: {fmt_err}")
+
+        # Final belt-and-braces check against the user's original input.
+        final_drift = _content_drift(original_yaml, yaml_text)
+        if final_drift:
+            return {
+                "ok": False,
+                "yaml": original_yaml,
+                "repairs": repairs,
+                "schema_errors": [f"El texto fue modificado: {final_drift}"],
+                "error": (
+                    f"La reparación alteró tu texto ({final_drift}). "
+                    f"Se devolvió tu texto original sin tocar."
+                ),
+            }
 
         return {
             "ok": True,

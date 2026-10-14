@@ -123,6 +123,19 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
           );
         }
         const repairData = await repairRes.json();
+
+        // The backend refuses any repair that altered the user's words and
+        // returns the ORIGINAL text in that case. Surface its message and
+        // leave the textarea untouched — never render a rewritten document.
+        if (repairData?.ok === false) {
+          setYamlRepairing(false);
+          setYamlError(
+            repairData.error ||
+              'La IA no pudo reparar el YAML sin alterar tu texto. Corregí la sintaxis a mano.',
+          );
+          return;
+        }
+
         if (typeof repairData?.yaml === 'string' && repairData.yaml.trim()) {
           // Validate the IA's output LOCALLY before accepting it. The IA
           // sometimes claims the YAML is valid but produces indentation
@@ -359,6 +372,16 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       });
       if (!res.ok) throw new Error('No se pudo conectar con el endpoint de reparación YAML.');
       const data = await res.json();
+
+      // The backend rejects any repair that changed the user's words and
+      // returns the original text in that case. Do not touch the textarea.
+      if (data?.ok === false) {
+        setYamlError(
+          data.error ||
+            'La IA no pudo reparar el YAML sin alterar tu texto. Tu texto NO se perdió — corregí la sintaxis a mano.',
+        );
+        return;
+      }
 
       if (typeof data?.yaml === 'string' && data.yaml.trim()) {
         // Validate the IA's output LOCALLY before accepting it. The IA
