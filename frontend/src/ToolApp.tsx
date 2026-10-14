@@ -57,6 +57,16 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [atsData, setAtsData] = useState<any | null>(null);
   const [atsErrorMessage, setAtsErrorMessage] = useState('');
 
+  // === Edit-before-generate YAML editor (feat/yaml-editor) ===
+  // When `editBeforeGenerate` is true, /api/generate streams the parsed
+  // LLM JSON as YAML over SSE (the `yaml_ready` event) and stops without
+  // rendering a PDF. The user edits the YAML in a textarea, then either
+  // POSTs it to /api/render-from-yaml (T7) or /api/analyze-yaml (T7).
+  const [editBeforeGenerate, setEditBeforeGenerate] = useState(false);
+  const [yamlContent, setYamlContent] = useState<string | null>(null);
+  const [yamlReady, setYamlReady] = useState(false);
+  const [yamlError, setYamlError] = useState('');
+
   // Live timer for loading states (seconds counter up to 60s)
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -161,6 +171,11 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setLastOutputLanguage('unknown');
     setAuditScores(null);
     setTranslationMeta(null);
+    // === YAML editor state reset (feat/yaml-editor) ===
+    setEditBeforeGenerate(false);
+    setYamlContent(null);
+    setYamlReady(false);
+    setYamlError('');
 
 
     if (fileInputRef.current) {
@@ -285,6 +300,10 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     // Multi-domain selection (feat/multi-domain-tailoring).
     // The backend uses this to compose the prompt body via domain_games.get_game().
     formData.append("domain_game", domainGame);
+    // Edit-before-generate flag (feat/yaml-editor). When true, the backend
+    // stops after the LLM call and streams the parsed_data as YAML over SSE
+    // (the `yaml_ready` event) instead of rendering a PDF.
+    formData.append("edit_before_generate", editBeforeGenerate ? "true" : "false");
     if (pageBreakSection && pageBreakSection !== 'none') {
       formData.append("page_break_section", pageBreakSection);
     }
@@ -343,6 +362,22 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
 
                 if (data.step) setStepMessage(data.step);
                 if (data.progress) setProgress(data.progress);
+
+                // === YAML editor (feat/yaml-editor) ===
+                // The backend emitted a `yaml_ready` event: the LLM has
+                // produced parsed_data and the user wants to edit the
+                // YAML before rendering. Stash the YAML and open the
+                // editor panel (rendered in T7).
+                if (data.yaml_ready && typeof data.yaml === 'string') {
+                  setYamlContent(data.yaml);
+                  setYamlReady(true);
+                  setYamlError('');
+                  setStatus('idle');
+                  setProgress(100);
+                  setStepMessage(data.step || 'YAML listo para revisión');
+                  return;
+                }
+
                 if (data.download_url) {
                   const fullUrl = `http://localhost:8000${data.download_url}`;
                   setDownloadUrl(fullUrl);
@@ -907,13 +942,24 @@ className = "rm-btn bg-white hover:bg-rose-50 border-2 border-black text-rose-70
 
 {/* Auto ATS Checkbox Option */ }
 <label className="flex items-center gap-3 bg-white border-2 border-black p-4 font-mono font-bold cursor-pointer hover:bg-gray-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] select-none" >
-  <input 
+  <input
               type="checkbox"
 checked = { autoValidateATS }
 onChange = {(e) => setAutoValidateATS(e.target.checked)}
 className = "w-5 h-5 accent-blue-700 cursor-pointer"
   />
   <span className="text-sm md:text-base" > Validar automáticamente match ATS al finalizar generación </span>
+    </label>
+
+    {/* Edit-before-generate YAML editor checkbox (feat/yaml-editor) */}
+    < label className = "flex items-center gap-3 bg-white border-2 border-black p-4 font-mono font-bold cursor-pointer hover:bg-gray-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] select-none mt-3" >
+      < input
+  type = "checkbox"
+  checked = { editBeforeGenerate }
+  onChange = {(e) => setEditBeforeGenerate(e.target.checked)}
+  className = "w-5 h-5 accent-blue-700 cursor-pointer"
+  />
+  < span className = "text-sm md:text-base" > Editar respuesta de la IA antes de generar el CV (formato YAML) </span>
     </label>
     </motion.div>
 
