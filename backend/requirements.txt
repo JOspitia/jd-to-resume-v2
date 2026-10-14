@@ -13,3 +13,4 @@ openai
 rendercv
 rendercv-fonts
 typst
+pyyaml

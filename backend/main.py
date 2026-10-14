@@ -1364,7 +1364,13 @@ IMPORTANT:
                 print(f"[WARN] Auto re-audit failed: {audit_err}")
             translation_meta = {"source_language": source_language, "target_language": "en", "forced": True}
 
-        yield f"data: {json.dumps({'step': 'Finished', 'progress': 100, 'download_url': f'/api/download/{output_filename}', 'audit_scores': audit_scores, 'translation': translation_meta})}\n\n"
+        # Emit the YAML alongside `download_url` so the frontend can capture it
+        # as `lastGeneratedYaml` and the user can re-open the YAML editor
+        # after a non-edit-before-generate flow. ~2-5KB on the wire.
+        # In the edit_before_generate path we returned earlier with the YAML
+        # on its own SSE event, so this branch only runs for the direct flow.
+        yaml_payload = _yaml_safe_dump_unicode(parsed_data)
+        yield f"data: {json.dumps({'step': 'Finished', 'progress': 100, 'download_url': f'/api/download/{output_filename}', 'audit_scores': audit_scores, 'translation': translation_meta, 'yaml': yaml_payload})}\n\n"
         
     except Exception as e:
         import traceback
@@ -1693,6 +1699,250 @@ async def analyze_yaml(
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# YAML repair: ask the LLM to fix a damaged YAML back into the schema the
+# render path expects. Two-pass strategy:
+#   1. Local syntactic validation (yaml.safe_load) — if it fails, capture the
+#      parser error and ask the LLM for a syntax repair.
+#   2. Local schema validation against GeminiResumeOutput (Pydantic) — if it
+#      fails, capture the validation errors and ask the LLM for a structural
+#      repair, with the previous YAML + domain_game as context.
+#   3. Both pass → return the YAML untouched with {repaired: False}.
+# Always returns 200 with a JSON envelope so the frontend can distinguish
+# "no repairs needed" from "LLM fixed it" from "could not fix".
+# ---------------------------------------------------------------------------
+_YAML_SCHEMA_DESCRIPTION = """
+{
+  "name": "Full Name (string)",
+  "location": "City, Country (string)",
+  "phone": "Phone Number (string)",
+  "email": "Email Address (string)",
+  "portfolio": "Portfolio URL (string)",
+  "linkedin": "LinkedIn URL (string)",
+  "github": "GitHub URL (string)",
+  "summary": "Concise professional summary (string)",
+  "education": [
+    {
+      "school": "string",
+      "degree": "string",
+      "dates": "string (e.g. '2020 - 2024' or '2018-01 - Presente')",
+      "gpa": "string (optional)"
+    }
+  ],
+  "skills": [
+    { "category": "string (e.g. 'Backend', 'Bases de Datos')", "items": ["tool1", "tool2"] }
+  ],
+  "experience": [
+    {
+      "company": "string",
+      "role": "string",
+      "dates": "string",
+      "points": ["Achievement 1", "Achievement 2", "Achievement 3"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "string",
+      "dates": "string",
+      "url": "string (live demo URL — optional)",
+      "github_url": "string (repo URL — optional)",
+      "points": ["Achievement 1", "Achievement 2"]
+    }
+  ],
+  "achievements": ["Award 1", "Certification 2"],
+  "section_labels": {
+    "summary": "string (e.g. 'Resumen Profesional')",
+    "education": "string",
+    "skills": "string (e.g. 'Habilidades')",
+    "experience": "string",
+    "projects": "string",
+    "achievements": "string",
+    "portfolio": "string"
+  }
+}
+
+CRITICAL RULES (your output MUST honor):
+1. Output ONLY a valid YAML document. No prose, no ``` fences, no comments.
+2. lists MUST be YAML lists (lines starting with `- `), not inline `[a, b, c]`.
+3. Strings inside lists MUST be quoted with double quotes if they contain
+   colons, hashes, or special YAML characters.
+4. NEVER invent new top-level keys. NEVER drop required keys.
+5. Preserve all present candidate facts verbatim (real names, dates, schools,
+   tool names, metrics). Only fix structure, indentation, and types.
+"""
+
+
+def _parse_yaml_safe(text: str):
+    """Returns (parsed_dict | None, error_message | None)."""
+    try:
+        parsed = _pyyaml.safe_load(text)
+    except _pyyaml.YAMLError as e:
+        return None, f"YAML syntax error: {e}"
+    if not isinstance(parsed, dict):
+        return None, f"Top-level must be a YAML mapping (got {type(parsed).__name__})"
+    return parsed, None
+
+
+def _validate_yaml_schema(parsed: dict):
+    """Returns (cleaned_dict | None, error_message | None) using Pydantic.
+
+    Pre-populates all fields with the same defaults that `render_from_yaml`
+    applies, so a YAML missing optional contact fields does NOT fail this
+    check — only structural mismatches (wrong types, missing required
+    sub-keys on lists, etc.) will.
+    """
+    defaults = {
+        "name": "", "location": "", "phone": "", "email": "",
+        "portfolio": "", "linkedin": "", "github": "",
+        "summary": "", "education": [], "skills": [],
+        "experience": [], "projects": [], "achievements": [],
+        "section_labels": {},
+    }
+    populated = {**defaults, **parsed}  # parsed wins over defaults
+    try:
+        cleaned = GeminiResumeOutput(**populated).model_dump()
+    except Exception as e:
+        return None, f"Schema mismatch: {e}"
+    return cleaned, None
+
+
+async def _ask_llm_to_repair_yaml_async(broken_yaml: str, schema_errors: list[str], domain_game: Optional[str]) -> str:
+    domain_line = f"\nTARGET DOMAIN (vocabulary hint): {domain_game}\n" if domain_game else ""
+    prompt = f"""You are a strict YAML repair engine. The user pasted a YAML document
+that needs to be repaired. You will receive:
+  - The broken YAML.
+  - The validation errors reported by our schema.
+  - The schema the YAML MUST satisfy.
+
+TASK
+1. Fix indentation, list syntax, string quoting, key naming, and type mismatches.
+2. Do NOT modify factual content (names, dates, schools, tool names, numbers).
+3. If a list entry is malformed, drop it ONLY if it cannot be salvaged without invention.
+4. Output ONLY the repaired YAML. No prose, no fences, no explanations.{domain_line}
+
+VALIDATION ERRORS:
+{chr(10).join(f"- {e}" for e in schema_errors)}
+
+EXPECTED SCHEMA (see STRICT RULES below):
+{_YAML_SCHEMA_DESCRIPTION}
+
+BROKEN YAML:
+```yaml
+{broken_yaml}
+```
+"""
+    return await call_llm_api(prompt)
+
+
+@app.post("/api/repair-yaml")
+async def repair_yaml(
+    yaml_content: str = Form(...),
+    domain_game: Optional[str] = Form(None),
+):
+    """
+    Repair a damaged YAML that the user edited in the YAML editor panel.
+
+    Two-pass validation:
+      1. yaml.safe_load  → catches indentation, quoting, missing colons, etc.
+      2. GeminiResumeOutput (Pydantic) → catches structural mismatch (e.g. a
+         list that became a string, or a missing `points` key inside experience).
+
+    If either validation fails, send the YAML + the error report to the LLM
+    asking for a strict-yet-faithful structural repair. The LLM response is
+    parsed and re-validated. If the second pass ALSO fails, return the partial
+    repair with `repairs: [...]` AND `schema_errors: [...]` so the user can
+    finish manually.
+
+    Returns:
+        {
+          "ok": bool,             # True if final YAML passes both validations
+          "yaml": str,            # the YAML text to put back in the textarea
+          "repairs": list[str],   # human-readable summary of what was changed
+          "schema_errors": list[str]  # remaining issues (empty if ok=True)
+        }
+    """
+    try:
+        original_yaml = yaml_content
+        repairs: list[str] = []
+
+        # Pass 1 — local syntactic validation
+        parsed, syntax_err = _parse_yaml_safe(original_yaml)
+        if syntax_err or parsed is None:
+            repairs.append(f"Local validation rejected the YAML: {syntax_err}")
+            llm_response = await _ask_llm_to_repair_yaml_async(
+                original_yaml, [syntax_err or "unknown syntax error"], domain_game,
+            )
+            # Strip markdown fences if present
+            llm_yaml = _strip_yaml_fences(llm_response)
+            # Re-validate the LLM response
+            parsed2, syntax_err2 = _parse_yaml_safe(llm_yaml)
+            if syntax_err2 or parsed2 is None:
+                return {
+                    "ok": False,
+                    "yaml": llm_yaml,
+                    "repairs": repairs + [f"LLM still returned invalid YAML: {syntax_err2}"],
+                    "schema_errors": [syntax_err2 or "yaml.safe_load failed"],
+                }
+            repairs.append("LLM produced valid YAML syntax.")
+            yaml_text = llm_yaml
+            parsed = parsed2
+        else:
+            yaml_text = original_yaml
+
+        # Pass 2 — schema validation against GeminiResumeOutput
+        cleaned, schema_err = _validate_yaml_schema(parsed)
+        if schema_err or cleaned is None:
+            repairs.append(f"Local schema check rejected the YAML: {schema_err}")
+            llm_response = await _ask_llm_to_repair_yaml_async(
+                yaml_text, [schema_err or "unknown schema error"], domain_game,
+            )
+            llm_yaml = _strip_yaml_fences(llm_response)
+            parsed2, syntax_err2 = _parse_yaml_safe(llm_yaml)
+            if syntax_err2 or parsed2 is None:
+                return {
+                    "ok": False,
+                    "yaml": llm_yaml,
+                    "repairs": repairs + [f"LLM returned YAML that still fails syntax: {syntax_err2}"],
+                    "schema_errors": [syntax_err2 or "yaml.safe_load failed"],
+                }
+            cleaned2, schema_err2 = _validate_yaml_schema(parsed2)
+            if schema_err2 or cleaned2 is None:
+                # Best-effort: return the partial YAML so the user can finish manually
+                return {
+                    "ok": False,
+                    "yaml": llm_yaml,
+                    "repairs": repairs + ["LLM returned YAML that still fails schema validation."],
+                    "schema_errors": [schema_err2 or "schema validation failed"],
+                }
+            repairs.append("LLM produced YAML that passes schema validation.")
+            yaml_text = llm_yaml
+
+        # Both validations passed (either locally or after LLM repair)
+        return {
+            "ok": True,
+            "yaml": yaml_text,
+            "repairs": repairs,
+            "schema_errors": [],
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"ok": False, "yaml": yaml_content, "repairs": [], "schema_errors": [f"Repair endpoint error: {e}"]}
+
+
+def _strip_yaml_fences(text: str) -> str:
+    """Strip ```yaml ... ``` markdown fences if the LLM added them despite instructions."""
+    t = text.strip()
+    if t.startswith("```"):
+        # Take the content between the first line and the last ```
+        first_newline = t.find("\n")
+        if first_newline != -1:
+            t = t[first_newline + 1:]
+        if t.endswith("```"):
+            t = t[:-3].rstrip()
+    return t
 
 
 @app.get("/api/download/{filename}")
