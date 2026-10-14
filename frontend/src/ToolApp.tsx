@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw, Languages } from 'lucide-react';
+import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw, Languages, Code2, Briefcase, Brain } from 'lucide-react';
 
 
 
@@ -11,6 +11,14 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [githubUrl, setGithubUrl] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
   const [portfolioUrl, setPortfolioUrl] = useState('');
+  // === Multi-domain tailoring (feat/multi-domain-tailoring) ===
+  // The selected profile dictates the prompt body that the backend composes:
+  //   'tech'          -> software engineers, full-stack, data/ML, DevOps, QA.
+  //   'hr_recruiting' -> talent acquisition analysts / recruiters / HRBPs.
+  //   'psychology'    -> psychologists (organizational / clinical / educational).
+  // Default is 'tech' to preserve the v2.5 UX byte-for-byte when the user does
+  // not pick anything.
+  const [domainGame, setDomainGame] = useState<'tech' | 'hr_recruiting' | 'psychology'>('tech');
   const [extractLinkedinInfo, setExtractLinkedinInfo] = useState(false);
   const [step2Mode, setStep2Mode] = useState<'jd' | 'custom'>('jd');
   const [status, setStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
@@ -129,6 +137,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setGithubUrl('');
     setLinkedinUrl('');
     setPortfolioUrl('');
+    setDomainGame('tech');
     try {
       localStorage.removeItem('jd-to-resume.contact');
     } catch {
@@ -273,6 +282,9 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     formData.append("strict_edits_only", strictEditsOnly ? "true" : "false");
     formData.append("theme", selectedTheme);
     formData.append("fit_single_page", fitSinglePage ? "true" : "false");
+    // Multi-domain selection (feat/multi-domain-tailoring).
+    // The backend uses this to compose the prompt body via domain_games.get_game().
+    formData.append("domain_game", domainGame);
     if (pageBreakSection && pageBreakSection !== 'none') {
       formData.append("page_break_section", pageBreakSection);
     }
@@ -496,6 +508,68 @@ className = "text-center space-y-4 pt-10 pb-8"
 
 {/* Input Grid */ }
 <div className="grid md:grid-cols-2 gap-10" >
+
+  {/* Domain Profile Selector (feat/multi-domain-tailoring) */}
+  {/* Sits above the upload section so the user picks the profile of the CV BEFORE
+       uploading it. Default = 'tech' to preserve v2.5 UX exactly. */}
+  < motion.div
+initial = {{ opacity: 0, y: -8 }}
+animate = {{ opacity: 1, y: 0 }}
+transition = {{ delay: 0.05 }}
+className = "rm-box p-6 md:p-7 flex flex-col bg-white relative md:col-span-2"
+  >
+  <div className="absolute -top-4 -left-4 rm-tag bg-purple-600 text-white px-4 py-2 text-lg" > PROFILE </div>
+    < h2 className = "text-2xl font-bold mb-3 font-serif mt-2" > Select Profile </h2>
+    < p className="text-sm text-gray-600 mb-5 font-mono" >
+      Choose the profile of the CV you are tailoring. The prompt, skill taxonomy and section labels adapt to the domain.
+    </p>
+    < div className = "grid sm:grid-cols-3 gap-4" >
+      {/* Tech */}
+      < button
+type = "button"
+onClick = {() => setDomainGame('tech')}
+className = {`rm-btn p-4 flex flex-col items-start text-left gap-2 ${domainGame === 'tech' ? 'bg-blue-700 text-white' : 'bg-white text-black'}`}
+      >
+  <div className="flex items-center gap-2 w-full" >
+    <Code2 className="w-5 h-5 shrink-0" />
+      <span className="font-bold font-mono text-base uppercase tracking-wide" > Tecnología </span>
+        </div>
+        < p className={ `text-xs leading-snug ${ domainGame === 'tech' ? 'text-blue-100' : 'text-gray-600' }` } >
+          Ingenieros de software, full-stack, data/ML, DevOps, QA.
+        </p>
+        </button>
+
+  {/* HR / Recruiting */}
+  < button
+type = "button"
+onClick = {() => setDomainGame('hr_recruiting')}
+className = {`rm-btn p-4 flex flex-col items-start text-left gap-2 ${domainGame === 'hr_recruiting' ? 'bg-blue-700 text-white' : 'bg-white text-black'}`}
+      >
+  <div className="flex items-center gap-2 w-full" >
+    <Briefcase className="w-5 h-5 shrink-0" />
+      <span className="font-bold font-mono text-base uppercase tracking-wide" > Analistas de Contratación </span>
+        </div>
+        < p className={ `text-xs leading-snug ${ domainGame === 'hr_recruiting' ? 'text-blue-100' : 'text-gray-600' }` } >
+          Reclutadores, selección, HRBP, employer branding, onboarding.
+        </p>
+        </button>
+
+  {/* Psychology */}
+  < button
+type = "button"
+onClick = {() => setDomainGame('psychology')}
+className = {`rm-btn p-4 flex flex-col items-start text-left gap-2 ${domainGame === 'psychology' ? 'bg-blue-700 text-white' : 'bg-white text-black'}`}
+      >
+  <div className="flex items-center gap-2 w-full" >
+    <Brain className="w-5 h-5 shrink-0" />
+      <span className="font-bold font-mono text-base uppercase tracking-wide" > Psicología </span>
+        </div>
+        < p className={ `text-xs leading-snug ${ domainGame === 'psychology' ? 'text-blue-100' : 'text-gray-600' }` } >
+          Psicólogos/as organizacional, clínico, educativo, social o forense.
+        </p>
+        </button>
+    </div>
+    </motion.div>
 
   {/* File Upload Section */ }
   < motion.div
