@@ -309,41 +309,81 @@ export function parseYamlToFormData(yamlText: string): YamlFormData {
 // quote them when they contain YAML control characters).
 // ---------------------------------------------------------------------------
 
+// Characters that force a YAML plain scalar to be quoted. Kept deliberately
+// conservative: quoting more than necessary is harmless, quoting too little
+// silently corrupts the document.
+const YAML_UNSAFE = /[:#{}[\],&*?|<>=!%@`"'\n\r\t\\]|^[\s-]|[\s]$/;
+
+/**
+ * Serialize a string as a YAML scalar.
+ *
+ * Uses JSON double-quote escaping, which is a strict subset of YAML's
+ * double-quoted style, so the output round-trips through PyYAML and js-yaml
+ * identically. Previous versions used a heuristic regex that missed quotes,
+ * backslashes and leading/trailing whitespace, which produced YAML that
+ * `yaml.safe_load` rejected with `bad indentation of a sequence entry`.
+ */
 function yamlString(s: string): string {
-  // Empty -> ''
   if (s === '') return "''";
-  // If the string contains YAML control characters, quote it.
-  if (/[:{}\[\],&*#?|<>=!%@`]/.test(s) || s !== s.trim()) {
-    return JSON.stringify(s);
-  }
+  if (YAML_UNSAFE.test(s)) return JSON.stringify(s);
   return s;
 }
 
+/**
+ * Serialize free-form prose (the professional summary) as a YAML block scalar.
+ *
+ * `>-` (folded) is used rather than `|` (literal): a summary is one flowing
+ * paragraph, so newlines from the textarea should be folded into spaces
+ * instead of preserved as hard breaks inside the rendered PDF.
+ *
+ * Indentation is 2 spaces relative to the key, and every line is indented —
+ * including the first — otherwise YAML reads the unindented first line as a
+ * sibling key and fails with `bad indentation`.
+ */
 function yamlMultiline(s: string): string {
-  if (s === '') return "''";
-  if (!s.includes('\n')) return yamlString(s);
-  // Use literal block style (|) — preserves newlines, no escape needed.
-  // Indent the content by 2 spaces so the YAML parser reads it back
-  // as a single string with newlines.
-  const lines = s.split('\n');
-  return '|\n' + lines.map((l) => '  ' + l).join('\n');
+  const trimmed = s.trim();
+  if (trimmed === '') return "''";
+  if (!trimmed.includes('\n')) return yamlString(trimmed);
+  // `>-` requires the content to start on the line AFTER the indicator.
+  const body = trimmed.split('\n').map((l) => '  ' + l.trim()).join('\n');
+  return '>-\n' + body;
 }
 
-// Serialize a string field. Used for the simple `key: value` lines inside
-// a list entry (e.g. `  school: Universidad X`).
+// Indentation contract for list entries. Must stay consistent across
+// `fieldLine` and `stringListBlock`.
+//
+// A YAML sequence entry `- ` consumes exactly 2 columns, so the mapping keys
+// of that entry must be indented by 2 spaces to sit at column 2 — the same
+// column as the key that follows the dash. Nested sequences need one more
+// level (4 spaces). Mixing widths is what produced
+// `bad indentation of a sequence entry`: the previous code emitted
+// `-   key:` (dash + 3 spaces) while siblings used 2, so strict parsers saw
+// the key at column 3 and rejected the document.
+const LIST_KEY_INDENT = '  ';
+const LIST_ITEM_INDENT = '    ';
+
+// Serialize a mapping key inside a list entry, WITHOUT leading indent.
+// The caller supplies the `- ` prefix for the first line and LIST_KEY_INDENT
+// for siblings, so the key text itself is unindented. This keeps every key of
+// the entry at the same column (2), which strict parsers require.
 function fieldLine(key: string, value: string): string {
-  return `  ${key}: ${yamlString(value)}`;
+  return `${key}: ${yamlString(value)}`;
+}
+
+// Serialize a mapping key that is a sibling of the list entry's first key,
+// i.e. already at LIST_KEY_INDENT.
+function siblingFieldLine(key: string, value: string): string {
+  return `${LIST_KEY_INDENT}${key}: ${yamlString(value)}`;
 }
 
 // Serialize a list of strings under a key. Empty -> `key: []`,
-// non-empty -> `key:\n  - item1\n  - item2`.
+// non-empty -> `key:\n    - item1\n    - item2`.
 function stringListBlock(key: string, items: string[]): string[] {
-  if (items.length === 0) return [`  ${key}: []`];
-  // The key sits at 2-space indent (inside a `- ` list entry). The list
-  // items must be nested one level deeper (4-space indent) for strict
-  // YAML parsers like js-yaml. PyYAML is lenient and accepts 2-space
-  // indent, but js-yaml raises 'bad indentation of a sequence entry'.
-  return [`  ${key}:`, ...items.map((it) => `    - ${yamlString(it)}`)];
+  if (items.length === 0) return [`${LIST_KEY_INDENT}${key}: []`];
+  return [
+    `${LIST_KEY_INDENT}${key}:`,
+    ...items.map((it) => `${LIST_ITEM_INDENT}- ${yamlString(it)}`),
+  ];
 }
 
 export function serializeFormDataToYaml(data: YamlFormData): string {
@@ -364,24 +404,24 @@ export function serializeFormDataToYaml(data: YamlFormData): string {
   lines.push('');
 
   // Education — list of objects {school, degree, dates, gpa}
-  lines.push('education:');
   if (data.education.length === 0) {
-    lines.push('[]');
+    lines.push('education: []');
   } else {
+    lines.push('education:');
     for (const e of data.education) {
       lines.push(`- ${fieldLine('school', e.school)}`);
-      lines.push(`  ${fieldLine('degree', e.degree)}`);
-      lines.push(`  ${fieldLine('dates', e.dates)}`);
-      lines.push(`  ${fieldLine('gpa', e.gpa)}`);
+      lines.push(`${siblingFieldLine('degree', e.degree)}`);
+      lines.push(`${siblingFieldLine('dates', e.dates)}`);
+      lines.push(`${siblingFieldLine('gpa', e.gpa)}`);
     }
   }
   lines.push('');
 
   // Skills — list of objects {category, items: string[]}
-  lines.push('skills:');
   if (data.skills.length === 0) {
-    lines.push('[]');
+    lines.push('skills: []');
   } else {
+    lines.push('skills:');
     for (const s of data.skills) {
       lines.push(`- ${fieldLine('category', s.category)}`);
       lines.push(...stringListBlock('items', s.items));
@@ -390,37 +430,37 @@ export function serializeFormDataToYaml(data: YamlFormData): string {
   lines.push('');
 
   // Experience — list of objects {company, role, dates, points: string[]}
-  lines.push('experience:');
   if (data.experience.length === 0) {
-    lines.push('[]');
+    lines.push('experience: []');
   } else {
+    lines.push('experience:');
     for (const x of data.experience) {
       lines.push(`- ${fieldLine('company', x.company)}`);
-      lines.push(`  ${fieldLine('role', x.role)}`);
-      lines.push(`  ${fieldLine('dates', x.dates)}`);
+      lines.push(`${siblingFieldLine('role', x.role)}`);
+      lines.push(`${siblingFieldLine('dates', x.dates)}`);
       lines.push(...stringListBlock('points', x.points));
     }
   }
   lines.push('');
 
   // Projects — list of objects {name, dates, points: string[]}
-  lines.push('projects:');
   if (data.projects.length === 0) {
-    lines.push('[]');
+    lines.push('projects: []');
   } else {
+    lines.push('projects:');
     for (const p of data.projects) {
       lines.push(`- ${fieldLine('name', p.name)}`);
-      lines.push(`  ${fieldLine('dates', p.dates)}`);
+      lines.push(`${siblingFieldLine('dates', p.dates)}`);
       lines.push(...stringListBlock('points', p.points));
     }
   }
   lines.push('');
 
   // Achievements — flat list of strings
-  lines.push('achievements:');
   if (data.achievements.length === 0) {
-    lines.push('[]');
+    lines.push('achievements: []');
   } else {
+    lines.push('achievements:');
     for (const a of data.achievements) {
       lines.push(`- ${yamlString(a)}`);
     }
