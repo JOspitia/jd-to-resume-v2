@@ -29,7 +29,10 @@ from render_service import render_cv_with_rendercv
 from language import detect_language
 from domain_games import get_game
 from audit_prompts import build_audit_prompt as _build_audit_prompt_lib
-from yaml_helpers import serialize_resume_data_as_text as _serialize_resume_data_as_text
+from yaml_helpers import (
+    serialize_resume_data_as_text as _serialize_resume_data_as_text,
+    yaml_safe_dump_unicode as _yaml_safe_dump_unicode,
+)
 
 load_dotenv()
 
@@ -930,6 +933,7 @@ async def generation_pipeline(
     strict_edits_only: bool = False,
     force_language: Optional[str] = None,
     domain_game: Optional[str] = None,
+    edit_before_generate: bool = False,
 ):
     """
     The end-to-end generation pipeline. Returns an SSE stream of progress events and
@@ -944,6 +948,15 @@ async def generation_pipeline(
     available games today are: "tech" (default), "hr_recruiting", "psychology".
     Passing None or an unknown value falls back to "tech" (preserves v2.5 behaviour
     exactly because the tech game mirrors the legacy prompt body byte-for-byte).
+
+    When `edit_before_generate=True`, the pipeline stops right after the LLM
+    call has been parsed. It serialises `parsed_data` as YAML and emits a
+    single SSE event with the form `{"step": "YAML Ready for Review",
+    "progress": 100, "yaml": "...", "yaml_ready": true}` before returning
+    without rendering a PDF. The frontend is expected to either POST the
+    (possibly edited) YAML to `/api/render-from-yaml` (S6) or
+    `/api/analyze-yaml` (S8). When False (default, or omitted) the
+    existing PDF render path runs unchanged (S7).
     """
     if force_language:
         print(f"[TRANSLATE] force_language='{force_language}' — LANGUAGE OVERRIDE will be applied to system prompt (both preamble and tail).")
@@ -1283,6 +1296,21 @@ IMPORTANT:
         }
         labels = {**default_labels, **parsed_data.get("section_labels", {})}
 
+        # Edit-before-generate path (S2 of yaml-editor feature): stop here,
+        # serialise the parsed data as YAML, and stream it back to the
+        # frontend so the user can review/edit it before the (separate,
+        # LLM-free) render step. No PDF is produced; the frontend can then
+        # POST the (possibly edited) YAML to /api/render-from-yaml or
+        # /api/analyze-yaml.
+        if edit_before_generate:
+            try:
+                yaml_payload = _yaml_safe_dump_unicode(parsed_data)
+            except Exception as yaml_err:
+                yield f"data: {json.dumps({'error': f'YAML serialization failed: {yaml_err}'})}\n\n"
+                return
+            yield f"data: {json.dumps({'step': 'YAML Ready for Review', 'progress': 100, 'yaml': yaml_payload, 'yaml_ready': True})}\n\n"
+            return
+
         yield f"data: {json.dumps({'step': 'Formatting Professional PDF', 'progress': 90})}\n\n"
         
         output_filename = f"tailored_resume_{int(time.time())}.pdf"
@@ -1390,7 +1418,8 @@ async def generate_resume(
     extract_linkedin_info: Optional[bool] = Form(False),
     strict_edits_only: Optional[bool] = Form(False),
     force_language: Optional[str] = Form(None),
-    domain_game: Optional[str] = Form(None)
+    domain_game: Optional[str] = Form(None),
+    edit_before_generate: Optional[bool] = Form(False)
 ):
     # Validate force_language early so unsupported values are rejected with HTTP 422
     # before any upload work or LLM call happens.
@@ -1435,6 +1464,7 @@ async def generate_resume(
             strict_edits_only or False,
             force_language,
             domain_game,
+            edit_before_generate or False,
         ),
         media_type="text/event-stream"
     )
