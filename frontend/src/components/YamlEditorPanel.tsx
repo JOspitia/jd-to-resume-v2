@@ -307,9 +307,23 @@ export function YamlEditorPanel({
               {viewMode === 'form'
                 ? 'Estás editando el formulario. Los cambios se serializan a YAML automáticamente. Si preferís ver el YAML crudo, usá el toggle "Ver YAML" arriba.'
                 : 'Estás editando el YAML crudo. Si preferís un formulario con campos, usá el toggle "Formulario" arriba.'}
-              {' '}El backend usa la YAML exacta para renderizar. Si el YAML no es válido, el botón
-              "Generar CV" llama automáticamente a la IA para arreglarlo antes de renderizar.
             </p>
+
+            {/* Explicit contract for this route. The AI-tailoring path (JD /
+                "Requerimientos de modificación") is a different flow entirely;
+                here the document is the user's, and nothing rewrites it. */}
+            <div className="mt-3 p-3 bg-emerald-50 border-2 border-emerald-600 text-emerald-900 text-xs">
+              <span className="font-bold">Tu texto se genera tal cual.</span>{' '}
+              Al presionar "Generar CV" no se llama a la IA para reescribir nada: se
+              renderiza exactamente lo que escribiste. Si el formato tiene un error,
+              la IA solo corrige la estructura (indentación, comillas, listas) y el
+              sistema verifica que no haya cambiado ni una palabra — si lo hace,
+              devuelve tu texto original sin tocar.
+              <span className="block mt-1.5 opacity-80">
+                Para que la IA <em>reescriba</em> el CV usá "GENERATE TAILORED RESUME"
+                con una oferta o con "Requerimientos de modificación".
+              </span>
+            </div>
           </motion.div>
         </motion.div>
       )}

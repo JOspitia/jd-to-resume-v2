@@ -133,3 +133,40 @@ También se agregó al prompt del LLM la instrucción explícita de block scalar
 - **L8** (input): *"podrías poner que de igual una vez ejecutado el generar el cv para evitar cualquier tipo de error se aplique el auto reparar en caso de que hayan ingresado mal algo y no le hayan seleccionado reparar manualmente"*.
 - **L9** (hallazgo): el auto-reparar **ya existía** en `handleRenderFromYaml` desde antes (líneas 98-156), disparado por `validateYaml`. El texto del panel ya lo prometía ("el botón Generar CV llama automáticamente a la IA"). Lo que faltaba eran las protecciones, no el mecanismo.
 - **L10** (fix): paridad de seguridad entre el botón manual y el automático. Backup, guard degenerado, mensajes honestos y banner visible. Ver Fix 2.
+
+---
+
+## Fix 3 — El guard no veía las métricas
+
+`_content_tokens` tokenizaba con `[\wÀ-ÿ]{3,}`, un umbral de **3 caracteres**. Los números de dos dígitos no se comparaban nunca:
+
+```
+'30' capturado? False   <- métrica de 2 dígitos
+'40' capturado? False   <- métrica de 2 dígitos
+'120' capturado? True   <- métrica de 3 dígitos
+```
+
+Consecuencia: una IA podía cambiar *"Reduje el tiempo de contratación en **30%**"* por 45% y pasar la validación. El CV queda bien formateado, el ATS score no se cae, y **el documento miente sobre el desempeño del candidato**. Es el peor defecto posible en esta herramienta, y solo apareció al testear — no leyendo el código.
+
+Separación deliberada de las dos reglas:
+
+| Tipo | Patrón | Razón |
+|---|---|---|
+| Números | `\d+(?:[.,]\d+)*` — cualquier longitud | Una métrica vale lo que vale su longitud |
+| Palabras | `[^\W\d_]{3,}` | Sigue filtrando ruido ("de", "la") |
+
+No un regex único relajado: el umbral existe para las palabras y no para las cifras.
+
+Los mensajes de rechazo ahora distinguen un dato de una palabra — *"cambió o perdió 1 dato (30)"* dice al usuario qué pasó; *"1 palabra"* no.
+
+### Cobertura
+
+`backend/tests/test_content_drift.py` — 25 casos, escritos sin pytest para que corran en el venv actual (pytest no está instalado; los otros archivos de test tampoco son recolectables aquí).
+
+Tokenización de números a cualquier longitud, palabras acentuadas, supresión de palabras cortas; cuatro cambios solo de formato que deben aceptarse; una palabra partida y reunida; ocho cambios de contenido que deben rechazarse.
+
+- **L11** (input): *"también agregar que cuando seleccione la opción editar YAML antes de generar que no se edite nada con ia... en tal caso formatear el yaml con ia pero no modificar nada del texto"*.
+- **L12** (hallazgo): el guard ya existía pero **nunca se probó contra métricas**. La verificación salió 1/3: los dos swaps de cifras pasaban sin ser detectados.
+- **L13** (fix): dos reglas de tokenización en lugar de una, y mensaje que nombra el dato.
+- **L14** (tests): 25 casos en `backend/tests/test_content_drift.py`, sin pytest. El primer run falló en "skill dropped" por una indentación equivocada **en el fixture del test**, no en el guard — se corrigió el test.
+- **L15** (UI): la garantía quedó escrita en el toggle "Editar YAML antes de generar", que es donde el usuario decide si confiar.

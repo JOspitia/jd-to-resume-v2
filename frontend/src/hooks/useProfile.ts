@@ -51,6 +51,51 @@ export function useProfile() {
   // POSTs it to /api/render-from-yaml (T7) or /api/analyze-yaml (T7).
   const [editBeforeGenerate, setEditBeforeGenerate] = useState(false);
 
+  // === Optional candidate photo ===
+  // RenderCV embeds the photo from a filesystem path, so the File travels with
+  // every generate / render-from-yaml request rather than being converted to a
+  // data URI here. `photoPreview` is only the local <img> source.
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string>('');
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+  const PHOTO_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+  const handlePhotoChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0];
+    if (!picked) return;
+    setPhotoError('');
+    if (!PHOTO_TYPES.includes(picked.type)) {
+      setPhotoError('Usá una imagen PNG, JPG, GIF o WebP.');
+      return;
+    }
+    if (picked.size > MAX_PHOTO_BYTES) {
+      setPhotoError('La foto supera el límite de 5 MB.');
+      return;
+    }
+    // Revoke the previous object URL so repeated picks do not leak memory.
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhoto(picked);
+    setPhotoPreview(URL.createObjectURL(picked));
+  };
+
+  const clearPhoto = () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhoto(null);
+    setPhotoPreview(null);
+    setPhotoError('');
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  // Release the object URL when the hook unmounts.
+  useEffect(() => {
+    return () => {
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+    };
+  }, [photoPreview]);
+
   // Persist contact URLs to localStorage so the user does not have to retype
   // them every time they open the app. Loaded on mount, written on change,
   // cleared by the explicit Reset button.
@@ -98,6 +143,7 @@ export function useProfile() {
     setDomainGame('tech');
     setCustomPrompt('');
     setEditBeforeGenerate(false);
+    clearPhoto();
     try {
       localStorage.removeItem(CONTACT_STORAGE_KEY);
     } catch {
@@ -112,6 +158,12 @@ export function useProfile() {
     file,
     setFile,
     fileInputRef,
+    photo,
+    photoPreview,
+    photoError,
+    photoInputRef,
+    handlePhotoChange,
+    clearPhoto,
     handleFileChange,
     jd,
     setJd,

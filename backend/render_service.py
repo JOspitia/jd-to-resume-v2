@@ -67,10 +67,20 @@ def clean_date_str(date_val: str, is_end_date: bool = False) -> str:
         
     return "present" if is_end_date else "2020"
 
-def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = "sb2nov") -> Dict[str, Any]:
+def convert_llm_json_to_rendercv_dict(
+    parsed_data: Dict[str, Any],
+    theme: str = "sb2nov",
+    fit_single_page: bool = False,
+    photo_path: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Transforms the LLM output structure into RenderCV valid schema.
     Applies localized section titles from `section_labels`.
+
+    When `fit_single_page` is set, tightens page margins, line spacing and
+    section spacing so a long CV is pushed back onto a single page.
+
+    When `photo_path` is set, embeds the candidate photo in the header.
     """
     name = parsed_data.get("name", "Candidate").strip() or "Candidate"
     email = parsed_data.get("email", "").strip()
@@ -86,6 +96,11 @@ def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = 
         cv_info["email"] = email
     if phone:
         cv_info["phone"] = phone
+    # RenderCV resolves this against the filesystem, so only pass it when the
+    # file still exists — a stale path makes the whole render fail and silently
+    # drop the CV onto the Playwright fallback.
+    if photo_path and os.path.isfile(photo_path):
+        cv_info["photo"] = photo_path
 
         
     # Social networks & Links
@@ -273,16 +288,22 @@ def render_cv_with_rendercv(
     output_path: str, 
     theme: str = "sb2nov", 
     fit_single_page: bool = False,
-    page_break_section: Optional[str] = None
+    page_break_section: Optional[str] = None,
+    photo_path: Optional[str] = None
 ) -> str:
     """
     Renders CV to PDF using RenderCV Python API.
     Returns the absolute path to the generated PDF.
     """
+    # convert_llm_json_to_rendercv_dict applies the compact layout internally
+    # when fit_single_page is set (margins, line spacing, section spacing), so
+    # it must be forwarded here. Passing it previously raised TypeError, which
+    # silently pushed every RenderCV render onto the Playwright fallback.
     rendercv_dict = convert_llm_json_to_rendercv_dict(
         parsed_data, 
         theme=theme, 
-        fit_single_page=fit_single_page
+        fit_single_page=fit_single_page,
+        photo_path=photo_path
     )
     json_str = json.dumps(rendercv_dict, ensure_ascii=False)
     

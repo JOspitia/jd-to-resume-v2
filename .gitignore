@@ -38,6 +38,7 @@ backend/rendercv_output/
 backend/test_cv.*
 backend/test_output.*
 rendercv/
+rendercv_output/
 
 # Images
 *.jpg

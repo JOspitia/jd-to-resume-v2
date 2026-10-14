@@ -23,6 +23,7 @@ type YamlEditorDeps = {
     | 'customPrompt'
     | 'autoValidateATS'
     | 'setEditBeforeGenerate'
+    | 'photo'
   >;
   generation: Generation;
   audit: Audit;
@@ -47,6 +48,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     customPrompt,
     autoValidateATS,
     setEditBeforeGenerate,
+    photo,
   } = profile;
 
   const [yamlContent, setYamlContent] = useState<string | null>(null);
@@ -123,6 +125,19 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
           );
         }
         const repairData = await repairRes.json();
+
+        // The backend refuses any repair that altered the user's words and
+        // returns the ORIGINAL text in that case. Surface its message and
+        // leave the textarea untouched — never render a rewritten document.
+        if (repairData?.ok === false) {
+          setYamlRepairing(false);
+          setYamlError(
+            repairData.error ||
+              'La IA no pudo reparar el YAML sin alterar tu texto. Corregí la sintaxis a mano.',
+          );
+          return;
+        }
+
         if (typeof repairData?.yaml === 'string' && repairData.yaml.trim()) {
           // Validate the IA's output LOCALLY before accepting it. The IA
           // sometimes claims the YAML is valid but produces indentation
@@ -187,6 +202,9 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     if (jd) formData.append('jd', jd);
     if (customPrompt) formData.append('custom_instructions', customPrompt);
     if (domainGame) formData.append('domain_game', domainGame);
+    // The photo is a presentation choice, not part of the YAML document, so it
+    // is re-sent on every render-from-yaml pass.
+    if (photo) formData.append('photo', photo);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -359,6 +377,16 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       });
       if (!res.ok) throw new Error('No se pudo conectar con el endpoint de reparación YAML.');
       const data = await res.json();
+
+      // The backend rejects any repair that changed the user's words and
+      // returns the original text in that case. Do not touch the textarea.
+      if (data?.ok === false) {
+        setYamlError(
+          data.error ||
+            'La IA no pudo reparar el YAML sin alterar tu texto. Tu texto NO se perdió — corregí la sintaxis a mano.',
+        );
+        return;
+      }
 
       if (typeof data?.yaml === 'string' && data.yaml.trim()) {
         // Validate the IA's output LOCALLY before accepting it. The IA

@@ -34,6 +34,7 @@ type GenerationDeps = {
     | 'pageBreakSection'
     | 'editBeforeGenerate'
     | 'autoValidateATS'
+    | 'photo'
   >;
   audit: Audit;
   /**
@@ -64,6 +65,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     pageBreakSection,
     editBeforeGenerate,
     autoValidateATS,
+    photo,
   } = profile;
 
   const [status, setStatus] = useState<GenerationStatus>('idle');
@@ -182,6 +184,9 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     // stops after the LLM call and streams the parsed_data as YAML over SSE
     // (the `yaml_ready` event) instead of rendering a PDF.
     formData.append("edit_before_generate", editBeforeGenerate ? "true" : "false");
+    // Optional candidate photo. Re-sent on refinement passes too, so changing
+    // the photo alone still reproduces the whole CV without a fresh upload.
+    if (photo) formData.append("photo", photo);
     if (pageBreakSection && pageBreakSection !== 'none') {
       formData.append("page_break_section", pageBreakSection);
     }

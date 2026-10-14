@@ -19,6 +19,7 @@ import { GenerationProgress } from './components/GenerationProgress';
 import { ResultsPanel } from './components/ResultsPanel';
 import { YamlEditorPanel } from './components/YamlEditorPanel';
 import { AuditPanel } from './components/AuditPanel';
+import { PhotoField } from './components/PhotoField';
 
 /**
  * ToolApp — T2 of the UX refactor (specs S1-S12).
@@ -156,6 +157,14 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             onGithubUrlChange={profile.setGithubUrl}
             portfolioUrl={profile.portfolioUrl}
             onPortfolioUrlChange={profile.setPortfolioUrl}
+          />
+
+          <PhotoField
+            preview={profile.photoPreview}
+            error={profile.photoError}
+            inputRef={profile.photoInputRef}
+            onChange={profile.handlePhotoChange}
+            onClear={profile.clearPhoto}
           />
         </Section>
 

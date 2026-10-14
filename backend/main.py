@@ -11,8 +11,10 @@ if sys.platform == "win32":
 
 import json
 import asyncio
+import base64
+from html import escape
 from typing import Optional
-from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException
+from fastapi import FastAPI, UploadFile, Form, File, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -27,6 +29,7 @@ import re
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
 from language import detect_language
+from photo_helpers import save_photo as _save_photo, prune_orphaned_photos as _prune_photos
 from domain_games import get_game
 from audit_prompts import build_audit_prompt as _build_audit_prompt_lib
 from yaml_helpers import (
@@ -50,6 +53,31 @@ app.add_middleware(
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Candidate photos. Kept separate from generated PDFs so "Limpiar" can clear
+# one without touching the other.
+PHOTOS_DIR = os.path.join(OUTPUT_DIR, "photos")
+
+
+async def _persist_uploaded_photo(photo: Optional[UploadFile]) -> Optional[str]:
+    """
+    Validate and store an optional candidate photo. Returns the absolute path,
+    or None when no photo was sent.
+
+    Never raises: a bad photo degrades to "no photo" rather than failing the
+    whole generation, which would strand the user with no CV at all.
+    """
+    if photo is None or not photo.filename:
+        return None
+    try:
+        data = await photo.read()
+        return _save_photo(data, PHOTOS_DIR)
+    except ValueError as exc:
+        print(f"[PHOTO] rejected: {exc}")
+        return None
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[PHOTO] unexpected error: {exc}")
+        return None
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -71,6 +99,40 @@ HTML_TEMPLATE = """
   h1 { font-size: 24pt; font-weight: bold; text-align: center; margin: 0 0 5px 0; text-transform: uppercase; }
   .contact-info { text-align: center; font-size: 10.5pt; margin-bottom: 8px; }
   .contact-info a { color: #000; text-decoration: none; }
+
+  /* Profile URLs live on their own full-width line.
+     Keeping them on the same line as location/phone/email means a photo
+     squeezes the run and the layout wraps the URL at one of its hyphens:
+     "linkedin.com/in/julieth-andrea-caicedo-" / "goyeneche". The link
+     annotation survives but the extracted text does not, and ATS parsers
+     read the text layer, so a wrapped URL parses as a broken one.
+
+     `nowrap` keeps each URL from breaking mid-token, which is what protects
+     the slug. The links are separated with a flex gap so that when they do not
+     all fit they wrap BETWEEN links — a new line starting at a clean URL — and
+     never inside one. Using inline-block plus nowrap instead made the block
+     overflow its centred container, which defeats text-align and stacks the
+     links on separate internal lines. */
+  .profile-links {
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
+    gap: 0 6pt; font-size: 10.5pt; margin-bottom: 8px;
+  }
+  .profile-links a {
+    color: #000; text-decoration: none; white-space: nowrap;
+  }
+  /* Explicit "|" between URLs. Drawn with ::after so it cannot affect layout —
+     the flex gap already handles spacing — while still landing in the extracted
+     text layer as a delimiter a naive parser can split on. */
+  .profile-links a:not(:last-child)::after { content: " |"; }
+
+  /* Optional candidate photo. Laid out as a bordered circle in the header row
+     so it matches what RenderCV's photo_position:left renders. */
+  .header-row { display: flex; align-items: center; justify-content: center; gap: 14pt; }
+  .header-row .photo {
+    width: 3.2cm; height: 3.2cm; border-radius: 50%; object-fit: cover;
+    border: 1pt solid #000; flex: 0 0 auto;
+  }
+  .header-row .header-text { flex: 1 1 auto; }
   
   h2 { font-size: 12pt; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid black; padding-bottom: 2px; margin-top: 12px; margin-bottom: 6px; color: #000; page-break-after: avoid; break-after: avoid; }
   
@@ -99,20 +161,33 @@ HTML_TEMPLATE = """
 </style>
 </head>
 <body>
+  <div class="header-row">
+    {% if photo_uri %}
+      <img class="photo" src="{{ photo_uri }}" alt="" />
+    {% endif %}
+    <div class="header-text">
   <h1>{{ name }}</h1>
   <div class="contact-info">
     {% set items = [] %}
     {% if location %}{% set _ = items.append(location) %}{% endif %}
     {% if phone %}{% set _ = items.append(phone) %}{% endif %}
     {% if email %}{% set _ = items.append(email) %}{% endif %}
-    {% if linkedin %}{% set _ = items.append('<a href="' ~ linkedin ~ '">LinkedIn</a>') %}{% endif %}
-    {% if github %}{% set _ = items.append('<a href="' ~ github ~ '">GitHub</a>') %}{% endif %}
-    {% if portfolio %}{% set _ = items.append('<a href="' ~ portfolio ~ '">' ~ (labels.portfolio if (labels and 'portfolio' in labels) else ('Portafolio' if (labels and labels.summary != 'Professional Summary') else 'Portfolio')) ~ '</a>') %}{% endif %}
     {{ items|join(' | ') }}
   </div>
+    </div>
+  </div>
 
+  {# Profile URLs on a dedicated full-width line — see .profile-links in the
+     stylesheet for why a photo must not share the line with them. The flex
+     gap supplies the separator, so no pipe markup is needed. #}
+  {% set links = [] %}
+  {% if linkedin %}{% set _ = links.append('<a href="' ~ (linkedin | e) ~ '">' ~ (linkedin | ats_link('linkedin')) ~ '</a>') %}{% endif %}
+  {% if github %}{% set _ = links.append('<a href="' ~ (github | e) ~ '">' ~ (github | ats_link('github')) ~ '</a>') %}{% endif %}
+  {% if portfolio %}{% set _ = links.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
+  {% if links %}
+  <div class="profile-links">{{ links|join('')|safe }}</div>
+  {% endif %}
 
-  
   {% if summary %}
   <div class="resume-entry {% if page_break_section == 'summary' %}manual-page-break{% endif %}">
     <h2>{{ labels.summary }}</h2>
@@ -204,6 +279,104 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
+
+def _ats_link_label(url: str, network: str) -> str:
+    """
+    Render a profile URL as machine-readable visible text.
+
+    ATS crawlers read the PDF's extracted text layer, not its link
+    annotations. An anchor whose visible text is just "LinkedIn" therefore
+    hides the URL from them: the crawler sees the word and has nothing to
+    follow. This produces the same label RenderCV already emits —
+    `linkedin.com/in/<slug>` — so both renderers agree and the URL survives
+    text extraction while remaining a clickable link.
+
+    HTML-escaped: the result is injected into the template as raw markup.
+    """
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return ""
+    no_scheme = re.sub(r"^https?://", "", cleaned, flags=re.IGNORECASE)
+    no_scheme = re.sub(r"^www\.", "", no_scheme, flags=re.IGNORECASE)
+    no_scheme = no_scheme.rstrip("/")
+
+    if network == "linkedin" and "linkedin.com/" in no_scheme:
+        slug = no_scheme.split("linkedin.com/", 1)[1].strip("/")
+        return escape(f"linkedin.com/{slug or 'in'}")
+    if network == "github" and "github.com/" in no_scheme:
+        slug = no_scheme.split("github.com/", 1)[1].strip("/")
+        return escape(f"github.com/{slug}" if slug else "github.com")
+    return escape(no_scheme)
+
+
+def _check_profile_urls_not_fragmented(pdf_path: str, parsed_data: dict) -> None:
+    """
+    Warn when a profile URL was split across lines in the rendered PDF.
+
+    ATS parsers read the extracted text layer, not the link annotations, so a
+    URL the layout engine wrapped at a hyphen looks broken to them even though
+    the annotation is intact. The fix is a layout change; this is the
+    canary that tells us when the layout regresses, since a silent wrap is
+    invisible to every other check.
+    """
+    try:
+        text = extract_text(pdf_path)
+    except Exception as err:  # pragma: no cover - defensive
+        print(f"[WARN] Could not verify profile URLs in {pdf_path}: {err}")
+        return
+
+    flat = re.sub(r"\s+", "", text)
+    for key in ("linkedin", "github", "portfolio"):
+        url = (parsed_data.get(key) or "").strip()
+        if not url:
+            continue
+        slug = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
+        slug = re.sub(r"^www\.", "", slug, flags=re.IGNORECASE).rstrip("/")
+        if slug and slug not in flat:
+            print(
+                f"[WARN] ATS: the {key} URL was fragmented in the rendered PDF "
+                f"and may parse as broken: {slug}"
+            )
+
+
+def _photo_to_data_uri(photo_path: Optional[str]) -> str:
+    """
+    Inline the candidate photo as a data URI for the Playwright renderer.
+
+    RenderCV takes a filesystem path, but the HTML engine has no file access of
+    its own, so the bytes are embedded directly. Returns "" when there is no
+    usable photo, which makes the template skip the <img> entirely.
+    """
+    if not photo_path or not os.path.isfile(photo_path):
+        return ""
+    import mimetypes
+    mime = mimetypes.guess_type(photo_path)[0] or "image/png"
+    try:
+        with open(photo_path, "rb") as fh:
+            payload = base64.b64encode(fh.read()).decode("ascii")
+    except OSError:
+        return ""
+    return f"data:{mime};base64,{payload}"
+
+
+def _render_html_template(
+    parsed_data: dict,
+    labels: dict,
+    page_break_section: Optional[str],
+    photo_path: Optional[str] = None,
+) -> str:
+    """Render the Playwright HTML template with the ATS helpers registered."""
+    template = Template(HTML_TEMPLATE)
+    template.globals["ats_link"] = _ats_link_label
+    # Also expose it as a filter so the template can write `url | ats_link('linkedin')`.
+    template.environment.filters["ats_link"] = lambda url, network: _ats_link_label(url, network)
+    return template.render(
+        **parsed_data,
+        labels=labels,
+        page_break_section=page_break_section,
+        photo_uri=_photo_to_data_uri(photo_path),
+    )
+
 
 def extract_text(file_path: str) -> str:
     doc = fitz.open(file_path)
@@ -935,6 +1108,7 @@ async def generation_pipeline(
     force_language: Optional[str] = None,
     domain_game: Optional[str] = None,
     edit_before_generate: bool = False,
+    photo_path: Optional[str] = None,
 ):
     """
     The end-to-end generation pipeline. Returns an SSE stream of progress events and
@@ -1321,14 +1495,15 @@ IMPORTANT:
         rendered = False
         if use_rendercv:
             try:
-                print(f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section})...")
+                print(f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section}, photo={bool(photo_path)})...")
                 await asyncio.to_thread(
                     render_cv_with_rendercv, 
                     parsed_data, 
                     output_path, 
                     theme, 
                     fit_single_page, 
-                    page_break_section
+                    page_break_section,
+                    photo_path
                 )
                 rendered = True
             except Exception as r_err:
@@ -1336,8 +1511,7 @@ IMPORTANT:
 
         if not rendered:
             print(f"[INFO] 📄 Rendering PDF with Playwright HTML engine (page_break_section={page_break_section})...")
-            template = Template(HTML_TEMPLATE)
-            html_content = template.render(**parsed_data, labels=labels, page_break_section=page_break_section)
+            html_content = _render_html_template(parsed_data, labels, page_break_section, photo_path)
             
             def render_pdf_sync():
                 with sync_playwright() as p:
@@ -1348,6 +1522,8 @@ IMPORTANT:
                     browser.close()
 
             await asyncio.to_thread(render_pdf_sync)
+
+        _check_profile_urls_not_fragmented(output_path, parsed_data)
 
         # Auto re-audit (REQ-4): when force_language='en' triggered the translation
         # path, internally invoke the ATS audit against the freshly rendered PDF so
@@ -1426,7 +1602,8 @@ async def generate_resume(
     strict_edits_only: Optional[bool] = Form(False),
     force_language: Optional[str] = Form(None),
     domain_game: Optional[str] = Form(None),
-    edit_before_generate: Optional[bool] = Form(False)
+    edit_before_generate: Optional[bool] = Form(False),
+    photo: Optional[UploadFile] = File(None),
 ):
     # Validate force_language early so unsupported values are rejected with HTTP 422
     # before any upload work or LLM call happens.
@@ -1454,6 +1631,8 @@ async def generate_resume(
     with open(file_path, "wb") as f:
          f.write(await file.read())
 
+    photo_path = await _persist_uploaded_photo(photo)
+
     return StreamingResponse(
         generation_pipeline(
             file_path,
@@ -1472,6 +1651,7 @@ async def generate_resume(
             force_language,
             domain_game,
             edit_before_generate or False,
+            photo_path,
         ),
         media_type="text/event-stream"
     )
@@ -1528,6 +1708,7 @@ async def render_from_yaml(
     jd: Optional[str] = Form(None),
     custom_instructions: Optional[str] = Form(None),
     domain_game: Optional[str] = Form(None),
+    photo: Optional[UploadFile] = File(None),
 ):
     """
     Render-only endpoint: takes the YAML edited by the user, parses it, and
@@ -1566,6 +1747,8 @@ async def render_from_yaml(
             detail=f"Expected a YAML mapping at the top level, got {type(parsed_data).__name__}"
         )
 
+    photo_path = await _persist_uploaded_photo(photo)
+
     # Compose labels using the same fallback chain as /api/generate so the
     # rendered PDF is consistent regardless of which path produced the
     # parsed_data (LLM vs YAML). Order: game ES (preferred, the user's
@@ -1592,7 +1775,7 @@ async def render_from_yaml(
     rendered = False
     if use_rendercv:
         try:
-            print(f"[INFO] 🎨 Render-from-YAML: RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section})...")
+            print(f"[INFO] 🎨 Render-from-YAML: RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section}, photo={bool(photo_path)})...")
             await asyncio.to_thread(
                 render_cv_with_rendercv,
                 parsed_data,
@@ -1600,6 +1783,7 @@ async def render_from_yaml(
                 theme,
                 fit_single_page or False,
                 page_break_section,
+                photo_path,
             )
             rendered = True
         except Exception as r_err:
@@ -1607,12 +1791,7 @@ async def render_from_yaml(
 
     if not rendered:
         print(f"[INFO] 📄 Render-from-YAML: Playwright HTML engine (page_break_section={page_break_section})...")
-        template = Template(HTML_TEMPLATE)
-        html_content = template.render(
-            **parsed_data,
-            labels=labels,
-            page_break_section=page_break_section,
-        )
+        html_content = _render_html_template(parsed_data, labels, page_break_section, photo_path)
         def render_pdf_sync():
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
@@ -1621,6 +1800,8 @@ async def render_from_yaml(
                 page.pdf(path=output_path, prefer_css_page_size=True, print_background=True)
                 browser.close()
         await asyncio.to_thread(render_pdf_sync)
+
+    _check_profile_urls_not_fragmented(output_path, parsed_data)
 
     return {
         "download_url": f"/api/download/{output_filename}",
@@ -1808,43 +1989,114 @@ def _validate_yaml_schema(parsed: dict):
     return cleaned, None
 
 
+def _content_tokens(text: str) -> set:
+    """
+    Extract the meaningful tokens (words, numbers) from a YAML document so two
+    versions can be compared for content drift. YAML syntax itself — indentation,
+    colons, quotes, list dashes — is deliberately discarded.
+    """
+    # Drop line-leading list markers so "- Python" and "Python" tokenize alike.
+    cleaned = re.sub(r"^\s*-\s+", " ", text, flags=re.MULTILINE)
+    # Numbers are kept at any length, including bare percentages and counts.
+    # A previous `{3,}` threshold silently dropped "30%", "40" and "15", which
+    # meant the drift check could not see a model swapping one metric for
+    # another — the single most damaging edit it could make to a CV.
+    numbers = re.findall(r"\d+(?:[.,]\d+)*", cleaned)
+    # Words keep the 3-character floor to suppress noise, while still
+    # capturing accented letters used throughout Spanish.
+    words = re.findall(r"[^\W\d_]{3,}", cleaned, flags=re.UNICODE)
+    return {w.lower() for w in words} | {n for n in numbers}
+
+
+def _content_drift(original: str, repaired: str) -> Optional[str]:
+    """
+    Returns None when a repair preserved the user's text, or a human-readable
+    reason when it did not.
+
+    This is the programmatic guarantee behind the product promise: editing the
+    YAML by hand and pressing "Generar CV" never rewrites what the user wrote.
+    The LLM is asked to fix structure only; this check enforces it, because a
+    prompt instruction alone is not a guarantee.
+
+    Returns a reason string when content was lost or invented.
+    """
+    before = _content_tokens(original)
+    after = _content_tokens(repaired)
+    if not before:
+        return None
+
+    # A word the user split across two lines ("selecci\n  ón") is rejoined by the
+    # repair, so test substring presence against a whitespace-stripped blob
+    # instead of exact token equality.
+    after_flat = re.sub(r"\s+", "", repaired).lower()
+
+    lost = sorted(w for w in before if w not in after and w not in after_flat)
+    if lost:
+        sample = ", ".join(lost[:8])
+        # A lost number is a changed metric, which reads very differently to the
+        # user than a lost word, so name it as such.
+        has_number = any(any(ch.isdigit() for ch in w) for w in lost)
+        noun = "dato" if has_number else ("palabra" if len(lost) == 1 else "palabras")
+        return (
+            f"la reparación cambió o perdió {len(lost)} "
+            f"{'datos' if has_number and len(lost) > 1 else noun} de tu texto "
+            f"({sample}{'…' if len(lost) > 8 else ''})"
+        )
+
+    # A pure syntax fix (indentation, quoting, list markers, colons) adds zero
+    # words by definition. Anything new is therefore invented content, so the
+    # allowance is exactly zero. There is no legitimate structural token a
+    # YAML syntax repair would introduce.
+    added = sorted(after - before)
+    if added:
+        sample = ", ".join(added[:8])
+        noun = "palabra" if len(added) == 1 else "palabras"
+        verb = "estaba" if len(added) == 1 else "estaban"
+        return (
+            f"la reparación agregó {len(added)} {noun} que no {verb} en tu texto "
+            f"({sample}{'…' if len(added) > 8 else ''})"
+        )
+
+    return None
+
+
 async def _ask_llm_to_repair_yaml_async(broken_yaml: str, schema_errors: list[str], domain_game: Optional[str]) -> str:
-    domain_line = f"\nTARGET DOMAIN (vocabulary hint): {domain_game}\n" if domain_game else ""
-    prompt = f"""You are a strict, FAITHFUL YAML repair engine. The user has hand-edited a YAML document and broken its syntax. Your ONLY job is to fix the syntax — NOT to rewrite or improve the content.
+    domain_line = f"\nTARGET DOMAIN (structural hint only — do not change any wording): {domain_game}\n" if domain_game else ""
+    prompt = f"""You are a YAML SYNTAX repair engine. The user hand-edited a YAML document and broke its structure. Your job is to make it parse. You are NOT a writing assistant.
 
-GOLDEN RULE — PRESERVE EVERY WORD
-If the user's bullet says "Aporto experiencia en atracción: candidatos calificados" you keep that exact text. You only fix the trailing colon if it breaks YAML parsing (e.g., by wrapping the value in double quotes). You do NOT remove it, rephrase it, or replace it with something "better". Treat every value the user wrote as sacred.
+CONTEXT — WHY THIS MATTERS
+This document is a finished resume the user wrote by hand. They pressed "Generar CV" and want a PDF of EXACTLY what they wrote. You exist only because the file will not parse. Once it parses, your work is done.
 
-WHAT TO FIX (syntax only)
-  - Indentation: normalize to 2 spaces.
-  - String quoting: if a value contains a colon, hyphen, or another YAML special char without quotes, wrap the value in double quotes. Example: `point: Aporto experiencia: en atracción` becomes `point: "Aporto experiencia: en atracción"`.
-  - MULTILINE TEXT (VERY IMPORTANT): a long value like `summary` that got split across several lines by the user MUST be converted to a YAML block scalar. Use `>-` (folded, keeps it as one flowing paragraph) for prose like the summary, or `|-` (literal, preserves line breaks) for bullet-like content. Example:
+THE ONLY THINGS YOU MAY CHANGE
+  - Indentation.
+  - Quoting and escaping of values (wrap a value in double quotes if it contains a colon, a leading dash, a `#`, or a quote).
+  - Multiline values: convert a value the user split across lines into a block scalar. Use `>-` for prose, `|-` when the line breaks are meaningful. Example:
       WRONG: `summary: Psicóloga Organizacional con más de 2 años\n  de experiencia en selección`
       RIGHT: `summary: >-\n    Psicóloga Organizacional con más de 2 años\n    de experiencia en selección`
-    NEVER leave a multi-line plain scalar — that is what produces `bad indentation of a sequence entry`.
-  - List syntax: ensure each list item starts with `- `.
-  - Missing colons: add them where the schema requires.
-  - Type mismatches: a list that became a string should be split back into list items IF the content supports it. If the content is a single sentence, wrap it in a one-item list.
+  - List markers, so every item starts with `- `.
+  - Colons and separators.
+  - Empty lists written as `key: []` on one line.
 
-WHAT NEVER TO DO
-  - Do NOT remove any key, value, or list item, even if it looks redundant.
-  - Do NOT add content the user did not write.
-  - Do NOT rephrase, summarize, "improve", or "translate" the user's text.
-  - Do NOT merge or split sections.
-  - Do NOT change the language of any value (Spanish stays Spanish, English stays English).
-  - Do NOT drop a malformed entry "just because it looks hard" — escape it as a quoted string first.
+THE THINGS YOU MUST NOT DO
+  - Do not rewrite, rephrase, translate, or "improve" any sentence.
+  - Do not shorten, expand, summarize, or reorder.
+  - Do not change dates, numbers, names, companies, tools, or URLs.
+  - Do not add information the user did not write.
+  - Do not delete information, even if it looks redundant or misspelled.
+  - Do not change the language of any value.
+  - Do not merge or split sections. Do not add or remove keys.
+  - Do not convert one sentence into a list of sentences, or a list into a sentence.
 
-If a value is truly unsalvageable (e.g., the user wrote a control character like \\x00 in the middle of a string), escape it as a quoted YAML string rather than dropping it.
+SELF-CHECK BEFORE ANSWERING
+Re-read your output and confirm every word of the input appears, unchanged. If you cannot fix the structure without altering a single word, output the original text with only the indentation and quoting corrected.
 
-OUTPUT FORMAT
-  - Output ONLY the repaired YAML.
-  - No prose, no fences, no explanations, no markdown.
-  - The output must be valid YAML that parses with yaml.safe_load.{domain_line}
+OUTPUT
+Only the repaired YAML. No prose, no markdown fences, no explanation.{domain_line}
 
 VALIDATION ERRORS:
 {chr(10).join(f"- {e}" for e in schema_errors)}
 
-EXPECTED SCHEMA (see STRICT RULES below):
+EXPECTED STRUCTURE:
 {_YAML_SCHEMA_DESCRIPTION}
 
 BROKEN YAML:
@@ -1911,6 +2163,21 @@ async def repair_yaml(
             repairs.append("LLM produced valid YAML syntax.")
             yaml_text = llm_yaml
             parsed = parsed2
+            # Hard guarantee: the repair must not have rewritten the user's
+            # text. A prompt instruction is not enough on its own.
+            drift = _content_drift(original_yaml, llm_yaml)
+            if drift:
+                return {
+                    "ok": False,
+                    "yaml": original_yaml,
+                    "repairs": repairs,
+                    "schema_errors": [f"El texto fue modificado: {drift}"],
+                    "error": (
+                        f"La IA reparó la sintaxis pero {drift}. "
+                        f"Se devolvió tu texto original sin tocar — corregí la sintaxis a mano."
+                    ),
+                }
+            repairs.append("Texto verificado: sin cambios de contenido.")
         else:
             yaml_text = original_yaml
 
@@ -1949,18 +2216,50 @@ async def repair_yaml(
                 }
             repairs.append("LLM produced YAML that passes schema validation.")
             yaml_text = llm_yaml
+            # Same content guarantee on the schema-repair pass. Compare against
+            # what we actually sent (the locally-valid text) so the original
+            # user's words are never lost across two chained repairs.
+            drift = _content_drift(yaml_text, llm_yaml)
+            if drift:
+                return {
+                    "ok": False,
+                    "yaml": original_yaml,
+                    "repairs": repairs,
+                    "schema_errors": [f"El texto fue modificado: {drift}"],
+                    "error": (
+                        f"La IA reparó la estructura pero {drift}. "
+                        f"Se devolvió tu texto original sin tocar — corregí a mano."
+                    ),
+                }
+            repairs.append("Texto verificado: sin cambios de contenido.")
 
-        # Both validations passed (either locally or after LLM repair).
+        # Both validations passed (either locally or after an LLM repair).
         # Re-serialize through yaml.safe_dump so the output is ALWAYS block-style
         # and human-readable. The LLM frequently answers with JSON (technically
         # valid YAML) which renders as one unreadable line in the textarea.
+        # yaml_text is guaranteed parseable at this point, and safe_dump is
+        # faithful to the parsed structure, so this cannot alter content.
         try:
-            normalized = _yaml_safe_dump_unicode(parsed if repairs == [] else _pyyaml.safe_load(yaml_text))
+            normalized = _yaml_safe_dump_unicode(_pyyaml.safe_load(yaml_text))
             if normalized.strip() != yaml_text.strip():
                 repairs.append("Re-formateado a YAML legible (bloques y saltos de línea).")
             yaml_text = normalized
         except Exception as fmt_err:
             print(f"[WARN] Could not normalize repaired YAML formatting: {fmt_err}")
+
+        # Final belt-and-braces check against the user's original input.
+        final_drift = _content_drift(original_yaml, yaml_text)
+        if final_drift:
+            return {
+                "ok": False,
+                "yaml": original_yaml,
+                "repairs": repairs,
+                "schema_errors": [f"El texto fue modificado: {final_drift}"],
+                "error": (
+                    f"La reparación alteró tu texto ({final_drift}). "
+                    f"Se devolvió tu texto original sin tocar."
+                ),
+            }
 
         return {
             "ok": True,
@@ -2007,7 +2306,15 @@ async def clear_cache():
                         deleted_count += 1
                     except Exception as err:
                         print(f"Could not remove {fpath}: {err}")
-        return {"status": "ok", "deleted_files": deleted_count, "message": "Cache y CVs generados eliminados correctamente."}
+        # Candidate photos live in a subdirectory, so the loop above (which
+        # only unlinks files) never reached them. Drop the whole directory.
+        photos_removed = _prune_photos(PHOTOS_DIR, keep=set())
+        return {
+            "status": "ok",
+            "deleted_files": deleted_count,
+            "deleted_photos": photos_removed,
+            "message": "Cache, CVs generados y fotos eliminados correctamente.",
+        }
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
