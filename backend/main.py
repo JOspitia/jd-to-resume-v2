@@ -27,6 +27,13 @@ import re
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
 from language import detect_language
+from domain_games import get_game
+from audit_prompts import build_audit_prompt as _build_audit_prompt_lib
+from yaml_helpers import (
+    serialize_resume_data_as_text as _serialize_resume_data_as_text,
+    yaml_safe_dump_unicode as _yaml_safe_dump_unicode,
+)
+import yaml as _pyyaml
 
 load_dotenv()
 
@@ -850,6 +857,67 @@ SECTION LABELS:
 """
 
 
+# Per-game audit prompt configuration lives in `audit_prompts.py` (imported
+# above) so the prompt builder is testable without importing main.py (which
+# pulls in fastapi, fitz, google.generativeai, etc). The wrapper kept below
+# preserves the original underscore-prefixed name used by the call sites.
+def _build_audit_prompt(resume_text: str, jd_text: str, audit_game) -> str:
+    """
+    Thin wrapper around `audit_prompts.build_audit_prompt` so call sites
+    in main.py keep the original name. The body of the audit prompt
+    (per-game taxonomy + seed matched/missing keywords + actionable_tips
+    templates) lives in `backend/audit_prompts.py` and is unit-tested
+    there.
+    """
+    return _build_audit_prompt_lib(resume_text, jd_text, audit_game)
+
+
+async def _run_audit_against_text(
+    resume_text: str,
+    jd_text: str,
+    audit_game,
+) -> dict:
+    """
+    Single source of truth for the ATS-audit LLM call.
+
+    All three audit paths in this app delegate here:
+      * `_run_internal_audit` (auto-fired after a forced translate-to-en flow).
+      * `POST /api/analyze-ats` (frontend-driven audit on a freshly uploaded CV).
+      * `POST /api/analyze-yaml` (audit on a YAML dict the user has edited
+        before rendering — T5 of the yaml-editor feature).
+
+    Composes the per-game prompt, calls the LLM, strips any ```json```
+    markdown fence and returns the parsed dict. Raises ValueError if the
+    response is not a JSON object (caller is responsible for HTTP mapping).
+    """
+    prompt = _build_audit_prompt(
+        resume_text=resume_text,
+        jd_text=jd_text,
+        audit_game=audit_game,
+    )
+    content = await call_llm_api(prompt)
+
+    clean_content = content.strip()
+    if "```" in clean_content:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
+        if match:
+            clean_content = match.group(1)
+
+    try:
+        parsed = json.loads(clean_content)
+    except Exception:
+        parsed = json.loads(content)
+
+    # Some LLM clients wrap the payload in a list; take the first element.
+    if isinstance(parsed, list) and len(parsed) > 0:
+        parsed = parsed[0]
+
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Audit response was not a dict (got {type(parsed).__name__})")
+    return parsed
+
+
+
 async def generation_pipeline(
     file_path: str,
     jd: Optional[str] = None,
@@ -864,7 +932,9 @@ async def generation_pipeline(
     page_break_section: Optional[str] = None,
     extract_linkedin_info: bool = False,
     strict_edits_only: bool = False,
-    force_language: Optional[str] = None
+    force_language: Optional[str] = None,
+    domain_game: Optional[str] = None,
+    edit_before_generate: bool = False,
 ):
     """
     The end-to-end generation pipeline. Returns an SSE stream of progress events and
@@ -873,6 +943,21 @@ async def generation_pipeline(
     When `force_language='en'`, prepends AND appends a LANGUAGE OVERRIDE block to the
     system prompt so the output CV is generated in English regardless of the source
     JD language. See _build_language_override for the exact wording.
+
+    When `domain_game` is set, the prompt body is composed from the corresponding
+    game in `backend/domain_games/` instead of the legacy tech-only prompt. The
+    available games today are: "tech" (default), "hr_recruiting", "psychology".
+    Passing None or an unknown value falls back to "tech" (preserves v2.5 behaviour
+    exactly because the tech game mirrors the legacy prompt body byte-for-byte).
+
+    When `edit_before_generate=True`, the pipeline stops right after the LLM
+    call has been parsed. It serialises `parsed_data` as YAML and emits a
+    single SSE event with the form `{"step": "YAML Ready for Review",
+    "progress": 100, "yaml": "...", "yaml_ready": true}` before returning
+    without rendering a PDF. The frontend is expected to either POST the
+    (possibly edited) YAML to `/api/render-from-yaml` (S6) or
+    `/api/analyze-yaml` (S8). When False (default, or omitted) the
+    existing PDF render path runs unchanged (S7).
     """
     if force_language:
         print(f"[TRANSLATE] force_language='{force_language}' — LANGUAGE OVERRIDE will be applied to system prompt (both preamble and tail).")
@@ -971,82 +1056,12 @@ STRICT SURGICAL EDIT RULES (ABSOLUTE HIGHEST PRIORITY — OVERRIDES ALL OTHER DE
                     target_language="en",
                     source_language=source_language,
                 )
+            game = get_game(domain_game)
             prompt = f"""
 {language_override_block}
-You are a professional technical recruiter and resume writer specialized in ATS optimization.
-You are provided with a 'Base Resume' of a candidate and a target 'Job Description' (JD).
-Your goal is to tailor the candidate's actual experience to align perfectly with the target role and achieve maximum ATS scores on platforms like CompuTrabajo, Workday, LinkedIn, and Greenhouse.
+{game.system_intro}
 
-STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
-1. ZERO HALLUCINATION & NO INVENTING DATA: You MUST ONLY use the candidate's real experiences, companies, education, degrees, dates, and projects provided in the 'Base Resume' and the 'Extracted LinkedIn Profile Data' (if provided). Absolutely DO NOT invent, hallucinate, or import fake or third-party companies, internships, jobs, dates, or projects (e.g. DO NOT add ZScore, Hackumi, Resume Analyzer, or any experience not in the Base Resume or LinkedIn data).
-2. TAILOR AND RESTRUCTURE ONLY: Rephrase, reorganize, merge, and emphasize the candidate's real existing achievements, skills, and experience from the Base Resume and extracted LinkedIn profile using strong action verbs and relevant keywords from the Job Description.
-3. PAGE LENGTH & COMPACTNESS RULE:
-   - If candidate has less than 5 years of experience, strictly fit into a 1-page layout.
-   - If candidate has more than 5 years of experience, maximum 2 pages.
-   - Provide 2 to 3 concise bullet points per role. Ensure bullet points are self-contained (1-2 lines) so they never leave solitary orphan lines.
-4. PROFESSIONAL SUMMARY ENGAGEMENT:
-   - Provide an engaging, high-impact professional summary of exactly 3 lines that hooks the recruiter in seconds, incorporating the target role and key value proposition.
-5. WORK EXPERIENCE REWRITING & ACHIEVEMENT FORMULA (CRITICAL - MANDATORY FOR EVERY BULLET POINT):
-   - You MUST aggressively rewrite EVERY SINGLE bullet point in the `experience` list (`points` array). DO NOT copy-paste raw text from the base resume.
-   - Redact all achievements and bullet points strictly using Google's XYZ Formula: "Accomplished [X] as measured by [Y], by doing [Z]" (ACCIÓN + CONTEXTO/MÉTODO + RESULTADO MEDIBLE en números, %, o ahorro de tiempo/costos).
-   - Every single bullet point in `experience` MUST start with a strong high-impact action verb:
-     * Spanish: Diseñé, Implementé, Refactoricé, Desplegué, Migré, Optimicé, Automaticé, Incrementé, Reduje, Agilicé, Maximicé, Consolidé, Lideré, Construí.
-     * English: Engineered, Architected, Implemented, Spearheaded, Optimized, Automated, Streamlined, Reduced, Scaled, Deployed, Refactored.
-   - ABSOLUTELY PROHIBITED: Passive or lazy phrasing like "Responsable de...", "Encargado de...", "Trabajé en...", "Desarrollo de...", or "Responsibilities included...". You must convert all passive duties into active quantifiable accomplishments.
-   - If exact metrics/numbers are not provided in the base text, estimate or frame the realistic positive impact (e.g., "mejorando la eficiencia operativa", "reduciendo errores de despliegue", "optimizando tiempos de respuesta") while keeping all candidate facts accurate.
-6. TONE & HUMANITY:
-   - Professional, authoritative, yet authentic and human tone without sounding like a robotic generic template.
-7. ATS KEYWORD DENSITY & INTEGRATION:
-   - Naturally integrate key technical and domain keywords from the target job description into bullet points and summary. Prioritize exact matches.
-8. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly. [OVERRIDDEN when force_language is set — see LANGUAGE OVERRIDE block at the end of this prompt.]
-9. ATS FORMATTING COMPLIANCE: Clean, single-column layout parseable by ATS parsers. Standard section headings.
-10. DOMAIN-AWARE INTELLIGENT SKILLS CATEGORIZATION:
-   - Categorize skills strictly according to the candidate's actual profession/domain and the target role (e.g. tech vs non-tech).
-11. CANDIDATE LOCATION & PHONE FORMAT:
-   - City and Country (e.g., 'Medellín, Colombia') and phone number with international dialing prefix.
-12. PROJECTS & LINKS:
-   - Support links for live demos, GitHub, and portfolio websites.
-   - NEVER put the exact same GitHub URL into both 'url' and 'github_url'. 'url' is strictly for live demo sites (e.g. Vercel/Netlify); if no live site exists, leave 'url': ''.
-13. ATS ADVANCED REFINEMENT & ANTI-SPAM RULES (ats_optimization):
-   - AVOID KEYWORD STUFFING: Do NOT repeat the exact same tool or term in more than 2 sections without varying the phrasing/context. Avoid robotic repetition of niche internal names (e.g. generalise or group obscure internal tool names like "Gentle AI" -> "orquestadores de agentes IA").
-   - VERIFY TOOL NAMES & RELEVANCE: Ensure every tool or orchestrator mentioned is recognizable, real, and relevant to the target role.
-   - DATE CONSISTENCY & ONGOING ROLES: If a degree or job started in the past or current month (e.g. "2026-08" when current date is September 2026) and is ongoing, format it as "2026-08 - Actualidad" (Spanish) or "2026-08 - Present" (English). ONLY use "Inicio: YYYY-MM" if the start date is strictly in a future month that has not arrived yet.
-   - PROFESSIONAL HEADLINE MATCH: Integrate a clear professional headline/title right under the name or within the summary header matching the target role (e.g., "Fullstack Developer | Python · React · FastAPI").
-   - SEPARATE CERTIFICATIONS: Clearly distinguish between "Certificaciones completadas" and "Certificaciones en curso".
-   - VARY PHRASING: Redact mentions of skills/tools using synonyms and varied context across summary, experience, and projects to avoid triggering AI-generated text detectors or spam filters.
-   - TARGET ROLE ALIGNMENT IN PREVIOUS ROLES: Reflect the target job title/role (or close industry equivalent) in previous experience aliases where applicable (e.g., adding "Fullstack Developer" if formal title was generic).
-14. KEYWORD GAP DETECTION & AUTOMATIC SKILL ENRICHMENT (keyword_gap_detection):
-   - Detect every technology, framework, tool, protocol, or testing library mentioned in Experience or Projects (e.g. FastAPI, Playwright, SSE, Ant Design, Cloudflare, CI/CD, REST APIs / Swagger-OpenAPI, Jest, JUnit, Cypress, Selenium, Android/Java) that is NOT listed in the `skills` array.
-   - AUTOMATICALLY add these exact technical keyword strings to the `skills` array under their proper category (e.g. "Lenguajes & Frameworks", "DevOps & Automatización", "Bases de Datos & Cloud", "Comunicación & Integraciones").
-   - ATS parsers match exact strings: never leave a tool mentioned in projects/experience out of the candidate's explicit `skills` list.
-15. HUMAN BURSTINESS & SYNTACTIC DIVERSITY (anti_ai_detector_burstiness):
-   - CRITICAL TO PASS AI DETECTORS: Do NOT repeat the exact same sentence pattern (e.g., "Desarrollé [X] mediante [Y] logrando [Z]") across project bullet points or experience entries. Monotonous repetition of syntactic structure drops burstiness/perplexity and triggers AI content detectors.
-   - MANDATORY STRUCTURAL ROTATION: Alternate bullet point structures across projects and roles using 4 distinct narrative patterns:
-     * Pattern A (Outcome-First): "Incrementé la velocidad de respuesta en 40% al refactorizar los endpoints..."
-     * Pattern B (Challenge/Context-First): "Ante cuellos de botella en el procesamiento masivo de datos, diseñé una arquitectura de colas..."
-     * Pattern C (Action/Architectural-First): "Lideré el despliegue del sistema distribuido sobre AWS, reduciendo la latencia a menos de 100ms..."
-     * Pattern D (Tool/Solution-First): "Mediante FastAPI y PostgreSQL, automaticé los flujos de facturación eliminando 15 horas semanales de trabajo manual..."
-   - Vary sentence length and rhythmic cadence naturally (some short 1-line statements, some 2-line contextual achievements) to emulate authentic human authorship.
-16. SEPARATE ACHIEVEMENTS VS IN-PROGRESS FORMATION (split_achievements_vs_inprogress):
-   - Keep ONLY completed, verifiable certifications or honors in the `achievements` array (e.g. "Diplomado Big Data y BI", "Curso Ágiles Design Thinking y Scrum").
-   - Move all certifications or degrees currently in progress (e.g., "AZ-900", "AWS Cloud Practitioner (en curso)") out of `achievements` and place them either in `education` or as a category in `skills` labeled "Formación Complementaria (En Curso)".
-17. SYNTACTIC VARIATION IN PROJECTS & EXPERIENCE (vary_bullet_syntax):
-   - PROHIBITED: Do NOT use the exact same template "Verbo + objeto + mediante/con + tecnología... Implementé el stack con X, logrando Y en Z%" in more than 2 consecutive bullet points across projects or experience.
-   - Use problem-first openings (e.g., "Los equipos de bodega carecían de visibilidad en tiempo real; construí una plataforma con Laravel y React que..."), metric-first openings ("Reduje en 40% los costos..."), and alternate short vs long sentences between projects.
-18. NATURAL HUMAN LANGUAGE MARKERS (natural_language_markers):
-   - Introduce subtle natural human phrasing without losing professionalism.
-   - Avoid monotonous repetitive transitions like "Implementé el stack con" or starting 4 consecutive bullets with "Desarrollé".
-   - Rotate opening action phrases: "Construí", "Diseñé e implementé", "Lideré el desarrollo de", "Refactoricé", "Desplegué", "Migré".
-19. CERTIFICATION EVIDENCE & VERIFIABLE LINKS (certification_evidence_link):
-   - Whenever verifiable links or badges (Credly, LinkedIn Learning, university credentials) exist in the base text for certifications/achievements, explicitly preserve and format them (e.g. "Diplomado en Big Data y BI [Credly Badge / Link]") to maximize human credibility and pass external ATS verification.
-20. STRICT REPETITION BAN IN PROJECTS (anti_repetition_project_footprint):
-   - STRICTLY FORBIDDEN: NEVER repeat the phrase "Implementé el stack con...", "Desarrollé una...", or "Construí una..." across multiple project bullet points. Repeating identical transition phrases across projects is the #1 footprint detected by AI content checkers.
-   - MANDATORY UNIQUE NARRATIVE PER PROJECT: Every project MUST use a completely distinct opening and transition structure:
-     * Project 1 (Architectural/Innovation Opening): "Arquitecturé una plataforma de optimización de CVs basada en la orquestación de LLMs y renderizado Typst..."
-     * Project 2 (Problem/Business Opening): "Para resolver la falta de visibilidad del inventario en tiempo real, diseñé un sistema de monitoreo..."
-     * Project 3 (Technical Integration Opening): "Mediante la integración de Playwright, FastAPI y SSE, automaticé las pruebas E2E..."
-     * Project 4 (Metric/Performance Opening): "Reduje los tiempos de respuesta en 45% al implementar mecanismos de caché con Redis..."
-   - NO REPEATED WORDS OR PHRASES: Ensure zero phrase overlap or repeated opening verbs between projects to achieve high human perplexity and burstiness.
+{game.strict_rules_block}
 """
         if custom_instructions and custom_instructions.strip() and not strict_edits_only:
             prompt += f"12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): You MUST explicitly apply the following user-selected improvements, tone humanization tips, and custom instructions above all other defaults: {custom_instructions.strip()}\n"
@@ -1265,8 +1280,14 @@ IMPORTANT:
                 parsed_data["phone"] = extracted_header["phone"]
 
 
-        # Extract localized section headings from LLM output (fallback to English if missing)
+        # Extract localized section headings from LLM output. The fallback
+        # chain is: LLM output (if any) → game's localized labels (ES, then EN)
+        # → hardcoded English defaults. Using the game's labels as the fallback
+        # ensures the printed headers reflect the domain (e.g. psy 'Formación
+        # Académica' instead of generic 'Education').
         default_labels = {
+            **game.section_labels_en,   # always available; non-empty for every game
+            **(game.section_labels_es if force_language != "en" else {}),
             "summary": "Professional Summary",
             "education": "Education",
             "skills": "Skills",
@@ -1275,6 +1296,21 @@ IMPORTANT:
             "achievements": "Achievements"
         }
         labels = {**default_labels, **parsed_data.get("section_labels", {})}
+
+        # Edit-before-generate path (S2 of yaml-editor feature): stop here,
+        # serialise the parsed data as YAML, and stream it back to the
+        # frontend so the user can review/edit it before the (separate,
+        # LLM-free) render step. No PDF is produced; the frontend can then
+        # POST the (possibly edited) YAML to /api/render-from-yaml or
+        # /api/analyze-yaml.
+        if edit_before_generate:
+            try:
+                yaml_payload = _yaml_safe_dump_unicode(parsed_data)
+            except Exception as yaml_err:
+                yield f"data: {json.dumps({'error': f'YAML serialization failed: {yaml_err}'})}\n\n"
+                return
+            yield f"data: {json.dumps({'step': 'YAML Ready for Review', 'progress': 100, 'yaml': yaml_payload, 'yaml_ready': True})}\n\n"
+            return
 
         yield f"data: {json.dumps({'step': 'Formatting Professional PDF', 'progress': 90})}\n\n"
         
@@ -1323,7 +1359,7 @@ IMPORTANT:
         if force_language == "en":
             yield f"data: {json.dumps({'step': 'Auditing translated CV', 'progress': 95})}\n\n"
             try:
-                audit_scores = await _run_internal_audit(output_path, jd=jd, custom_instructions=custom_instructions)
+                audit_scores = await _run_internal_audit(output_path, jd=jd, custom_instructions=custom_instructions, domain_game=domain_game)
             except Exception as audit_err:
                 print(f"[WARN] Auto re-audit failed: {audit_err}")
             translation_meta = {"source_language": source_language, "target_language": "en", "forced": True}
@@ -1337,10 +1373,19 @@ IMPORTANT:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 
-async def _run_internal_audit(pdf_path: str, jd: Optional[str], custom_instructions: Optional[str]) -> dict:
+async def _run_internal_audit(
+    pdf_path: str,
+    jd: Optional[str],
+    custom_instructions: Optional[str],
+    domain_game: Optional[str] = None,
+) -> dict:
     """
     Re-invoke the ATS audit internally against the freshly rendered PDF.
-    Reuses the same prompt body as POST /api/analyze-ats (lines ~988-1020).
+    Reuses the same prompt body as POST /api/analyze-ats (the audit prompt
+    in /api/analyze-ats above), but additionally accepts a `domain_game`
+    so the audit vocabulary lines up with the CV domain (the audit_scores
+    auto-fired after a Translate-to-English flow otherwise carry tech-only
+    keywords into actionable_tips for HR / Psychology CVs).
     Returns the parsed dict (already with defensive defaults).
     """
     resume_text = extract_text(pdf_path)
@@ -1348,58 +1393,12 @@ async def _run_internal_audit(pdf_path: str, jd: Optional[str], custom_instructi
         custom_instructions.strip() if (custom_instructions and custom_instructions.strip()) else
         "Optimización general y mejoramiento de calidad del CV"
     )
-    prompt = f"""
-You are an expert Applicant Tracking System (ATS) auditor and recruitment AI analyst (like CompuTrabajo, Workday, and Greenhouse ATS screeners).
-Your task is to analyze the candidate's Base Resume against the target Job Description (JD) or General Professional Standards if no JD is provided.
-
-Perform 3 comprehensive evaluations:
-1. ATS MATCH SCORE (%): Calculate direct keyword and skill alignment between the Resume and Job Description/Professional Standards.
-2. AI WRITING DETECTION SCORE (%): Analyze the writing style of the resume. Identify if it sounds natural/human or overly robotic/AI-generated (detect AI buzzwords like 'spearheaded revolutionary synergy', 'delved into', 'testament to', etc.). Provide a risk score (0-20% = Low AI Risk/Natural, 21-50% = Medium, 51-100% = High AI Risk) and advice to humanize the tone.
-3. ATS FORMATTING & KEYWORD CHECK: Extract matched keywords, missing keywords, and actionable tips for ranking higher on platforms like CompuTrabajo.
-
-STRICT INSTRUCTION: Detect the language of the Job Description/Resume (e.g. Spanish). Generate ALL feedback, tips, and verdicts strictly in that language.
-
-Respond ONLY with a JSON object in this exact structure:
-{{
-  "ats_score": 85,
-  "match_level": "Alto",
-  "matched_keywords": ["Python", "FastAPI", "React", "SQL"],
-  "missing_keywords": ["Docker", "Pytest", "CI/CD"],
-  "ai_detection_score": 15,
-  "ai_tone_verdict": "Bajo Riesgo de IA - Redacción Humana y Natural",
-  "ai_humanize_tips": ["El lenguaje es directo, conciso y fácil de leer por reclutadores."],
-  "ats_formatting_score": 95,
-  "actionable_tips": [
-    "Añade la palabra clave 'Docker' si posees conocimientos en contenedores.",
-    "Destaca métricas de rendimiento en tus experiencias clave."
-  ]
-}}
-
-Base Resume:
-{resume_text}
-
-Job Description / Requirements:
-{effective_jd}
-"""
-    content = await call_llm_api(prompt)
-
-    clean_content = content.strip()
-    if "```" in clean_content:
-        import re as _re
-        match = _re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
-        if match:
-            clean_content = match.group(1)
-
-    try:
-        parsed = json.loads(clean_content)
-    except Exception:
-        parsed = json.loads(content)
-
-    if isinstance(parsed, list) and len(parsed) > 0:
-        parsed = parsed[0]
-
-    if not isinstance(parsed, dict):
-        raise ValueError("Internal audit response was not a dict")
+    audit_game = get_game(domain_game)
+    return await _run_audit_against_text(
+        resume_text=resume_text,
+        jd_text=effective_jd,
+        audit_game=audit_game,
+    )
 
     return parsed
 
@@ -1419,7 +1418,9 @@ async def generate_resume(
     page_break_section: Optional[str] = Form(None),
     extract_linkedin_info: Optional[bool] = Form(False),
     strict_edits_only: Optional[bool] = Form(False),
-    force_language: Optional[str] = Form(None)
+    force_language: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None),
+    edit_before_generate: Optional[bool] = Form(False)
 ):
     # Validate force_language early so unsupported values are rejected with HTTP 422
     # before any upload work or LLM call happens.
@@ -1427,6 +1428,18 @@ async def generate_resume(
         raise HTTPException(
             status_code=422,
             detail=f"force_language must be 'en' or omitted, got {force_language!r}"
+        )
+
+    # Validate domain_game early. The frontend selector offers:
+    #   "tech" (default, preserves v2.5 behaviour),
+    #   "hr_recruiting", "psychology".
+    # Unknown values fall back to "tech" inside get_game(), but we reject them at
+    # the edge so misconfigured clients surface the typo explicitly.
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
         )
 
     # Save the original uploaded file temporarily (used as fallback if no base_resume_filename)
@@ -1451,6 +1464,8 @@ async def generate_resume(
             extract_linkedin_info or False,
             strict_edits_only or False,
             force_language,
+            domain_game,
+            edit_before_generate or False,
         ),
         media_type="text/event-stream"
     )
@@ -1459,74 +1474,226 @@ async def generate_resume(
 @app.post("/api/analyze-ats")
 async def analyze_ats(
     file: UploadFile,
-    jd: Optional[str] = Form(None)
+    jd: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None)
 ):
+    # Validate domain_game (same contract as /api/generate).
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
+        )
+
     try:
         load_dotenv(override=True)
         temp_dir = tempfile.gettempdir()
         file_path = os.path.join(temp_dir, file.filename)
         with open(file_path, "wb") as f:
             f.write(await file.read())
-            
+
         resume_text = extract_text(file_path)
-        
+
         effective_jd = jd.strip() if (jd and jd.strip()) else "Optimización general y mejoramiento de calidad del CV"
-        
-        prompt = f"""
-You are an expert Applicant Tracking System (ATS) auditor and recruitment AI analyst (like CompuTrabajo, Workday, and Greenhouse ATS screeners).
-Your task is to analyze the candidate's Base Resume against the target Job Description (JD) or General Professional Standards if no JD is provided.
 
-Perform 3 comprehensive evaluations:
-1. ATS MATCH SCORE (%): Calculate direct keyword and skill alignment between the Resume and Job Description/Professional Standards.
-2. AI WRITING DETECTION SCORE (%): Analyze the writing style of the resume. Identify if it sounds natural/human or overly robotic/AI-generated (detect AI buzzwords like 'spearheaded revolutionary synergy', 'delved into', 'testament to', etc.). Provide a risk score (0-20% = Low AI Risk/Natural, 21-50% = Medium, 51-100% = High AI Risk) and advice to humanize the tone.
-3. ATS FORMATTING & KEYWORD CHECK: Extract matched keywords, missing keywords, and actionable tips for ranking higher on platforms like CompuTrabajo.
-
-STRICT INSTRUCTION: Detect the language of the Job Description/Resume (e.g. Spanish). Generate ALL feedback, tips, and verdicts strictly in that language.
-
-Respond ONLY with a JSON object in this exact structure:
-{{
-  "ats_score": 85,
-  "match_level": "Alto",
-  "matched_keywords": ["Python", "FastAPI", "React", "SQL"],
-  "missing_keywords": ["Docker", "Pytest", "CI/CD"],
-  "ai_detection_score": 15,
-  "ai_tone_verdict": "Bajo Riesgo de IA - Redacción Humana y Natural",
-  "ai_humanize_tips": ["El lenguaje es directo, conciso y fácil de leer por reclutadores."],
-  "ats_formatting_score": 95,
-  "actionable_tips": [
-    "Añade la palabra clave 'Docker' si posees conocimientos en contenedores.",
-    "Destaca métricas de rendimiento en tus experiencias clave."
-  ]
-}}
-
-Base Resume:
-{resume_text}
-
-Job Description / Requirements:
-{effective_jd}
-"""
-        content = await call_llm_api(prompt)
-        
-        clean_content = content.strip()
-        if "```" in clean_content:
-            import re
-            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
-            if match:
-                clean_content = match.group(1)
-
-        try:
-            parsed = json.loads(clean_content)
-        except Exception:
-            parsed = json.loads(content)
-            
-        if isinstance(parsed, list) and len(parsed) > 0:
-            parsed = parsed[0]
-            
-        return parsed
+        # Audit prompt is composed from the selected game's vocabulary so the
+        # 'actionable_tips' stop suggesting tech-only artifacts (e.g. 'Add Docker')
+        # for HR or Psychology CVs. The single source of truth for the
+        # LLM call lives in `_run_audit_against_text` (shared with
+        # `_run_internal_audit` and the upcoming `/api/analyze-yaml`).
+        audit_game = get_game(domain_game)
+        return await _run_audit_against_text(
+            resume_text=resume_text,
+            jd_text=effective_jd,
+            audit_game=audit_game,
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+
+
+@app.post("/api/render-from-yaml")
+async def render_from_yaml(
+    yaml_content: str = Form(...),
+    theme: Optional[str] = Form("sb2nov"),
+    fit_single_page: Optional[bool] = Form(False),
+    page_break_section: Optional[str] = Form(None),
+    jd: Optional[str] = Form(None),
+    custom_instructions: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None),
+):
+    """
+    Render-only endpoint: takes the YAML edited by the user, parses it, and
+    renders the PDF using the same RenderCV / Playwright path that
+    /api/generate uses after the LLM call. No LLM call.
+
+    Spec coverage:
+      S6 (yaml-editor feature): yaml_content (required), theme,
+        fit_single_page, page_break_section, jd, custom_instructions,
+        domain_game. Reuses RenderCV/Playwright path. No LLM call.
+      S10 (multi-domain integration): domain_game propagates so the
+        section_labels fallback uses the selected game's localized
+        headers (e.g. psychology's "Formación Académica").
+    """
+    # Validate domain_game against the same contract as the other endpoints.
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
+        )
+
+    # Parse the YAML.
+    if not yaml_content or not yaml_content.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="yaml_content is required and must not be empty"
+        )
+    try:
+        parsed_data = _pyyaml.safe_load(yaml_content)
+    except _pyyaml.YAMLError as ye:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {ye}")
+    if not isinstance(parsed_data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected a YAML mapping at the top level, got {type(parsed_data).__name__}"
+        )
+
+    # Compose labels using the same fallback chain as /api/generate so the
+    # rendered PDF is consistent regardless of which path produced the
+    # parsed_data (LLM vs YAML). Order: game ES (preferred, the user's
+    # primary locale is LATAM Spanish), game EN, hardcoded EN defaults.
+    game = get_game(domain_game)
+    default_labels = {
+        **game.section_labels_es,
+        **game.section_labels_en,
+        "summary": "Professional Summary",
+        "education": "Education",
+        "skills": "Skills",
+        "experience": "Work Experience",
+        "projects": "Projects",
+        "achievements": "Achievements",
+    }
+    labels = {**default_labels, **parsed_data.get("section_labels", {})}
+
+    # Render PDF. Reuses the same RenderCV / Playwright path as
+    # /api/generate. We intentionally do NOT call any LLM here.
+    output_filename = f"tailored_resume_{int(time.time())}.pdf"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+    use_rendercv = theme and theme != "classic_html"
+    rendered = False
+    if use_rendercv:
+        try:
+            print(f"[INFO] 🎨 Render-from-YAML: RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section})...")
+            await asyncio.to_thread(
+                render_cv_with_rendercv,
+                parsed_data,
+                output_path,
+                theme,
+                fit_single_page or False,
+                page_break_section,
+            )
+            rendered = True
+        except Exception as r_err:
+            print(f"[WARN] ⚠️ RenderCV theme '{theme}' failed: {r_err}. Falling back to Playwright HTML renderer.")
+
+    if not rendered:
+        print(f"[INFO] 📄 Render-from-YAML: Playwright HTML engine (page_break_section={page_break_section})...")
+        template = Template(HTML_TEMPLATE)
+        html_content = template.render(
+            **parsed_data,
+            labels=labels,
+            page_break_section=page_break_section,
+        )
+        def render_pdf_sync():
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                page.set_content(html_content)
+                page.pdf(path=output_path, prefer_css_page_size=True, print_background=True)
+                browser.close()
+        await asyncio.to_thread(render_pdf_sync)
+
+    return {
+        "download_url": f"/api/download/{output_filename}",
+        "filename": output_filename,
+    }
+
+
+@app.post("/api/analyze-yaml")
+async def analyze_yaml(
+    yaml_content: str = Form(...),
+    jd: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None),
+):
+    """
+    Audit-only endpoint for a user-edited YAML. No PDF render.
+
+    The frontend uses this when the user clicks `VALIDAR YAML` in the
+    YAML editor panel: it serializes the parsed dict back to a
+    plain-text narrative via `_serialize_resume_data_as_text` and
+    runs the same per-game audit prompt as `/api/analyze-ats`
+    (delegated to `_run_audit_against_text`).
+
+    Spec coverage:
+      S8 (yaml-editor feature): accepts yaml_content (required) and
+        optional jd. Serializes the parsed dict into a narrative and
+        runs the same audit LLM prompt as /api/analyze-ats. No PDF
+        render. The frontend takes care of adding a 'YAML vN' entry
+        to scoreHistory on success.
+      S10 (multi-domain integration): domain_game propagates so the
+        audit uses the selected game's vocabulary (no 'add Docker'
+        on HR / Psychology CVs).
+    """
+    # Validate domain_game against the same contract as the other endpoints.
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
+        )
+
+    # Parse the YAML.
+    if not yaml_content or not yaml_content.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="yaml_content is required and must not be empty"
+        )
+    try:
+        parsed_data = _pyyaml.safe_load(yaml_content)
+    except _pyyaml.YAMLError as ye:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {ye}")
+    if not isinstance(parsed_data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected a YAML mapping at the top level, got {type(parsed_data).__name__}"
+        )
+
+    # Serialize the parsed dict to a plain-text narrative that mirrors
+    # what `extract_text` would yield from a rendered PDF. The audit
+    # LLM sees the same shape regardless of whether the input is a
+    # rendered PDF or a user-edited YAML dict.
+    narrative = _serialize_resume_data_as_text(parsed_data)
+
+    # Compose jd_text: prefer the JD the user supplied, fall back to a
+    # generic Spanish default.
+    effective_jd = (jd or "").strip() or "Optimización general y mejoramiento de calidad del CV"
+
+    # Resolve the domain game and run the audit.
+    audit_game = get_game(domain_game)
+    try:
+        return await _run_audit_against_text(
+            resume_text=narrative,
+            jd_text=effective_jd,
+            audit_game=audit_game,
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
 
 @app.get("/api/download/{filename}")
 async def download_resume(filename: str):

@@ -24,6 +24,56 @@ El frontend es una SPA con shadcn/ui (estilo new-york) sobre Radix, decorada con
 
 ---
 
+## Dominios soportados (v2.6+)
+
+El selector de la barra superior derecha de **ToolApp** te deja elegir el perfil del CV antes de subirlo. El backend compone el prompt a partir de la *игра* (juego / "game") correspondiente en `backend/domain_games/`:
+
+| Игла | Para quién | Categorías de skills (ES) | Markers característicos |
+|---|---|---|---|
+| `tech` *(default)* | Ingenieros de software, full-stack, data/ML, DevOps, QA | *Lenguajes & Frameworks · DevOps & Automatización · Bases de Datos & Cloud · Testing & QA · Frontend & UX Engineering* | FastAPI · Playwright · Kubernetes · PostgreSQL · Diseñé / Implementé / Refactoricé |
+| `hr_recruiting` | Analistas de selección, talent acquisition, HRBP, employer branding, onboarding | *ATS & CRM · Sourcing & Estrategia de Canales · Screening & Assessment · Legislación Laboral & Compliance · Employer Branding & CX del Candidato · Onboarding & Retención* | Workday · LinkedIn Recruiter · Greenhouse · Entrevista por Competencias · time-to-fill · Recluté / Headhunteé / Cerré ofertas |
+| `psychology` | Psicólogos/as organizacional, clínico, educativo, social o forense | *Pruebas Psicotécnicas & Psicométricas · Evaluación & Diagnóstico Psicológico · Metodología de Selección · Intervención Terapéutica & Organizacional · Investigación, Docencia & Publicaciones · Ética & Deontología Profesional* | 16PF · DISC · MMPI-2 · 16PF + Wartegg · TCC · psicoeducación · BDI-II · consentimiento informado |
+
+- **Default = `tech`** cuando no seleccionás nada: preserva exactamente la salida de v2.5 (los prompts legacy viven ahora en `backend/domain_games/tech.py` byte-for-byte).
+- **API contract**: `/api/generate` y `/api/analyze-ats` aceptan `domain_game` opcional (string). Valores fuera de `{tech, hr_recruiting, psychology}` se rechazan con HTTP 422.
+- **Audit ATS** usa la misma игра: las *actionable_tips* y los *matched/missing keywords* dejan de sugerir *“añade Docker”* sobre un CV de Psicología.
+- Agregar una nueva игра (p. ej. *marketing*, *finance*, *design*) es un único archivo en `domain_games/` registrado en `__init__.py`.
+
+---
+
+## Editor YAML (v2.7+)
+
+Permite revisar y editar el resultado del LLM (en formato YAML) **antes** de renderizar el CV. Sirve para hacer ajustes manuales (fechas, skills, bullets) sin gastar otra llamada al LLM.
+
+### Flujo
+
+1. El usuario marca el checkbox **"Editar respuesta de la IA antes de generar el CV (formato YAML)"** en la barra de opciones de `ToolApp`.
+2. Click en `GENERATE TAILORED RESUME` — el backend corre el LLM como siempre, pero en lugar de renderizar el PDF emite un evento SSE:
+   ```json
+   {"step": "YAML Ready for Review", "progress": 100, "yaml": "<YAML completo>", "yaml_ready": true}
+   ```
+3. Se abre el **panel de editor** con un textarea monospace (min-h 420px, resizable) pre-poblada con el YAML, más un área de error inline.
+4. El usuario edita libremente el YAML y elige una de las **3 acciones**:
+   - **Generar CV** → `POST /api/render-from-yaml` con el YAML actual. Devuelve `download_url` y muestra la UI de éxito (PREVIEW, DOWNLOAD, ATS audit).
+   - **Descartar y regenerar YAML** → re-invoca `/api/generate?edit_before_generate=true`. La LLM corre de nuevo y emite un nuevo `yaml_ready`.
+   - **VALIDAR YAML (Sin generar CV)** → `POST /api/analyze-yaml` con el YAML actual. Muestra el resultado en el panel de AUDITORÍA ATS sin renderizar PDF.
+5. **Auto-audit cuando `Validar automáticamente match ATS` también está activo:** después de `Generar CV`, el frontend descarga el PDF recién renderizado y corre `/api/analyze-ats` sobre ese mismo archivo (no sobre el upload original). Si la red falla, se swalloea silenciosamente y la tarjeta de éxito queda visible.
+
+### Contrato del YAML
+
+- Es el output completo de la LLM serializado con `yaml.safe_dump(allow_unicode=True, sort_keys=False)`. Unicode se preserva, el orden de inserción también (la textarea se ve human-curated, no alfabética).
+- El mismo JSON que produce la LLM, pero en YAML. Tiene `name`, `summary`, `experience[]`, `skills[]`, `education[]`, `projects[]`, `achievements[]`, `section_labels`.
+- Si la YAML no es válida al re-renderizar (`POST /api/render-from-yaml`), el endpoint devuelve **HTTP 400** con el error del parser; el editor no se cierra y el error aparece en el área inline.
+- El flag `domain_game` propaga end-to-end: la sección de headers del PDF se compone con `game.section_labels_es` (o `en` si `force_language='en'`). Auditar un YAML de Psicología con la auditoria de Psicología (16PF, DISC, etc.), no de Tech.
+
+### Por qué YAML y no JSON
+
+- YAML es más legible para no-técnicos (sangría, sin comillas obligatorias).
+- Comentarios con `#` son legales — el usuario puede dejar notas para sí mismo.
+- Roundtrip perfecto con `yaml.safe_load` / `yaml.safe_dump` preservando el orden y los caracteres Unicode.
+
+---
+
 ## Features
 
 ### 1. Tres motores LLM en cadena
@@ -140,8 +190,10 @@ Resumen de lo que pasa cuando presionas **Generar**:
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/` | Health check (`{"status": "AI Resume Backend is running OK!"}`). |
-| `POST` | `/api/generate` | Pipeline completo. Acepta `multipart/form-data`: `file` (PDF), `jd`, `target_role`, `github_url`, `linkedin_url`, `custom_instructions`, `base_resume_filename`, `theme` (`sb2nov` \| `classic` \| `moderncv` \| `classic_html`), `fit_single_page`, `page_break_section`, `extract_linkedin_info`. Responde **SSE** con eventos `data: {...}\n\n`. |
-| `POST` | `/api/analyze-ats` | Audita sin generar. Acepta `file` (PDF) + `jd`. Devuelve JSON: `ats_score`, `match_level`, `matched_keywords`, `missing_keywords`, `ai_detection_score`, `ai_tone_verdict`, `ai_humanize_tips`, `ats_formatting_score`, `actionable_tips`. |
+| `POST` | `/api/generate` | Pipeline completo. Acepta `multipart/form-data`: `file` (PDF), `jd`, `target_role`, `github_url`, `linkedin_url`, `custom_instructions`, `base_resume_filename`, `theme` (`sb2nov` \| `classic` \| `moderncv` \| `classic_html`), `fit_single_page`, `page_break_section`, `extract_linkedin_info`, `domain_game` (`tech` \| `hr_recruiting` \| `psychology`, default `tech`), `edit_before_generate` (default `false`). Responde **SSE** con eventos `data: {...}\n\n`. Si `edit_before_generate=true`, emite `{"step": "YAML Ready for Review", "yaml": "...", "yaml_ready": true}` y termina sin renderizar PDF. |
+| `POST` | `/api/render-from-yaml` | Renderiza desde YAML ya parseado. Acepta `yaml_content` (required), `theme`, `fit_single_page`, `page_break_section`, `jd`, `custom_instructions`, `domain_game`. Reusa el path RenderCV/Playwright. Sin llamada LLM. Devuelve `{"download_url": "/api/download/<filename>", "filename": "..."}`. |
+| `POST` | `/api/analyze-yaml` | Audita desde YAML sin renderizar. Acepta `yaml_content` (required), `jd`, `domain_game`. Serializa el YAML a narrativa y corre el mismo audit LLM que `/api/analyze-ats`. Sin PDF. |
+| `POST` | `/api/analyze-ats` | Audita sin generar. Acepta `file` (PDF) + `jd` + `domain_game`. Devuelve JSON: `ats_score`, `match_level`, `matched_keywords`, `missing_keywords`, `ai_detection_score`, `ai_tone_verdict`, `ai_humanize_tips`, `ats_formatting_score`, `actionable_tips`. |
 | `GET` | `/api/download/{filename}` | Sirve el PDF desde `backend/output/`. |
 | `POST` | `/api/clear-cache` | Borra todos los PDFs de `output/`. Devuelve `{deleted_files: N}`. |
 

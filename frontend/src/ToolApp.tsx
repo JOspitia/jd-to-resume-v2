@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw, Languages } from 'lucide-react';
+import { Upload, Play, Download, AlertCircle, CheckCircle, Eye, ArrowLeft, ShieldCheck, BarChart3, Sparkles, CheckCircle2, AlertTriangle, Edit3, RefreshCw, Clock, RotateCcw, Languages, Code2, Briefcase, Brain } from 'lucide-react';
 
 
 
@@ -11,6 +11,14 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [githubUrl, setGithubUrl] = useState('');
   const [linkedinUrl, setLinkedinUrl] = useState('');
   const [portfolioUrl, setPortfolioUrl] = useState('');
+  // === Multi-domain tailoring (feat/multi-domain-tailoring) ===
+  // The selected profile dictates the prompt body that the backend composes:
+  //   'tech'          -> software engineers, full-stack, data/ML, DevOps, QA.
+  //   'hr_recruiting' -> talent acquisition analysts / recruiters / HRBPs.
+  //   'psychology'    -> psychologists (organizational / clinical / educational).
+  // Default is 'tech' to preserve the v2.5 UX byte-for-byte when the user does
+  // not pick anything.
+  const [domainGame, setDomainGame] = useState<'tech' | 'hr_recruiting' | 'psychology'>('tech');
   const [extractLinkedinInfo, setExtractLinkedinInfo] = useState(false);
   const [step2Mode, setStep2Mode] = useState<'jd' | 'custom'>('jd');
   const [status, setStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
@@ -48,6 +56,16 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const [atsStatus, setAtsStatus] = useState<'idle' | 'analyzing' | 'success' | 'error'>('idle');
   const [atsData, setAtsData] = useState<any | null>(null);
   const [atsErrorMessage, setAtsErrorMessage] = useState('');
+
+  // === Edit-before-generate YAML editor (feat/yaml-editor) ===
+  // When `editBeforeGenerate` is true, /api/generate streams the parsed
+  // LLM JSON as YAML over SSE (the `yaml_ready` event) and stops without
+  // rendering a PDF. The user edits the YAML in a textarea, then either
+  // POSTs it to /api/render-from-yaml (T7) or /api/analyze-yaml (T7).
+  const [editBeforeGenerate, setEditBeforeGenerate] = useState(false);
+  const [yamlContent, setYamlContent] = useState<string | null>(null);
+  const [yamlReady, setYamlReady] = useState(false);
+  const [yamlError, setYamlError] = useState('');
 
   // Live timer for loading states (seconds counter up to 60s)
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -129,6 +147,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setGithubUrl('');
     setLinkedinUrl('');
     setPortfolioUrl('');
+    setDomainGame('tech');
     try {
       localStorage.removeItem('jd-to-resume.contact');
     } catch {
@@ -152,6 +171,11 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setLastOutputLanguage('unknown');
     setAuditScores(null);
     setTranslationMeta(null);
+    // === YAML editor state reset (feat/yaml-editor) ===
+    setEditBeforeGenerate(false);
+    setYamlContent(null);
+    setYamlReady(false);
+    setYamlError('');
 
 
     if (fileInputRef.current) {
@@ -169,8 +193,13 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   };
 
 
-  const handleValidateATS = async () => {
-    if (!file) {
+  const handleValidateATS = async (overrideFile?: File | null) => {
+    // overrideFile is used by the audit-after-render flow (T8 of yaml-editor
+    // feature) which audits the freshly rendered PDF instead of the original
+    // upload. Falls back to the uploaded `file` state for the standalone
+    // SOLO AUDITAR ATS button.
+    const fileToAudit = overrideFile ?? file;
+    if (!fileToAudit) {
       setErrorMessage("Por favor selecciona un archivo PDF de currículum.");
       setStatus('error');
       return;
@@ -180,7 +209,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setAtsErrorMessage('');
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToAudit);
     formData.append("jd", jd);
 
     const controller = new AbortController();
@@ -229,6 +258,168 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     }
   };
 
+  // === YAML editor handlers (feat/yaml-editor) ===
+  // handleRenderFromYaml: POST the user-edited YAML to /api/render-from-yaml
+  // and treat the response like a successful /api/generate (download_url,
+  // status='success', close the editor).
+  const handleRenderFromYaml = async () => {
+    if (!yamlContent) {
+      setYamlError('No hay contenido YAML para renderizar.');
+      return;
+    }
+    setYamlError('');
+    setStatus('generating');
+    setProgress(0);
+    setStepMessage('Renderizando CV desde YAML...');
+
+    const formData = new FormData();
+    formData.append('yaml_content', yamlContent);
+    formData.append('theme', selectedTheme);
+    formData.append('fit_single_page', fitSinglePage ? 'true' : 'false');
+    if (pageBreakSection && pageBreakSection !== 'none') {
+      formData.append('page_break_section', pageBreakSection);
+    }
+    if (jd) formData.append('jd', jd);
+    if (customPrompt) formData.append('custom_instructions', customPrompt);
+    if (domainGame) formData.append('domain_game', domainGame);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+      const res = await fetch('http://localhost:8000/api/render-from-yaml', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Render-from-YAML failed (${res.status}): ${errText || res.statusText}`);
+      }
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      const downloadPath: string = data.download_url;
+      const filename: string = data.filename || downloadPath.split('/').pop() || '';
+      setDownloadUrl(`http://localhost:8000${downloadPath}`);
+      setGeneratedPdfFilename(filename);
+      setStatus('success');
+      setStepMessage('CV renderizado');
+      setProgress(100);
+      // Close the YAML editor and reset the flag (S4).
+      setYamlReady(false);
+      setEditBeforeGenerate(false);
+      // Track the new version in scoreHistory as the next refinado.
+      generationVersionRef.current += 1;
+
+      // T8 of yaml-editor feature: if autoValidateATS is on, audit the freshly
+      // rendered PDF (fetched from download_url) so the user gets the audit
+      // without needing to click the standalone SOLO AUDITAR ATS button.
+      // Network failures are swallowed silently so the success card stays
+      // visible. Matches the original WIP-yaml spec T9.
+      if (autoValidateATS) {
+        try {
+          const auditResp = await fetch(`http://localhost:8000${downloadPath}`);
+          if (!auditResp.ok) {
+            throw new Error(`audit fetch failed: ${auditResp.status}`);
+          }
+          const auditBlob = await auditResp.blob();
+          const renderedFile = new File([auditBlob], filename, { type: 'application/pdf' });
+          await handleValidateATS(renderedFile);
+        } catch (auditErr) {
+          // Silent on purpose: the success card is already showing and
+          // the user can still trigger the audit manually.
+          console.warn('[audit-after-render] failed (silent):', auditErr);
+        }
+      }
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      const msg = err.name === 'AbortError'
+        ? 'El render desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
+        : (err.message || 'Error desconocido al renderizar desde YAML.');
+      setYamlError(msg);
+      setStatus('error');
+    }
+  };
+
+  // handleRegenerateYaml: re-invoke /api/generate with edit_before_generate=true
+  // (the checkbox is still on). The LLM will run again and stream a new
+  // yaml_ready event; the editor reopens.
+  const handleRegenerateYaml = async () => {
+    setYamlReady(false);
+    setYamlError('');
+    setEditBeforeGenerate(true); // make sure the flag is on for the re-run
+    // handleGenerate reads the current state of editBeforeGenerate via the
+    // FormData, so the LLM will be re-invoked and the new yaml will arrive
+    // via the existing SSE handler.
+    await handleGenerate();
+  };
+
+  // handleAuditYaml: POST the user-edited YAML to /api/analyze-yaml.
+  // The response is the same audit dict shape as /api/analyze-ats. We
+  // stash it in atsData and close the editor. The user can then trigger
+  // /api/render-from-yaml to render the audited content.
+  const handleAuditYaml = async () => {
+    if (!yamlContent) {
+      setYamlError('No hay contenido YAML para validar.');
+      return;
+    }
+    setYamlError('');
+    setAtsStatus('analyzing');
+    setAtsErrorMessage('');
+
+    const formData = new FormData();
+    formData.append('yaml_content', yamlContent);
+    if (jd) formData.append('jd', jd);
+    if (domainGame) formData.append('domain_game', domainGame);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+      const res = await fetch('http://localhost:8000/api/analyze-yaml', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Audit-from-YAML failed (${res.status}): ${errText || res.statusText}`);
+      }
+      const data = await res.json();
+      if (data.error) {
+        setAtsErrorMessage(data.error);
+        setAtsStatus('error');
+        return;
+      }
+      setAtsData(data);
+      setAtsStatus('success');
+      generationVersionRef.current += 1;
+      setScoreHistory(prev => [
+        ...prev,
+        {
+          version: generationVersionRef.current,
+          ats: data.ats_score ?? 0,
+          ai: data.ai_detection_score ?? 0,
+          format: data.ats_formatting_score ?? 0,
+          label: `YAML v${generationVersionRef.current - 1}`,
+        }
+      ]);
+      // Close the YAML editor on success (S4). The user can then click
+      // Generar CV to render with the audited YAML.
+      setYamlReady(false);
+      setEditBeforeGenerate(false);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      const msg = err.name === 'AbortError'
+        ? 'La auditoría desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
+        : (err.message || 'Error desconocido al auditar desde YAML.');
+      setYamlError(msg);
+      setAtsStatus('error');
+    }
+  };
+
   const handleGenerate = async (customInstructionsOverride?: string, baseResumeFilename?: string, forceTranslate?: boolean) => {
     if (!file) {
       setErrorMessage("Please select a resume PDF to upload.");
@@ -273,6 +464,13 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     formData.append("strict_edits_only", strictEditsOnly ? "true" : "false");
     formData.append("theme", selectedTheme);
     formData.append("fit_single_page", fitSinglePage ? "true" : "false");
+    // Multi-domain selection (feat/multi-domain-tailoring).
+    // The backend uses this to compose the prompt body via domain_games.get_game().
+    formData.append("domain_game", domainGame);
+    // Edit-before-generate flag (feat/yaml-editor). When true, the backend
+    // stops after the LLM call and streams the parsed_data as YAML over SSE
+    // (the `yaml_ready` event) instead of rendering a PDF.
+    formData.append("edit_before_generate", editBeforeGenerate ? "true" : "false");
     if (pageBreakSection && pageBreakSection !== 'none') {
       formData.append("page_break_section", pageBreakSection);
     }
@@ -331,6 +529,22 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
 
                 if (data.step) setStepMessage(data.step);
                 if (data.progress) setProgress(data.progress);
+
+                // === YAML editor (feat/yaml-editor) ===
+                // The backend emitted a `yaml_ready` event: the LLM has
+                // produced parsed_data and the user wants to edit the
+                // YAML before rendering. Stash the YAML and open the
+                // editor panel (rendered in T7).
+                if (data.yaml_ready && typeof data.yaml === 'string') {
+                  setYamlContent(data.yaml);
+                  setYamlReady(true);
+                  setYamlError('');
+                  setStatus('idle');
+                  setProgress(100);
+                  setStepMessage(data.step || 'YAML listo para revisión');
+                  return;
+                }
+
                 if (data.download_url) {
                   const fullUrl = `http://localhost:8000${data.download_url}`;
                   setDownloadUrl(fullUrl);
@@ -496,6 +710,68 @@ className = "text-center space-y-4 pt-10 pb-8"
 
 {/* Input Grid */ }
 <div className="grid md:grid-cols-2 gap-10" >
+
+  {/* Domain Profile Selector (feat/multi-domain-tailoring) */}
+  {/* Sits above the upload section so the user picks the profile of the CV BEFORE
+       uploading it. Default = 'tech' to preserve v2.5 UX exactly. */}
+  < motion.div
+initial = {{ opacity: 0, y: -8 }}
+animate = {{ opacity: 1, y: 0 }}
+transition = {{ delay: 0.05 }}
+className = "rm-box p-6 md:p-7 flex flex-col bg-white relative md:col-span-2"
+  >
+  <div className="absolute -top-4 -left-4 rm-tag bg-purple-600 text-white px-4 py-2 text-lg" > PROFILE </div>
+    < h2 className = "text-2xl font-bold mb-3 font-serif mt-2" > Select Profile </h2>
+    < p className="text-sm text-gray-600 mb-5 font-mono" >
+      Choose the profile of the CV you are tailoring. The prompt, skill taxonomy and section labels adapt to the domain.
+    </p>
+    < div className = "grid sm:grid-cols-3 gap-4" >
+      {/* Tech */}
+      < button
+type = "button"
+onClick = {() => setDomainGame('tech')}
+className = {`rm-btn p-4 flex flex-col items-start text-left gap-2 ${domainGame === 'tech' ? 'bg-blue-700 text-white' : 'bg-white text-black'}`}
+      >
+  <div className="flex items-center gap-2 w-full" >
+    <Code2 className="w-5 h-5 shrink-0" />
+      <span className="font-bold font-mono text-base uppercase tracking-wide" > Tecnología </span>
+        </div>
+        < p className={ `text-xs leading-snug ${ domainGame === 'tech' ? 'text-blue-100' : 'text-gray-600' }` } >
+          Ingenieros de software, full-stack, data/ML, DevOps, QA.
+        </p>
+        </button>
+
+  {/* HR / Recruiting */}
+  < button
+type = "button"
+onClick = {() => setDomainGame('hr_recruiting')}
+className = {`rm-btn p-4 flex flex-col items-start text-left gap-2 ${domainGame === 'hr_recruiting' ? 'bg-blue-700 text-white' : 'bg-white text-black'}`}
+      >
+  <div className="flex items-center gap-2 w-full" >
+    <Briefcase className="w-5 h-5 shrink-0" />
+      <span className="font-bold font-mono text-base uppercase tracking-wide" > Analistas de Contratación </span>
+        </div>
+        < p className={ `text-xs leading-snug ${ domainGame === 'hr_recruiting' ? 'text-blue-100' : 'text-gray-600' }` } >
+          Reclutadores, selección, HRBP, employer branding, onboarding.
+        </p>
+        </button>
+
+  {/* Psychology */}
+  < button
+type = "button"
+onClick = {() => setDomainGame('psychology')}
+className = {`rm-btn p-4 flex flex-col items-start text-left gap-2 ${domainGame === 'psychology' ? 'bg-blue-700 text-white' : 'bg-white text-black'}`}
+      >
+  <div className="flex items-center gap-2 w-full" >
+    <Brain className="w-5 h-5 shrink-0" />
+      <span className="font-bold font-mono text-base uppercase tracking-wide" > Psicología </span>
+        </div>
+        < p className={ `text-xs leading-snug ${ domainGame === 'psychology' ? 'text-blue-100' : 'text-gray-600' }` } >
+          Psicólogos/as organizacional, clínico, educativo, social o forense.
+        </p>
+        </button>
+    </div>
+    </motion.div>
 
   {/* File Upload Section */ }
   < motion.div
@@ -833,13 +1109,24 @@ className = "rm-btn bg-white hover:bg-rose-50 border-2 border-black text-rose-70
 
 {/* Auto ATS Checkbox Option */ }
 <label className="flex items-center gap-3 bg-white border-2 border-black p-4 font-mono font-bold cursor-pointer hover:bg-gray-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] select-none" >
-  <input 
+  <input
               type="checkbox"
 checked = { autoValidateATS }
 onChange = {(e) => setAutoValidateATS(e.target.checked)}
 className = "w-5 h-5 accent-blue-700 cursor-pointer"
   />
   <span className="text-sm md:text-base" > Validar automáticamente match ATS al finalizar generación </span>
+    </label>
+
+    {/* Edit-before-generate YAML editor checkbox (feat/yaml-editor) */}
+    < label className = "flex items-center gap-3 bg-white border-2 border-black p-4 font-mono font-bold cursor-pointer hover:bg-gray-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] select-none mt-3" >
+      < input
+  type = "checkbox"
+  checked = { editBeforeGenerate }
+  onChange = {(e) => setEditBeforeGenerate(e.target.checked)}
+  className = "w-5 h-5 accent-blue-700 cursor-pointer"
+  />
+  < span className = "text-sm md:text-base" > Editar respuesta de la IA antes de generar el CV (formato YAML) </span>
     </label>
     </motion.div>
 
@@ -900,12 +1187,12 @@ style = {{ width: `${progress}%` }}
             < p className = "text-xl text-gray-800" > Your tailored, ATS - friendly PDF is ready for review.</p>
               </div>
 
-              < div className = "flex flex-col md:flex-row justify-center gap-4 w-full" >
+              < div className = "grid grid-cols-1 md:grid-cols-2 gap-4 w-full" >
               <a 
                       href= { downloadUrl }
                       target = "_blank"
   rel = "noreferrer"
-  className = "rm-btn bg-white hover:bg-gray-50 flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+  className = "rm-btn bg-white hover:bg-gray-50 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
     >
     <Eye className="w-5 h-5" /> PREVIEW
       </a>
@@ -914,7 +1201,7 @@ style = {{ width: `${progress}%` }}
   href = { downloadUrl }
   download = "Tailored_Resume.pdf"
   target = "_blank"
-  className = "rm-btn bg-orange-500 text-white hover:bg-orange-600 flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+  className = "rm-btn bg-orange-500 text-white hover:bg-orange-600 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
     >
     <Download className="w-5 h-5" /> DOWNLOAD PDF
       </a>
@@ -924,7 +1211,7 @@ style = {{ width: `${progress}%` }}
                       onClick={ handleValidateATS }
   disabled = { atsStatus === 'analyzing'
 }
-className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
   >
   <BarChart3 className="w-5 h-5" />
     { atsStatus === 'analyzing' ? 'ANALIZANDO ATS & IA...' : '📊 AUDITAR MATCH ATS & DETECCIÓN IA'}
@@ -943,7 +1230,7 @@ className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex jus
         ? 'CV already in English'
         : 'This may take 30-90s'
     }
-    className="rm-btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex-1 flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
+    className="rm-btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-3 px-6 py-4 text-base font-bold"
   >
     <Languages className="w-5 h-5" />
     Translate to English
@@ -953,7 +1240,7 @@ className = "rm-btn bg-yellow-400 text-black hover:bg-yellow-500 flex-1 flex jus
 <button
                       onClick={ handleResetProcess }
 title = "Reiniciar todo y borrar CVs generados"
-className = "rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 flex justify-center items-center gap-2 px-6 py-4 text-base font-bold shadow-[4px_4px_0px_0px_rgba(225,29,72,1)]"
+className = "rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 md:col-span-2 flex justify-center items-center gap-2 px-6 py-4 text-base font-bold shadow-[4px_4px_0px_0px_rgba(225,29,72,1)]"
   >
   <RotateCcw className="w-5 h-5 text-rose-600" />
     NUEVO / LIMPIAR
@@ -990,6 +1277,85 @@ className = "rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 f
               )}
 </motion.div>
           )}
+</AnimatePresence>
+
+{/* === YAML editor panel (feat/yaml-editor) === */ }
+{/* Rendered when the backend emitted a `yaml_ready` event. The user
+    edits the YAML in a textarea and either POSTs to
+    /api/render-from-yaml or /api/analyze-yaml via the 3 buttons. */ }
+< AnimatePresence mode = "popLayout" >
+  { yamlReady && yamlContent && (
+    <motion.div
+initial = {{ opacity: 0, y: 16 }}
+animate = {{ opacity: 1, y: 0 }}
+exit = {{ opacity: 0, scale: 0.96 }}
+className = "rm-box p-8 mt-8 mx-auto max-w-4xl bg-white"
+    >
+    <div className="flex items-center justify-between mb-4 border-b-2 border-black pb-3" >
+      <h3 className="text-2xl font-bold font-serif" > Editor de YAML </h3>
+        < button
+type = "button"
+onClick = {() => {
+  setYamlReady(false);
+  setEditBeforeGenerate(false);
+  setYamlError('');
+}}
+className = "text-sm font-mono text-gray-600 hover:text-rose-700"
+        >
+  ✕ Cerrar
+  </button>
+  </div>
+
+  { yamlError && (
+    <div className="mb-4 p-3 bg-rose-100 border-2 border-rose-700 text-rose-900 font-mono text-sm" >
+      { yamlError }
+    </div>
+  ) }
+
+  < textarea
+value = { yamlContent }
+onChange = {(e) => setYamlContent(e.target.value)}
+spellCheck = { false }
+className = "w-full font-mono text-sm p-3 border-2 border-black min-h-[420px] resize-y bg-gray-50 focus:bg-white"
+placeholder = "# YAML listo para revisión. Editá libremente y luego presioná 'Generar CV'."
+/>
+
+  < div className = "flex flex-wrap gap-3 mt-5" >
+    < button
+type = "button"
+onClick = { handleRenderFromYaml }
+disabled = { status === 'generating' }
+className = {`rm-btn bg-blue-700 text-white px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+  <Play className="w-4 h-4" />
+    Generar CV
+    </button>
+    < button
+type = "button"
+onClick = { handleRegenerateYaml }
+disabled = { status === 'generating' }
+className = {`rm-btn bg-white border-2 border-black text-black px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+  <RefreshCw className="w-4 h-4" />
+    Descartar y regenerar YAML
+    </button>
+    < button
+type = "button"
+onClick = { handleAuditYaml }
+disabled = { atsStatus === 'analyzing' }
+className = {`rm-btn bg-yellow-100 border-2 border-black text-black px-6 py-3 font-bold flex items-center gap-2 ${atsStatus === 'analyzing' ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+  <ShieldCheck className="w-4 h-4" />
+    VALIDAR YAML (Sin generar CV)
+    </button>
+  </div>
+
+  <p className="mt-4 text-xs font-mono text-gray-500" >
+    El backend usa la YAML exactamente como está acá para renderizar. Si el YAML no es válido el endpoint
+    devuelve HTTP 400 con el error del parser.
+  </p>
+  </motion.div>
+  )}
 </AnimatePresence>
 
 {/* Score History Timeline */ }
