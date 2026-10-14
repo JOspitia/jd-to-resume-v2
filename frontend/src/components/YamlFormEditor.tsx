@@ -1,11 +1,6 @@
-import { Plus, Trash2 } from 'lucide-react';
-import type {
-  YamlFormData,
-  EducationEntry,
-  ExperienceEntry,
-  SkillCategory,
-  ProjectEntry,
-} from '../lib/yamlFormData';
+import { useRef } from 'react';
+import { Plus, Trash2, Wand2 } from 'lucide-react';
+import { fixBullets, type YamlFormData, type EducationEntry, type ExperienceEntry, type SkillCategory, type ProjectEntry } from '../lib/yamlFormData';
 
 /**
  * YamlFormEditor — T2 of feat/yaml-editor-structured
@@ -66,14 +61,17 @@ function TextAreaInput({
   onChange,
   placeholder,
   rows = 3,
+  inputRef,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   rows?: number;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
 }) {
   return (
     <textarea
+      ref={inputRef}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
@@ -295,6 +293,63 @@ function SkillsSection({
 }
 
 // ---------------------------------------------------------------------------
+// Mini-component: bullets textarea + "Auto-separar" button.
+// Extracted so each experience entry gets its own useRef without violating
+// the rules of hooks (a ref must not be created inside .map()).
+// ---------------------------------------------------------------------------
+function BulletTextarea({
+  points,
+  onChange,
+}: {
+  points: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const handleFix = () => {
+    // Read the textarea's current DOM value (even if the user hasn't
+    // blurred yet — React batches onChange commits, so props.points may
+    // be stale). Falls back to the committed array.
+    const text = ref.current?.value ?? points.join('\n');
+    const fixed = fixBullets(text);
+    onChange(fixed);
+  };
+
+  return (
+    <>
+      <Field label="Bullets (uno por línea)">
+        <TextAreaInput
+          value={points.join('\n')}
+          onChange={(v) =>
+            onChange(
+              v
+                .split('\n')
+                .map((l) => l.trim())
+                .filter((l) => l.length > 0),
+            )
+          }
+          inputRef={ref}
+          rows={5}
+          placeholder={'Coordiné el equipo de psicología asegurando soporte integral...'}
+        />
+      </Field>
+      <div className="flex justify-between items-center -mt-1">
+        <button
+          type="button"
+          onClick={handleFix}
+          className="rm-btn bg-white border border-blue-700 text-blue-800 text-[10px] px-2 py-0.5 font-mono font-bold flex items-center gap-1 hover:bg-blue-50"
+        >
+          <Wand2 className="w-3 h-3" /> Auto-separar bullets
+        </button>
+        <span className="text-[10px] text-gray-500 italic">
+          Separa un bloque pegado en bullets por párrafo u oración
+        </span>
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Section: Experience (cards with points sub-list)
 // ---------------------------------------------------------------------------
 
@@ -307,14 +362,6 @@ function ExperienceSection({
 }) {
   const update = (i: number, patch: Partial<ExperienceEntry>) =>
     onChange(data.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
-  const updatePoints = (i: number, pointsText: string) => {
-    const points = pointsText
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
-    update(i, { points });
-  };
-  const pointsToText = (points: string[]) => points.join('\n');
   const remove = (i: number) => onChange(data.filter((_, idx) => idx !== i));
   const add = () =>
     onChange([...data, { company: '', role: '', dates: '', points: [] }]);
@@ -341,14 +388,10 @@ function ExperienceSection({
                   <TextInput value={x.dates} onChange={(v) => update(i, { dates: v })} placeholder="2025-02 - 2026-06" />
                 </Field>
               </div>
-              <Field label="Bullets (uno por línea)">
-                <TextAreaInput
-                  value={pointsToText(x.points)}
-                  onChange={(v) => updatePoints(i, v)}
-                  rows={5}
-                  placeholder={'Coordiné el equipo de psicología asegurando soporte integral...'}
-                />
-              </Field>
+              <BulletTextarea
+                points={x.points}
+                onChange={(p) => update(i, { points: p })}
+              />
               <div className="flex justify-end">
                 <RemoveButton onClick={() => remove(i)} />
               </div>

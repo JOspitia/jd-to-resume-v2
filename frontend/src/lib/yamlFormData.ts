@@ -119,6 +119,45 @@ function asRecord(v: unknown): RawYaml {
     : {};
 }
 
+// ---------------------------------------------------------------------------
+// fixBullets — heuristic to split a pasted block of text into one bullet
+// per logical line. Used by the "Fix format" button in the experience
+// section of the form editor.
+//
+// Splitting strategy (tries each in order, returns the first that yields
+// more than one item):
+//   1. Split on blank lines (\n\n) — explicit paragraphs.
+//   2. Split on single newlines (\n) — manual line breaks.
+//   3. Split on sentence boundaries (". " before an uppercase letter) —
+//      the most common case for users who paste a single dense paragraph
+//      from their old CV.
+// In every case, each item is trimmed and empty items are dropped.
+// ---------------------------------------------------------------------------
+export function fixBullets(text: string): string[] {
+  if (!text || !text.trim()) return [];
+
+  const trimmed = text.trim();
+
+  // 1. Paragraphs
+  let parts = trimmed.split(/\n\s*\n/).map((s) => s.trim()).filter((s) => s.length > 0);
+  if (parts.length > 1) return parts;
+
+  // 2. Manual line breaks
+  parts = trimmed.split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
+  if (parts.length > 1) return parts;
+
+  // 3. Sentence boundaries. Match ". " followed by a capital letter or
+  //    a digit (so percentages like ". 20%" don't split). Keep the period
+  //    attached to the preceding sentence.
+  const sentenceRe = /\.\s+(?=[A-ZÁÉÍÓÚÑ0-9])/;
+  parts = trimmed
+    .split(sentenceRe)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => (s.endsWith('.') || s.endsWith(']') || s.endsWith('%') || s.endsWith(')')) ? s : s + '.');
+  return parts;
+}
+
 export function parseYamlToFormData(yamlText: string): YamlFormData {
   const empty = emptyFormData();
   let raw: RawYaml;
