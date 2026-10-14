@@ -158,6 +158,62 @@ export function fixBullets(text: string): string[] {
   return parts;
 }
 
+// ---------------------------------------------------------------------------
+// fixSummary — heuristic to format a pasted block as proper paragraphs.
+// Used by the "Auto-formatear" button in the Resumen profesional section.
+// Summary is a single string (not a list), so the goal is to ensure
+// sensible paragraph separation, not to split into discrete bullets.
+//
+// Strategy:
+//   1. If the text already has paragraph breaks (\n\n or more), normalize
+//      them: trim each paragraph, drop empties, join with exactly \n\n.
+//   2. If the text has single line breaks (\n), promote them to paragraph
+//      breaks and trim.
+//   3. If the text is a single block, split into sentences and group 2
+//      sentences per paragraph.
+// In every case, collapse internal whitespace runs to single spaces so
+// the output reads cleanly.
+// ---------------------------------------------------------------------------
+export function fixSummary(text: string): string {
+  if (!text || !text.trim()) return text;
+
+  const trimmed = text.replace(/[ \t]+\n/g, '\n').trim();
+
+  // 1. Already has paragraph breaks — normalize.
+  if (/\n\s*\n/.test(trimmed)) {
+    return trimmed
+      .split(/\n\s*\n+/)
+      .map((p) => p.replace(/\s+/g, ' ').trim())
+      .filter((p) => p.length > 0)
+      .join('\n\n');
+  }
+
+  // 2. Has single newlines — promote to paragraph breaks.
+  if (trimmed.includes('\n')) {
+    return trimmed
+      .split(/\n+/)
+      .map((p) => p.replace(/\s+/g, ' ').trim())
+      .filter((p) => p.length > 0)
+      .join('\n\n');
+  }
+
+  // 3. Single block — split into sentences, group 2 per paragraph.
+  const sentenceRe = /\.\s+(?=[A-ZÁÉÍÓÚÑ0-9])/;
+  const sentences = trimmed
+    .split(sentenceRe)
+    .map((s) => s.replace(/\s+/g, ' ').trim())
+    .filter((s) => s.length > 0)
+    .map((s) => (s.endsWith('.') || s.endsWith(']') || s.endsWith('%') || s.endsWith(')')) ? s : s + '.');
+
+  if (sentences.length <= 2) return sentences.join(' ');
+
+  const paragraphs: string[] = [];
+  for (let i = 0; i < sentences.length; i += 2) {
+    paragraphs.push(sentences.slice(i, i + 2).join(' '));
+  }
+  return paragraphs.join('\n\n');
+}
+
 export function parseYamlToFormData(yamlText: string): YamlFormData {
   const empty = emptyFormData();
   let raw: RawYaml;

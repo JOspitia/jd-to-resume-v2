@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { Plus, Trash2, Wand2 } from 'lucide-react';
-import { fixBullets, type YamlFormData, type EducationEntry, type ExperienceEntry, type SkillCategory, type ProjectEntry } from '../lib/yamlFormData';
+import { fixBullets, fixSummary, type YamlFormData, type EducationEntry, type ExperienceEntry, type SkillCategory, type ProjectEntry } from '../lib/yamlFormData';
 
 /**
  * YamlFormEditor — T2 of feat/yaml-editor-structured
@@ -165,14 +165,35 @@ function ContactSection({
 // ---------------------------------------------------------------------------
 
 function SummarySection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const handleFix = () => {
+    // Read the textarea's current DOM value (catches un-blurred edits).
+    const text = ref.current?.value ?? value;
+    onChange(fixSummary(text));
+  };
+
   return (
     <SectionCard title="Resumen profesional">
       <TextAreaInput
         value={value}
         onChange={onChange}
+        inputRef={ref}
         rows={5}
         placeholder="Psicóloga Organizacional | Analista de Contratación con +2 años cerrando vacantes..."
       />
+      <div className="flex justify-between items-center -mt-1">
+        <button
+          type="button"
+          onClick={handleFix}
+          className="rm-btn bg-white border border-blue-700 text-blue-800 text-[10px] px-2 py-0.5 font-mono font-bold flex items-center gap-1 hover:bg-blue-50"
+        >
+          <Wand2 className="w-3 h-3" /> Auto-formatear
+        </button>
+        <span className="text-[10px] text-gray-500 italic">
+          Separa un bloque pegado en párrafos (2 oraciones por párrafo)
+        </span>
+      </div>
       <p className="text-[10px] text-gray-500 mt-1">Soporta varias líneas. Se serializa como bloque literal (|) en YAML.</p>
     </SectionCard>
   );
