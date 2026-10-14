@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
 from language import detect_language
 from domain_games import get_game
+from audit_prompts import build_audit_prompt as _build_audit_prompt_lib
 
 load_dotenv()
 
@@ -851,6 +852,22 @@ SECTION LABELS:
 """
 
 
+# Per-game audit prompt configuration lives in `audit_prompts.py` (imported
+# above) so the prompt builder is testable without importing main.py (which
+# pulls in fastapi, fitz, google.generativeai, etc). The wrapper kept below
+# preserves the original underscore-prefixed name used by the call sites.
+def _build_audit_prompt(resume_text: str, jd_text: str, audit_game) -> str:
+    """
+    Thin wrapper around `audit_prompts.build_audit_prompt` so call sites
+    in main.py keep the original name. The body of the audit prompt
+    (per-game taxonomy + seed matched/missing keywords + actionable_tips
+    templates) lives in `backend/audit_prompts.py` and is unit-tested
+    there.
+    """
+    return _build_audit_prompt_lib(resume_text, jd_text, audit_game)
+
+
+
 async def generation_pipeline(
     file_path: str,
     jd: Optional[str] = None,
@@ -1203,8 +1220,14 @@ IMPORTANT:
                 parsed_data["phone"] = extracted_header["phone"]
 
 
-        # Extract localized section headings from LLM output (fallback to English if missing)
+        # Extract localized section headings from LLM output. The fallback
+        # chain is: LLM output (if any) → game's localized labels (ES, then EN)
+        # → hardcoded English defaults. Using the game's labels as the fallback
+        # ensures the printed headers reflect the domain (e.g. psy 'Formación
+        # Académica' instead of generic 'Education').
         default_labels = {
+            **game.section_labels_en,   # always available; non-empty for every game
+            **(game.section_labels_es if force_language != "en" else {}),
             "summary": "Professional Summary",
             "education": "Education",
             "skills": "Skills",
@@ -1261,7 +1284,7 @@ IMPORTANT:
         if force_language == "en":
             yield f"data: {json.dumps({'step': 'Auditing translated CV', 'progress': 95})}\n\n"
             try:
-                audit_scores = await _run_internal_audit(output_path, jd=jd, custom_instructions=custom_instructions)
+                audit_scores = await _run_internal_audit(output_path, jd=jd, custom_instructions=custom_instructions, domain_game=domain_game)
             except Exception as audit_err:
                 print(f"[WARN] Auto re-audit failed: {audit_err}")
             translation_meta = {"source_language": source_language, "target_language": "en", "forced": True}
@@ -1275,10 +1298,19 @@ IMPORTANT:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 
-async def _run_internal_audit(pdf_path: str, jd: Optional[str], custom_instructions: Optional[str]) -> dict:
+async def _run_internal_audit(
+    pdf_path: str,
+    jd: Optional[str],
+    custom_instructions: Optional[str],
+    domain_game: Optional[str] = None,
+) -> dict:
     """
     Re-invoke the ATS audit internally against the freshly rendered PDF.
-    Reuses the same prompt body as POST /api/analyze-ats (lines ~988-1020).
+    Reuses the same prompt body as POST /api/analyze-ats (the audit prompt
+    in /api/analyze-ats above), but additionally accepts a `domain_game`
+    so the audit vocabulary lines up with the CV domain (the audit_scores
+    auto-fired after a Translate-to-English flow otherwise carry tech-only
+    keywords into actionable_tips for HR / Psychology CVs).
     Returns the parsed dict (already with defensive defaults).
     """
     resume_text = extract_text(pdf_path)
@@ -1286,39 +1318,12 @@ async def _run_internal_audit(pdf_path: str, jd: Optional[str], custom_instructi
         custom_instructions.strip() if (custom_instructions and custom_instructions.strip()) else
         "Optimización general y mejoramiento de calidad del CV"
     )
-    prompt = f"""
-You are an expert Applicant Tracking System (ATS) auditor and recruitment AI analyst (like CompuTrabajo, Workday, and Greenhouse ATS screeners).
-Your task is to analyze the candidate's Base Resume against the target Job Description (JD) or General Professional Standards if no JD is provided.
-
-Perform 3 comprehensive evaluations:
-1. ATS MATCH SCORE (%): Calculate direct keyword and skill alignment between the Resume and Job Description/Professional Standards.
-2. AI WRITING DETECTION SCORE (%): Analyze the writing style of the resume. Identify if it sounds natural/human or overly robotic/AI-generated (detect AI buzzwords like 'spearheaded revolutionary synergy', 'delved into', 'testament to', etc.). Provide a risk score (0-20% = Low AI Risk/Natural, 21-50% = Medium, 51-100% = High AI Risk) and advice to humanize the tone.
-3. ATS FORMATTING & KEYWORD CHECK: Extract matched keywords, missing keywords, and actionable tips for ranking higher on platforms like CompuTrabajo.
-
-STRICT INSTRUCTION: Detect the language of the Job Description/Resume (e.g. Spanish). Generate ALL feedback, tips, and verdicts strictly in that language.
-
-Respond ONLY with a JSON object in this exact structure:
-{{
-  "ats_score": 85,
-  "match_level": "Alto",
-  "matched_keywords": ["Python", "FastAPI", "React", "SQL"],
-  "missing_keywords": ["Docker", "Pytest", "CI/CD"],
-  "ai_detection_score": 15,
-  "ai_tone_verdict": "Bajo Riesgo de IA - Redacción Humana y Natural",
-  "ai_humanize_tips": ["El lenguaje es directo, conciso y fácil de leer por reclutadores."],
-  "ats_formatting_score": 95,
-  "actionable_tips": [
-    "Añade la palabra clave 'Docker' si posees conocimientos en contenedores.",
-    "Destaca métricas de rendimiento en tus experiencias clave."
-  ]
-}}
-
-Base Resume:
-{resume_text}
-
-Job Description / Requirements:
-{effective_jd}
-"""
+    audit_game = get_game(domain_game)
+    prompt = _build_audit_prompt(
+        resume_text=resume_text,
+        jd_text=effective_jd,
+        audit_game=audit_game,
+    )
     content = await call_llm_api(prompt)
 
     clean_content = content.strip()
@@ -1411,52 +1416,37 @@ async def generate_resume(
 @app.post("/api/analyze-ats")
 async def analyze_ats(
     file: UploadFile,
-    jd: Optional[str] = Form(None)
+    jd: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None)
 ):
+    # Validate domain_game (same contract as /api/generate).
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
+        )
+
     try:
         load_dotenv(override=True)
         temp_dir = tempfile.gettempdir()
         file_path = os.path.join(temp_dir, file.filename)
         with open(file_path, "wb") as f:
             f.write(await file.read())
-            
+
         resume_text = extract_text(file_path)
-        
+
         effective_jd = jd.strip() if (jd and jd.strip()) else "Optimización general y mejoramiento de calidad del CV"
-        
-        prompt = f"""
-You are an expert Applicant Tracking System (ATS) auditor and recruitment AI analyst (like CompuTrabajo, Workday, and Greenhouse ATS screeners).
-Your task is to analyze the candidate's Base Resume against the target Job Description (JD) or General Professional Standards if no JD is provided.
 
-Perform 3 comprehensive evaluations:
-1. ATS MATCH SCORE (%): Calculate direct keyword and skill alignment between the Resume and Job Description/Professional Standards.
-2. AI WRITING DETECTION SCORE (%): Analyze the writing style of the resume. Identify if it sounds natural/human or overly robotic/AI-generated (detect AI buzzwords like 'spearheaded revolutionary synergy', 'delved into', 'testament to', etc.). Provide a risk score (0-20% = Low AI Risk/Natural, 21-50% = Medium, 51-100% = High AI Risk) and advice to humanize the tone.
-3. ATS FORMATTING & KEYWORD CHECK: Extract matched keywords, missing keywords, and actionable tips for ranking higher on platforms like CompuTrabajo.
-
-STRICT INSTRUCTION: Detect the language of the Job Description/Resume (e.g. Spanish). Generate ALL feedback, tips, and verdicts strictly in that language.
-
-Respond ONLY with a JSON object in this exact structure:
-{{
-  "ats_score": 85,
-  "match_level": "Alto",
-  "matched_keywords": ["Python", "FastAPI", "React", "SQL"],
-  "missing_keywords": ["Docker", "Pytest", "CI/CD"],
-  "ai_detection_score": 15,
-  "ai_tone_verdict": "Bajo Riesgo de IA - Redacción Humana y Natural",
-  "ai_humanize_tips": ["El lenguaje es directo, conciso y fácil de leer por reclutadores."],
-  "ats_formatting_score": 95,
-  "actionable_tips": [
-    "Añade la palabra clave 'Docker' si posees conocimientos en contenedores.",
-    "Destaca métricas de rendimiento en tus experiencias clave."
-  ]
-}}
-
-Base Resume:
-{resume_text}
-
-Job Description / Requirements:
-{effective_jd}
-"""
+        # Audit prompt is composed from the selected game's vocabulary so the
+        # 'actionable_tips' stop suggesting tech-only artifacts (e.g. 'Add Docker')
+        # for HR or Psychology CVs.
+        audit_game = get_game(domain_game)
+        prompt = _build_audit_prompt(
+            resume_text=resume_text,
+            jd_text=effective_jd,
+            audit_game=audit_game,
+        )
         content = await call_llm_api(prompt)
         
         clean_content = content.strip()
