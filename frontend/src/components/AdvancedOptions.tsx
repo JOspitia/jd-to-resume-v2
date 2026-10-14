@@ -221,6 +221,13 @@ export function AdvancedOptions({
                     </div>
                     <div className="text-[10px] text-gray-600 leading-tight">
                       Para hacer ajustes manuales antes de renderizar el PDF.
+                      <span className="block mt-1 text-gray-700">
+                        Con esta opción la IA <strong>no reescribe</strong> nada de lo que
+                        escribas: solo formatea el YAML si tiene un error de sintaxis,
+                        y el sistema verifica que no haya cambiado ni una palabra
+                        (incluidos los números). Si la IA altera algo, se conserva tu
+                        texto original.
+                      </span>
                     </div>
                   </div>
                 </label>

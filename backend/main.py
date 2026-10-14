@@ -1930,8 +1930,15 @@ def _content_tokens(text: str) -> set:
     """
     # Drop line-leading list markers so "- Python" and "Python" tokenize alike.
     cleaned = re.sub(r"^\s*-\s+", " ", text, flags=re.MULTILINE)
-    words = re.findall(r"[\wÀ-ÿ]{3,}", cleaned, flags=re.UNICODE)
-    return {w.lower() for w in words}
+    # Numbers are kept at any length, including bare percentages and counts.
+    # A previous `{3,}` threshold silently dropped "30%", "40" and "15", which
+    # meant the drift check could not see a model swapping one metric for
+    # another — the single most damaging edit it could make to a CV.
+    numbers = re.findall(r"\d+(?:[.,]\d+)*", cleaned)
+    # Words keep the 3-character floor to suppress noise, while still
+    # capturing accented letters used throughout Spanish.
+    words = re.findall(r"[^\W\d_]{3,}", cleaned, flags=re.UNICODE)
+    return {w.lower() for w in words} | {n for n in numbers}
 
 
 def _content_drift(original: str, repaired: str) -> Optional[str]:
@@ -1959,9 +1966,13 @@ def _content_drift(original: str, repaired: str) -> Optional[str]:
     lost = sorted(w for w in before if w not in after and w not in after_flat)
     if lost:
         sample = ", ".join(lost[:8])
-        noun = "palabra" if len(lost) == 1 else "palabras"
+        # A lost number is a changed metric, which reads very differently to the
+        # user than a lost word, so name it as such.
+        has_number = any(any(ch.isdigit() for ch in w) for w in lost)
+        noun = "dato" if has_number else ("palabra" if len(lost) == 1 else "palabras")
         return (
-            f"la reparación perdió {len(lost)} {noun} de tu texto "
+            f"la reparación cambió o perdió {len(lost)} "
+            f"{'datos' if has_number and len(lost) > 1 else noun} de tu texto "
             f"({sample}{'…' if len(lost) > 8 else ''})"
         )
 
