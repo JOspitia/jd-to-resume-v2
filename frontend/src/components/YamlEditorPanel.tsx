@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Play, RefreshCw, ShieldCheck, Sparkles, X,
+  Play, RefreshCw, ShieldCheck, Sparkles, X, RotateCcw,
   AlertCircle, CheckCircle2, FileText, LayoutGrid,
 } from 'lucide-react';
 
@@ -44,12 +44,14 @@ export type YamlEditorPanelProps = {
   yamlError: string;
   yamlRepairing: boolean;
   yamlRepairNotice: string;
+  hasBackup: boolean;
   status: 'idle' | 'generating' | 'success' | 'error';
   atsStatus: 'idle' | 'analyzing' | 'success' | 'error';
   onRender: () => void;
   onRegenerate: () => void;
   onAudit: () => void;
   onRepair: () => void;
+  onRestoreBackup: () => void;
   onClose: () => void;
 };
 
@@ -62,12 +64,14 @@ export function YamlEditorPanel({
   yamlError,
   yamlRepairing,
   yamlRepairNotice,
+  hasBackup,
   status,
   atsStatus,
   onRender,
   onRegenerate,
   onAudit,
   onRepair,
+  onRestoreBackup,
   onClose,
 }: YamlEditorPanelProps) {
   // ---------- Form state ----------
@@ -223,6 +227,19 @@ export function YamlEditorPanel({
               </>
             )}
 
+            {/* Auto-repair banner — shown while `Generar CV` is transparently
+                fixing a broken YAML so the user knows why there's a delay and
+                that nothing was lost. */}
+            {yamlRepairing && status === 'generating' && (
+              <div className="mt-4 p-3 bg-purple-50 border-2 border-purple-400 text-purple-900 text-sm flex items-center gap-3">
+                <Sparkles className="w-4 h-4 shrink-0 animate-pulse" />
+                <span>
+                  Detectamos un error de formato en tu YAML. La IA lo está
+                  reparando automáticamente antes de generar el CV — no perdiste nada.
+                </span>
+              </div>
+            )}
+
             {/* Action row — unchanged from the previous branch */}
             <div className="flex flex-wrap gap-3 mt-5">
               <button
@@ -267,6 +284,17 @@ export function YamlEditorPanel({
                 <Sparkles className="w-4 h-4" />
                 {yamlRepairing ? 'REPARANDO YAML…' : 'REPARAR YAML (IA)'}
               </button>
+              {hasBackup && (
+                <button
+                  type="button"
+                  onClick={onRestoreBackup}
+                  title="Restaura el texto que tenías antes de la última reparación"
+                  className="rm-btn bg-white border-2 border-purple-700 text-purple-900 px-6 py-3 font-bold flex items-center gap-2"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Deshacer reparación
+                </button>
+              )}
             </div>
 
             {yamlRepairNotice && (

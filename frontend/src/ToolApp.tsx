@@ -214,12 +214,14 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           yamlError={yamlEditor.yamlError}
           yamlRepairing={yamlEditor.yamlRepairing}
           yamlRepairNotice={yamlEditor.yamlRepairNotice}
+          hasBackup={!!yamlEditor.yamlBackup}
           status={generation.status}
           atsStatus={audit.atsStatus}
           onRender={yamlEditor.handleRenderFromYaml}
           onRegenerate={yamlEditor.handleRegenerateYaml}
           onAudit={yamlEditor.handleAuditYaml}
           onRepair={yamlEditor.handleRepairYaml}
+          onRestoreBackup={yamlEditor.handleRestoreYamlBackup}
           onClose={yamlEditor.handleCloseYamlEditor}
         />
 
