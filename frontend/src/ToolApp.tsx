@@ -109,7 +109,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       <motion.header
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="text-center w-full max-w-3xl mt-4 mb-8 z-10"
+        className="text-center w-full max-w-5xl mt-4 mb-8 z-10"
       >
         <h1 className="text-2xl md:text-3xl font-extrabold font-serif tracking-tight text-black">
           Perfect Your Resume.{' '}
@@ -124,7 +124,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       </motion.header>
 
       {/* Main flow — numbered sections */}
-      <div className="w-full max-w-3xl space-y-6 z-10">
+      <div className="w-full max-w-5xl space-y-6 z-10">
         <Section number={1} title="PERFIL">
           <ProfileSelector
             domainGame={profile.domainGame}
