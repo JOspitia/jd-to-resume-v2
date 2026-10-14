@@ -867,6 +867,182 @@ def _build_audit_prompt(resume_text: str, jd_text: str, audit_game) -> str:
     return _build_audit_prompt_lib(resume_text, jd_text, audit_game)
 
 
+async def _run_audit_against_text(
+    resume_text: str,
+    jd_text: str,
+    audit_game,
+) -> dict:
+    """
+    Single source of truth for the ATS-audit LLM call.
+
+    All three audit paths in this app delegate here:
+      * `_run_internal_audit` (auto-fired after a forced translate-to-en flow).
+      * `POST /api/analyze-ats` (frontend-driven audit on a freshly uploaded CV).
+      * `POST /api/analyze-yaml` (audit on a YAML dict the user has edited
+        before rendering — T5 of the yaml-editor feature).
+
+    Composes the per-game prompt, calls the LLM, strips any ```json```
+    markdown fence and returns the parsed dict. Raises ValueError if the
+    response is not a JSON object (caller is responsible for HTTP mapping).
+    """
+    prompt = _build_audit_prompt(
+        resume_text=resume_text,
+        jd_text=jd_text,
+        audit_game=audit_game,
+    )
+    content = await call_llm_api(prompt)
+
+    clean_content = content.strip()
+    if "```" in clean_content:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
+        if match:
+            clean_content = match.group(1)
+
+    try:
+        parsed = json.loads(clean_content)
+    except Exception:
+        parsed = json.loads(content)
+
+    # Some LLM clients wrap the payload in a list; take the first element.
+    if isinstance(parsed, list) and len(parsed) > 0:
+        parsed = parsed[0]
+
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Audit response was not a dict (got {type(parsed).__name__})")
+    return parsed
+
+
+def _serialize_resume_data_as_text(parsed_data: dict) -> str:
+    """
+    Render a parsed LLM JSON resume dict into a plain-text narrative that
+    mirrors what `extract_text` would return from a rendered PDF.
+
+    Used by `POST /api/analyze-yaml` (S8) so the audit LLM sees the
+    user-edited YAML in the same shape it sees a rendered PDF. The output
+    is plain ASCII-ish text — section labels, contact lines, experience
+    entries with bullet points, skills grouped by category, education,
+    projects, achievements.
+
+    Designed to be robust to missing fields (everything wrapped in
+    `.get(...)` with safe defaults) so a partially-edited YAML still
+    produces a coherent narrative instead of crashing the audit.
+    """
+    lines: list[str] = []
+
+    name = parsed_data.get("name") or ""
+    if name:
+        lines.append(f"Name: {name}")
+
+    loc = parsed_data.get("location")
+    if loc:
+        lines.append(f"Location: {loc}")
+    phone = parsed_data.get("phone")
+    if phone:
+        lines.append(f"Phone: {phone}")
+    email = parsed_data.get("email")
+    if email:
+        lines.append(f"Email: {email}")
+    portfolio = parsed_data.get("portfolio")
+    if portfolio:
+        lines.append(f"Portfolio: {portfolio}")
+    linkedin = parsed_data.get("linkedin")
+    if linkedin:
+        lines.append(f"LinkedIn: {linkedin}")
+    github = parsed_data.get("github")
+    if github:
+        lines.append(f"GitHub: {github}")
+
+    summary = parsed_data.get("summary")
+    if summary:
+        lines.append("")
+        lines.append("Summary:")
+        lines.append(str(summary).strip())
+
+    # Experience entries
+    experiences = parsed_data.get("experience") or []
+    if experiences:
+        lines.append("")
+        lines.append("Experience:")
+        for exp in experiences:
+            if not isinstance(exp, dict):
+                continue
+            role = exp.get("role") or ""
+            company = exp.get("company") or ""
+            dates = exp.get("dates") or ""
+            head = "  - "
+            if role or company:
+                head_bits = [b for b in (role, company) if b]
+                head += " | ".join(head_bits)
+                if dates:
+                    head += f" ({dates})"
+                lines.append(head)
+            for point in exp.get("points") or []:
+                if not point:
+                    continue
+                lines.append(f"    * {str(point).strip()}")
+
+    # Skills (grouped by category)
+    skills = parsed_data.get("skills") or []
+    if skills:
+        lines.append("")
+        lines.append("Skills:")
+        for sk in skills:
+            if not isinstance(sk, dict):
+                continue
+            category = sk.get("category") or "Skills"
+            items = sk.get("items") or []
+            if items:
+                lines.append(f"  - {category}: {', '.join(str(i) for i in items)}")
+
+    # Education
+    educations = parsed_data.get("education") or []
+    if educations:
+        lines.append("")
+        lines.append("Education:")
+        for edu in educations:
+            if not isinstance(edu, dict):
+                continue
+            school = edu.get("school") or ""
+            degree = edu.get("degree") or ""
+            dates = edu.get("dates") or ""
+            bits = [b for b in (degree, school) if b]
+            line = "  - " + " — ".join(bits) if bits else "  - (entry)"
+            if dates:
+                line += f" ({dates})"
+            lines.append(line)
+
+    # Projects
+    projects = parsed_data.get("projects") or []
+    if projects:
+        lines.append("")
+        lines.append("Projects:")
+        for proj in projects:
+            if not isinstance(proj, dict):
+                continue
+            name_p = proj.get("name") or ""
+            dates = proj.get("dates") or ""
+            if name_p:
+                head = f"  - {name_p}"
+                if dates:
+                    head += f" ({dates})"
+                lines.append(head)
+            for point in proj.get("points") or []:
+                if not point:
+                    continue
+                lines.append(f"    * {str(point).strip()}")
+
+    # Achievements
+    achievements = parsed_data.get("achievements") or []
+    if achievements:
+        lines.append("")
+        lines.append("Achievements:")
+        for ach in achievements:
+            if ach:
+                lines.append(f"  - {str(ach).strip()}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 
 async def generation_pipeline(
     file_path: str,
@@ -1319,30 +1495,11 @@ async def _run_internal_audit(
         "Optimización general y mejoramiento de calidad del CV"
     )
     audit_game = get_game(domain_game)
-    prompt = _build_audit_prompt(
+    return await _run_audit_against_text(
         resume_text=resume_text,
         jd_text=effective_jd,
         audit_game=audit_game,
     )
-    content = await call_llm_api(prompt)
-
-    clean_content = content.strip()
-    if "```" in clean_content:
-        import re as _re
-        match = _re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
-        if match:
-            clean_content = match.group(1)
-
-    try:
-        parsed = json.loads(clean_content)
-    except Exception:
-        parsed = json.loads(content)
-
-    if isinstance(parsed, list) and len(parsed) > 0:
-        parsed = parsed[0]
-
-    if not isinstance(parsed, dict):
-        raise ValueError("Internal audit response was not a dict")
 
     return parsed
 
@@ -1440,31 +1597,15 @@ async def analyze_ats(
 
         # Audit prompt is composed from the selected game's vocabulary so the
         # 'actionable_tips' stop suggesting tech-only artifacts (e.g. 'Add Docker')
-        # for HR or Psychology CVs.
+        # for HR or Psychology CVs. The single source of truth for the
+        # LLM call lives in `_run_audit_against_text` (shared with
+        # `_run_internal_audit` and the upcoming `/api/analyze-yaml`).
         audit_game = get_game(domain_game)
-        prompt = _build_audit_prompt(
+        return await _run_audit_against_text(
             resume_text=resume_text,
             jd_text=effective_jd,
             audit_game=audit_game,
         )
-        content = await call_llm_api(prompt)
-        
-        clean_content = content.strip()
-        if "```" in clean_content:
-            import re
-            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
-            if match:
-                clean_content = match.group(1)
-
-        try:
-            parsed = json.loads(clean_content)
-        except Exception:
-            parsed = json.loads(content)
-            
-        if isinstance(parsed, list) and len(parsed) > 0:
-            parsed = parsed[0]
-            
-        return parsed
     except Exception as e:
         import traceback
         traceback.print_exc()
