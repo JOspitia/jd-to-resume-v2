@@ -27,6 +27,7 @@ import re
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
 from language import detect_language
+from domain_games import get_game
 
 load_dotenv()
 
@@ -864,7 +865,8 @@ async def generation_pipeline(
     page_break_section: Optional[str] = None,
     extract_linkedin_info: bool = False,
     strict_edits_only: bool = False,
-    force_language: Optional[str] = None
+    force_language: Optional[str] = None,
+    domain_game: Optional[str] = None,
 ):
     """
     The end-to-end generation pipeline. Returns an SSE stream of progress events and
@@ -873,6 +875,12 @@ async def generation_pipeline(
     When `force_language='en'`, prepends AND appends a LANGUAGE OVERRIDE block to the
     system prompt so the output CV is generated in English regardless of the source
     JD language. See _build_language_override for the exact wording.
+
+    When `domain_game` is set, the prompt body is composed from the corresponding
+    game in `backend/domain_games/` instead of the legacy tech-only prompt. The
+    available games today are: "tech" (default), "hr_recruiting", "psychology".
+    Passing None or an unknown value falls back to "tech" (preserves v2.5 behaviour
+    exactly because the tech game mirrors the legacy prompt body byte-for-byte).
     """
     if force_language:
         print(f"[TRANSLATE] force_language='{force_language}' — LANGUAGE OVERRIDE will be applied to system prompt (both preamble and tail).")
@@ -971,82 +979,12 @@ STRICT SURGICAL EDIT RULES (ABSOLUTE HIGHEST PRIORITY — OVERRIDES ALL OTHER DE
                     target_language="en",
                     source_language=source_language,
                 )
+            game = get_game(domain_game)
             prompt = f"""
 {language_override_block}
-You are a professional technical recruiter and resume writer specialized in ATS optimization.
-You are provided with a 'Base Resume' of a candidate and a target 'Job Description' (JD).
-Your goal is to tailor the candidate's actual experience to align perfectly with the target role and achieve maximum ATS scores on platforms like CompuTrabajo, Workday, LinkedIn, and Greenhouse.
+{game.system_intro}
 
-STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
-1. ZERO HALLUCINATION & NO INVENTING DATA: You MUST ONLY use the candidate's real experiences, companies, education, degrees, dates, and projects provided in the 'Base Resume' and the 'Extracted LinkedIn Profile Data' (if provided). Absolutely DO NOT invent, hallucinate, or import fake or third-party companies, internships, jobs, dates, or projects (e.g. DO NOT add ZScore, Hackumi, Resume Analyzer, or any experience not in the Base Resume or LinkedIn data).
-2. TAILOR AND RESTRUCTURE ONLY: Rephrase, reorganize, merge, and emphasize the candidate's real existing achievements, skills, and experience from the Base Resume and extracted LinkedIn profile using strong action verbs and relevant keywords from the Job Description.
-3. PAGE LENGTH & COMPACTNESS RULE:
-   - If candidate has less than 5 years of experience, strictly fit into a 1-page layout.
-   - If candidate has more than 5 years of experience, maximum 2 pages.
-   - Provide 2 to 3 concise bullet points per role. Ensure bullet points are self-contained (1-2 lines) so they never leave solitary orphan lines.
-4. PROFESSIONAL SUMMARY ENGAGEMENT:
-   - Provide an engaging, high-impact professional summary of exactly 3 lines that hooks the recruiter in seconds, incorporating the target role and key value proposition.
-5. WORK EXPERIENCE REWRITING & ACHIEVEMENT FORMULA (CRITICAL - MANDATORY FOR EVERY BULLET POINT):
-   - You MUST aggressively rewrite EVERY SINGLE bullet point in the `experience` list (`points` array). DO NOT copy-paste raw text from the base resume.
-   - Redact all achievements and bullet points strictly using Google's XYZ Formula: "Accomplished [X] as measured by [Y], by doing [Z]" (ACCIÓN + CONTEXTO/MÉTODO + RESULTADO MEDIBLE en números, %, o ahorro de tiempo/costos).
-   - Every single bullet point in `experience` MUST start with a strong high-impact action verb:
-     * Spanish: Diseñé, Implementé, Refactoricé, Desplegué, Migré, Optimicé, Automaticé, Incrementé, Reduje, Agilicé, Maximicé, Consolidé, Lideré, Construí.
-     * English: Engineered, Architected, Implemented, Spearheaded, Optimized, Automated, Streamlined, Reduced, Scaled, Deployed, Refactored.
-   - ABSOLUTELY PROHIBITED: Passive or lazy phrasing like "Responsable de...", "Encargado de...", "Trabajé en...", "Desarrollo de...", or "Responsibilities included...". You must convert all passive duties into active quantifiable accomplishments.
-   - If exact metrics/numbers are not provided in the base text, estimate or frame the realistic positive impact (e.g., "mejorando la eficiencia operativa", "reduciendo errores de despliegue", "optimizando tiempos de respuesta") while keeping all candidate facts accurate.
-6. TONE & HUMANITY:
-   - Professional, authoritative, yet authentic and human tone without sounding like a robotic generic template.
-7. ATS KEYWORD DENSITY & INTEGRATION:
-   - Naturally integrate key technical and domain keywords from the target job description into bullet points and summary. Prioritize exact matches.
-8. LANGUAGE MATCHING (CRITICAL): Detect the dominant language of the Job Description. Generate ALL text content (summary, bullet points, skill categories, achievements) in THAT SAME language. If the JD is in English → output everything in English. If the JD is in Spanish → output everything in Spanish. Default to the JD language; never mix languages in the same document. Also output the correct localized 'section_labels' accordingly. [OVERRIDDEN when force_language is set — see LANGUAGE OVERRIDE block at the end of this prompt.]
-9. ATS FORMATTING COMPLIANCE: Clean, single-column layout parseable by ATS parsers. Standard section headings.
-10. DOMAIN-AWARE INTELLIGENT SKILLS CATEGORIZATION:
-   - Categorize skills strictly according to the candidate's actual profession/domain and the target role (e.g. tech vs non-tech).
-11. CANDIDATE LOCATION & PHONE FORMAT:
-   - City and Country (e.g., 'Medellín, Colombia') and phone number with international dialing prefix.
-12. PROJECTS & LINKS:
-   - Support links for live demos, GitHub, and portfolio websites.
-   - NEVER put the exact same GitHub URL into both 'url' and 'github_url'. 'url' is strictly for live demo sites (e.g. Vercel/Netlify); if no live site exists, leave 'url': ''.
-13. ATS ADVANCED REFINEMENT & ANTI-SPAM RULES (ats_optimization):
-   - AVOID KEYWORD STUFFING: Do NOT repeat the exact same tool or term in more than 2 sections without varying the phrasing/context. Avoid robotic repetition of niche internal names (e.g. generalise or group obscure internal tool names like "Gentle AI" -> "orquestadores de agentes IA").
-   - VERIFY TOOL NAMES & RELEVANCE: Ensure every tool or orchestrator mentioned is recognizable, real, and relevant to the target role.
-   - DATE CONSISTENCY & ONGOING ROLES: If a degree or job started in the past or current month (e.g. "2026-08" when current date is September 2026) and is ongoing, format it as "2026-08 - Actualidad" (Spanish) or "2026-08 - Present" (English). ONLY use "Inicio: YYYY-MM" if the start date is strictly in a future month that has not arrived yet.
-   - PROFESSIONAL HEADLINE MATCH: Integrate a clear professional headline/title right under the name or within the summary header matching the target role (e.g., "Fullstack Developer | Python · React · FastAPI").
-   - SEPARATE CERTIFICATIONS: Clearly distinguish between "Certificaciones completadas" and "Certificaciones en curso".
-   - VARY PHRASING: Redact mentions of skills/tools using synonyms and varied context across summary, experience, and projects to avoid triggering AI-generated text detectors or spam filters.
-   - TARGET ROLE ALIGNMENT IN PREVIOUS ROLES: Reflect the target job title/role (or close industry equivalent) in previous experience aliases where applicable (e.g., adding "Fullstack Developer" if formal title was generic).
-14. KEYWORD GAP DETECTION & AUTOMATIC SKILL ENRICHMENT (keyword_gap_detection):
-   - Detect every technology, framework, tool, protocol, or testing library mentioned in Experience or Projects (e.g. FastAPI, Playwright, SSE, Ant Design, Cloudflare, CI/CD, REST APIs / Swagger-OpenAPI, Jest, JUnit, Cypress, Selenium, Android/Java) that is NOT listed in the `skills` array.
-   - AUTOMATICALLY add these exact technical keyword strings to the `skills` array under their proper category (e.g. "Lenguajes & Frameworks", "DevOps & Automatización", "Bases de Datos & Cloud", "Comunicación & Integraciones").
-   - ATS parsers match exact strings: never leave a tool mentioned in projects/experience out of the candidate's explicit `skills` list.
-15. HUMAN BURSTINESS & SYNTACTIC DIVERSITY (anti_ai_detector_burstiness):
-   - CRITICAL TO PASS AI DETECTORS: Do NOT repeat the exact same sentence pattern (e.g., "Desarrollé [X] mediante [Y] logrando [Z]") across project bullet points or experience entries. Monotonous repetition of syntactic structure drops burstiness/perplexity and triggers AI content detectors.
-   - MANDATORY STRUCTURAL ROTATION: Alternate bullet point structures across projects and roles using 4 distinct narrative patterns:
-     * Pattern A (Outcome-First): "Incrementé la velocidad de respuesta en 40% al refactorizar los endpoints..."
-     * Pattern B (Challenge/Context-First): "Ante cuellos de botella en el procesamiento masivo de datos, diseñé una arquitectura de colas..."
-     * Pattern C (Action/Architectural-First): "Lideré el despliegue del sistema distribuido sobre AWS, reduciendo la latencia a menos de 100ms..."
-     * Pattern D (Tool/Solution-First): "Mediante FastAPI y PostgreSQL, automaticé los flujos de facturación eliminando 15 horas semanales de trabajo manual..."
-   - Vary sentence length and rhythmic cadence naturally (some short 1-line statements, some 2-line contextual achievements) to emulate authentic human authorship.
-16. SEPARATE ACHIEVEMENTS VS IN-PROGRESS FORMATION (split_achievements_vs_inprogress):
-   - Keep ONLY completed, verifiable certifications or honors in the `achievements` array (e.g. "Diplomado Big Data y BI", "Curso Ágiles Design Thinking y Scrum").
-   - Move all certifications or degrees currently in progress (e.g., "AZ-900", "AWS Cloud Practitioner (en curso)") out of `achievements` and place them either in `education` or as a category in `skills` labeled "Formación Complementaria (En Curso)".
-17. SYNTACTIC VARIATION IN PROJECTS & EXPERIENCE (vary_bullet_syntax):
-   - PROHIBITED: Do NOT use the exact same template "Verbo + objeto + mediante/con + tecnología... Implementé el stack con X, logrando Y en Z%" in more than 2 consecutive bullet points across projects or experience.
-   - Use problem-first openings (e.g., "Los equipos de bodega carecían de visibilidad en tiempo real; construí una plataforma con Laravel y React que..."), metric-first openings ("Reduje en 40% los costos..."), and alternate short vs long sentences between projects.
-18. NATURAL HUMAN LANGUAGE MARKERS (natural_language_markers):
-   - Introduce subtle natural human phrasing without losing professionalism.
-   - Avoid monotonous repetitive transitions like "Implementé el stack con" or starting 4 consecutive bullets with "Desarrollé".
-   - Rotate opening action phrases: "Construí", "Diseñé e implementé", "Lideré el desarrollo de", "Refactoricé", "Desplegué", "Migré".
-19. CERTIFICATION EVIDENCE & VERIFIABLE LINKS (certification_evidence_link):
-   - Whenever verifiable links or badges (Credly, LinkedIn Learning, university credentials) exist in the base text for certifications/achievements, explicitly preserve and format them (e.g. "Diplomado en Big Data y BI [Credly Badge / Link]") to maximize human credibility and pass external ATS verification.
-20. STRICT REPETITION BAN IN PROJECTS (anti_repetition_project_footprint):
-   - STRICTLY FORBIDDEN: NEVER repeat the phrase "Implementé el stack con...", "Desarrollé una...", or "Construí una..." across multiple project bullet points. Repeating identical transition phrases across projects is the #1 footprint detected by AI content checkers.
-   - MANDATORY UNIQUE NARRATIVE PER PROJECT: Every project MUST use a completely distinct opening and transition structure:
-     * Project 1 (Architectural/Innovation Opening): "Arquitecturé una plataforma de optimización de CVs basada en la orquestación de LLMs y renderizado Typst..."
-     * Project 2 (Problem/Business Opening): "Para resolver la falta de visibilidad del inventario en tiempo real, diseñé un sistema de monitoreo..."
-     * Project 3 (Technical Integration Opening): "Mediante la integración de Playwright, FastAPI y SSE, automaticé las pruebas E2E..."
-     * Project 4 (Metric/Performance Opening): "Reduje los tiempos de respuesta en 45% al implementar mecanismos de caché con Redis..."
-   - NO REPEATED WORDS OR PHRASES: Ensure zero phrase overlap or repeated opening verbs between projects to achieve high human perplexity and burstiness.
+{game.strict_rules_block}
 """
         if custom_instructions and custom_instructions.strip() and not strict_edits_only:
             prompt += f"12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): You MUST explicitly apply the following user-selected improvements, tone humanization tips, and custom instructions above all other defaults: {custom_instructions.strip()}\n"
@@ -1419,7 +1357,8 @@ async def generate_resume(
     page_break_section: Optional[str] = Form(None),
     extract_linkedin_info: Optional[bool] = Form(False),
     strict_edits_only: Optional[bool] = Form(False),
-    force_language: Optional[str] = Form(None)
+    force_language: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None)
 ):
     # Validate force_language early so unsupported values are rejected with HTTP 422
     # before any upload work or LLM call happens.
@@ -1427,6 +1366,18 @@ async def generate_resume(
         raise HTTPException(
             status_code=422,
             detail=f"force_language must be 'en' or omitted, got {force_language!r}"
+        )
+
+    # Validate domain_game early. The frontend selector offers:
+    #   "tech" (default, preserves v2.5 behaviour),
+    #   "hr_recruiting", "psychology".
+    # Unknown values fall back to "tech" inside get_game(), but we reject them at
+    # the edge so misconfigured clients surface the typo explicitly.
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
         )
 
     # Save the original uploaded file temporarily (used as fallback if no base_resume_filename)
@@ -1451,6 +1402,7 @@ async def generate_resume(
             extract_linkedin_info or False,
             strict_edits_only or False,
             force_language,
+            domain_game,
         ),
         media_type="text/event-stream"
     )
