@@ -339,7 +339,11 @@ function fieldLine(key: string, value: string): string {
 // non-empty -> `key:\n  - item1\n  - item2`.
 function stringListBlock(key: string, items: string[]): string[] {
   if (items.length === 0) return [`  ${key}: []`];
-  return [`  ${key}:`, ...items.map((it) => `  - ${yamlString(it)}`)];
+  // The key sits at 2-space indent (inside a `- ` list entry). The list
+  // items must be nested one level deeper (4-space indent) for strict
+  // YAML parsers like js-yaml. PyYAML is lenient and accepts 2-space
+  // indent, but js-yaml raises 'bad indentation of a sequence entry'.
+  return [`  ${key}:`, ...items.map((it) => `    - ${yamlString(it)}`)];
 }
 
 export function serializeFormDataToYaml(data: YamlFormData): string {
