@@ -253,6 +253,147 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     }
   };
 
+  // === YAML editor handlers (feat/yaml-editor) ===
+  // handleRenderFromYaml: POST the user-edited YAML to /api/render-from-yaml
+  // and treat the response like a successful /api/generate (download_url,
+  // status='success', close the editor).
+  const handleRenderFromYaml = async () => {
+    if (!yamlContent) {
+      setYamlError('No hay contenido YAML para renderizar.');
+      return;
+    }
+    setYamlError('');
+    setStatus('generating');
+    setProgress(0);
+    setStepMessage('Renderizando CV desde YAML...');
+
+    const formData = new FormData();
+    formData.append('yaml_content', yamlContent);
+    formData.append('theme', selectedTheme);
+    formData.append('fit_single_page', fitSinglePage ? 'true' : 'false');
+    if (pageBreakSection && pageBreakSection !== 'none') {
+      formData.append('page_break_section', pageBreakSection);
+    }
+    if (jd) formData.append('jd', jd);
+    if (customPrompt) formData.append('custom_instructions', customPrompt);
+    if (domainGame) formData.append('domain_game', domainGame);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+      const res = await fetch('http://localhost:8000/api/render-from-yaml', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Render-from-YAML failed (${res.status}): ${errText || res.statusText}`);
+      }
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      const downloadPath: string = data.download_url;
+      const filename: string = data.filename || downloadPath.split('/').pop() || '';
+      setDownloadUrl(`http://localhost:8000${downloadPath}`);
+      setGeneratedPdfFilename(filename);
+      setStatus('success');
+      setStepMessage('CV renderizado');
+      setProgress(100);
+      // Close the YAML editor and reset the flag (S4).
+      setYamlReady(false);
+      setEditBeforeGenerate(false);
+      // Track the new version in scoreHistory as the next refinado.
+      generationVersionRef.current += 1;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      const msg = err.name === 'AbortError'
+        ? 'El render desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
+        : (err.message || 'Error desconocido al renderizar desde YAML.');
+      setYamlError(msg);
+      setStatus('error');
+    }
+  };
+
+  // handleRegenerateYaml: re-invoke /api/generate with edit_before_generate=true
+  // (the checkbox is still on). The LLM will run again and stream a new
+  // yaml_ready event; the editor reopens.
+  const handleRegenerateYaml = async () => {
+    setYamlReady(false);
+    setYamlError('');
+    setEditBeforeGenerate(true); // make sure the flag is on for the re-run
+    // handleGenerate reads the current state of editBeforeGenerate via the
+    // FormData, so the LLM will be re-invoked and the new yaml will arrive
+    // via the existing SSE handler.
+    await handleGenerate();
+  };
+
+  // handleAuditYaml: POST the user-edited YAML to /api/analyze-yaml.
+  // The response is the same audit dict shape as /api/analyze-ats. We
+  // stash it in atsData and close the editor. The user can then trigger
+  // /api/render-from-yaml to render the audited content.
+  const handleAuditYaml = async () => {
+    if (!yamlContent) {
+      setYamlError('No hay contenido YAML para validar.');
+      return;
+    }
+    setYamlError('');
+    setAtsStatus('analyzing');
+    setAtsErrorMessage('');
+
+    const formData = new FormData();
+    formData.append('yaml_content', yamlContent);
+    if (jd) formData.append('jd', jd);
+    if (domainGame) formData.append('domain_game', domainGame);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+      const res = await fetch('http://localhost:8000/api/analyze-yaml', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Audit-from-YAML failed (${res.status}): ${errText || res.statusText}`);
+      }
+      const data = await res.json();
+      if (data.error) {
+        setAtsErrorMessage(data.error);
+        setAtsStatus('error');
+        return;
+      }
+      setAtsData(data);
+      setAtsStatus('success');
+      generationVersionRef.current += 1;
+      setScoreHistory(prev => [
+        ...prev,
+        {
+          version: generationVersionRef.current,
+          ats: data.ats_score ?? 0,
+          ai: data.ai_detection_score ?? 0,
+          format: data.ats_formatting_score ?? 0,
+          label: `YAML v${generationVersionRef.current - 1}`,
+        }
+      ]);
+      // Close the YAML editor on success (S4). The user can then click
+      // Generar CV to render with the audited YAML.
+      setYamlReady(false);
+      setEditBeforeGenerate(false);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      const msg = err.name === 'AbortError'
+        ? 'La auditoría desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
+        : (err.message || 'Error desconocido al auditar desde YAML.');
+      setYamlError(msg);
+      setAtsStatus('error');
+    }
+  };
+
   const handleGenerate = async (customInstructionsOverride?: string, baseResumeFilename?: string, forceTranslate?: boolean) => {
     if (!file) {
       setErrorMessage("Please select a resume PDF to upload.");
@@ -1110,6 +1251,85 @@ className = "rm-btn bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 m
               )}
 </motion.div>
           )}
+</AnimatePresence>
+
+{/* === YAML editor panel (feat/yaml-editor) === */ }
+{/* Rendered when the backend emitted a `yaml_ready` event. The user
+    edits the YAML in a textarea and either POSTs to
+    /api/render-from-yaml or /api/analyze-yaml via the 3 buttons. */ }
+< AnimatePresence mode = "popLayout" >
+  { yamlReady && yamlContent && (
+    <motion.div
+initial = {{ opacity: 0, y: 16 }}
+animate = {{ opacity: 1, y: 0 }}
+exit = {{ opacity: 0, scale: 0.96 }}
+className = "rm-box p-8 mt-8 mx-auto max-w-4xl bg-white"
+    >
+    <div className="flex items-center justify-between mb-4 border-b-2 border-black pb-3" >
+      <h3 className="text-2xl font-bold font-serif" > Editor de YAML </h3>
+        < button
+type = "button"
+onClick = {() => {
+  setYamlReady(false);
+  setEditBeforeGenerate(false);
+  setYamlError('');
+}}
+className = "text-sm font-mono text-gray-600 hover:text-rose-700"
+        >
+  ✕ Cerrar
+  </button>
+  </div>
+
+  { yamlError && (
+    <div className="mb-4 p-3 bg-rose-100 border-2 border-rose-700 text-rose-900 font-mono text-sm" >
+      { yamlError }
+    </div>
+  ) }
+
+  < textarea
+value = { yamlContent }
+onChange = {(e) => setYamlContent(e.target.value)}
+spellCheck = { false }
+className = "w-full font-mono text-sm p-3 border-2 border-black min-h-[420px] resize-y bg-gray-50 focus:bg-white"
+placeholder = "# YAML listo para revisión. Editá libremente y luego presioná 'Generar CV'."
+/>
+
+  < div className = "flex flex-wrap gap-3 mt-5" >
+    < button
+type = "button"
+onClick = { handleRenderFromYaml }
+disabled = { status === 'generating' }
+className = {`rm-btn bg-blue-700 text-white px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+  <Play className="w-4 h-4" />
+    Generar CV
+    </button>
+    < button
+type = "button"
+onClick = { handleRegenerateYaml }
+disabled = { status === 'generating' }
+className = {`rm-btn bg-white border-2 border-black text-black px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+  <RefreshCw className="w-4 h-4" />
+    Descartar y regenerar YAML
+    </button>
+    < button
+type = "button"
+onClick = { handleAuditYaml }
+disabled = { atsStatus === 'analyzing' }
+className = {`rm-btn bg-yellow-100 border-2 border-black text-black px-6 py-3 font-bold flex items-center gap-2 ${atsStatus === 'analyzing' ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+  <ShieldCheck className="w-4 h-4" />
+    VALIDAR YAML (Sin generar CV)
+    </button>
+  </div>
+
+  <p className="mt-4 text-xs font-mono text-gray-500" >
+    El backend usa la YAML exactamente como está acá para renderizar. Si el YAML no es válido el endpoint
+    devuelve HTTP 400 con el error del parser.
+  </p>
+  </motion.div>
+  )}
 </AnimatePresence>
 
 {/* Score History Timeline */ }
