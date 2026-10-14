@@ -23,6 +23,7 @@ type YamlEditorDeps = {
     | 'customPrompt'
     | 'autoValidateATS'
     | 'setEditBeforeGenerate'
+    | 'photo'
   >;
   generation: Generation;
   audit: Audit;
@@ -47,6 +48,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     customPrompt,
     autoValidateATS,
     setEditBeforeGenerate,
+    photo,
   } = profile;
 
   const [yamlContent, setYamlContent] = useState<string | null>(null);
@@ -200,6 +202,9 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     if (jd) formData.append('jd', jd);
     if (customPrompt) formData.append('custom_instructions', customPrompt);
     if (domainGame) formData.append('domain_game', domainGame);
+    // The photo is a presentation choice, not part of the YAML document, so it
+    // is re-sent on every render-from-yaml pass.
+    if (photo) formData.append('photo', photo);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
