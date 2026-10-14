@@ -33,6 +33,7 @@ from yaml_helpers import (
     serialize_resume_data_as_text as _serialize_resume_data_as_text,
     yaml_safe_dump_unicode as _yaml_safe_dump_unicode,
 )
+import yaml as _pyyaml
 
 load_dotenv()
 
@@ -1510,6 +1511,116 @@ async def analyze_ats(
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+
+
+@app.post("/api/render-from-yaml")
+async def render_from_yaml(
+    yaml_content: str = Form(...),
+    theme: Optional[str] = Form("sb2nov"),
+    fit_single_page: Optional[bool] = Form(False),
+    page_break_section: Optional[str] = Form(None),
+    jd: Optional[str] = Form(None),
+    custom_instructions: Optional[str] = Form(None),
+    domain_game: Optional[str] = Form(None),
+):
+    """
+    Render-only endpoint: takes the YAML edited by the user, parses it, and
+    renders the PDF using the same RenderCV / Playwright path that
+    /api/generate uses after the LLM call. No LLM call.
+
+    Spec coverage:
+      S6 (yaml-editor feature): yaml_content (required), theme,
+        fit_single_page, page_break_section, jd, custom_instructions,
+        domain_game. Reuses RenderCV/Playwright path. No LLM call.
+      S10 (multi-domain integration): domain_game propagates so the
+        section_labels fallback uses the selected game's localized
+        headers (e.g. psychology's "Formación Académica").
+    """
+    # Validate domain_game against the same contract as the other endpoints.
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    if domain_game is not None and domain_game not in ALLOWED_GAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
+        )
+
+    # Parse the YAML.
+    if not yaml_content or not yaml_content.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="yaml_content is required and must not be empty"
+        )
+    try:
+        parsed_data = _pyyaml.safe_load(yaml_content)
+    except _pyyaml.YAMLError as ye:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {ye}")
+    if not isinstance(parsed_data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected a YAML mapping at the top level, got {type(parsed_data).__name__}"
+        )
+
+    # Compose labels using the same fallback chain as /api/generate so the
+    # rendered PDF is consistent regardless of which path produced the
+    # parsed_data (LLM vs YAML). Order: game ES (preferred, the user's
+    # primary locale is LATAM Spanish), game EN, hardcoded EN defaults.
+    game = get_game(domain_game)
+    default_labels = {
+        **game.section_labels_es,
+        **game.section_labels_en,
+        "summary": "Professional Summary",
+        "education": "Education",
+        "skills": "Skills",
+        "experience": "Work Experience",
+        "projects": "Projects",
+        "achievements": "Achievements",
+    }
+    labels = {**default_labels, **parsed_data.get("section_labels", {})}
+
+    # Render PDF. Reuses the same RenderCV / Playwright path as
+    # /api/generate. We intentionally do NOT call any LLM here.
+    output_filename = f"tailored_resume_{int(time.time())}.pdf"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+    use_rendercv = theme and theme != "classic_html"
+    rendered = False
+    if use_rendercv:
+        try:
+            print(f"[INFO] 🎨 Render-from-YAML: RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section})...")
+            await asyncio.to_thread(
+                render_cv_with_rendercv,
+                parsed_data,
+                output_path,
+                theme,
+                fit_single_page or False,
+                page_break_section,
+            )
+            rendered = True
+        except Exception as r_err:
+            print(f"[WARN] ⚠️ RenderCV theme '{theme}' failed: {r_err}. Falling back to Playwright HTML renderer.")
+
+    if not rendered:
+        print(f"[INFO] 📄 Render-from-YAML: Playwright HTML engine (page_break_section={page_break_section})...")
+        template = Template(HTML_TEMPLATE)
+        html_content = template.render(
+            **parsed_data,
+            labels=labels,
+            page_break_section=page_break_section,
+        )
+        def render_pdf_sync():
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                page.set_content(html_content)
+                page.pdf(path=output_path, prefer_css_page_size=True, print_background=True)
+                browser.close()
+        await asyncio.to_thread(render_pdf_sync)
+
+    return {
+        "download_url": f"/api/download/{output_filename}",
+        "filename": output_filename,
+    }
+
 
 @app.get("/api/download/{filename}")
 async def download_resume(filename: str):
