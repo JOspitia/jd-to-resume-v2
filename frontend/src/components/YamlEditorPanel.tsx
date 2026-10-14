@@ -1,21 +1,44 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Play, RefreshCw, ShieldCheck, Sparkles, X } from 'lucide-react';
+import {
+  Play, RefreshCw, ShieldCheck, Sparkles, X,
+  AlertCircle, CheckCircle2, FileText, LayoutGrid,
+} from 'lucide-react';
+
+import { validateYaml } from '../lib/yamlValidator';
+import {
+  emptyFormData,
+  parseYamlToFormData,
+  serializeFormDataToYaml,
+  type YamlFormData,
+} from '../lib/yamlFormData';
+import { YamlFormEditor } from './YamlFormEditor';
 
 /**
- * YamlEditorPanel — T12 of the UX refactor (specs S5, S6).
+ * YamlEditorPanel — T2/T3 of feat/yaml-editor-structured + T2 of
+ * odd/tasks/yaml-editor-validation.md.
  *
- * Full-width contextual panel that slides *over* the main flow (never a new
- * page): the user keeps the context of the form behind the dimmed backdrop
- * and closes the editor with ✕ to go back without losing anything.
+ * Hybrid form + raw YAML editor with a toggle. The user edits fields, not
+ * YAML text — no stray colons, no indentation accidents, no syntax errors.
  *
- * Rendered when the backend emitted a `yaml_ready` event. The user edits the
- * YAML in the textarea and either POSTs to /api/render-from-yaml or
- * /api/analyze-yaml via the buttons below.
+ * View modes:
+ *   - 'form' (default): structured fields, one section per top-level key.
+ *     Add/Remove buttons for lists. The form is the source of truth.
+ *   - 'yaml' (toggle): the existing raw YAML textarea. Editable, for power
+ *     users who want to see the wire format.
+ *
+ * Sync model: formData is local state. When the user edits the form we
+ * serialize and call onYamlChange. When yamlContent changes from outside
+ * (SSE event, auto-repair, parent re-render) we re-parse into formData.
+ * A ref guards against the re-parse firing on our own form-derived update.
+ *
+ * The existing auto-cleanup (validate + auto-repair on Generate) and the
+ * REPARAR / VALIDAR / Generar CV buttons still work — they operate on
+ * yamlContent, which is always the serialized form.
  */
 
 export type YamlEditorPanelProps = {
   yamlContent: string | null;
-  /** Panel visibility flag (the `yaml_ready` gate from the SSE stream). */
   yamlReady: boolean;
   onYamlChange: (value: string) => void;
   yamlError: string;
@@ -29,6 +52,8 @@ export type YamlEditorPanelProps = {
   onRepair: () => void;
   onClose: () => void;
 };
+
+type ViewMode = 'form' | 'yaml';
 
 export function YamlEditorPanel({
   yamlContent,
@@ -45,6 +70,51 @@ export function YamlEditorPanel({
   onRepair,
   onClose,
 }: YamlEditorPanelProps) {
+  // ---------- Form state ----------
+  const [formData, setFormData] = useState<YamlFormData>(() =>
+    yamlContent ? parseYamlToFormData(yamlContent) : emptyFormData(),
+  );
+  const [viewMode, setViewMode] = useState<ViewMode>('form');
+
+  // Guard against the sync effect firing on our own form-derived update.
+  const isInternalUpdate = useRef(false);
+
+  // Re-parse when yamlContent changes from outside (initial load, auto-repair,
+  // SSE event). Skip when the change came from our own form serialization.
+  useEffect(() => {
+    if (!yamlContent) return;
+    if (isInternalUpdate.current) {
+      isInternalUpdate.current = false;
+      return;
+    }
+    setFormData(parseYamlToFormData(yamlContent));
+  }, [yamlContent]);
+
+  const handleFormChange = (next: YamlFormData) => {
+    setFormData(next);
+    isInternalUpdate.current = true;
+    onYamlChange(serializeFormDataToYaml(next));
+  };
+
+  const handleYamlTextChange = (next: string) => {
+    // Direct yamlContent update — the useEffect re-parses to formData so the
+    // form view stays in sync if the user switches back.
+    isInternalUpdate.current = true;
+    onYamlChange(next);
+    setFormData(parseYamlToFormData(next));
+  };
+
+  // ---------- Live validation (from the previous branch) ----------
+  const validation = useMemo(
+    () => (yamlContent ? validateYaml(yamlContent) : { valid: true }),
+    [yamlContent],
+  );
+
+  const textareaClass = validation.valid
+    ? 'w-full font-mono text-sm p-3 border-2 border-emerald-600 min-h-[420px] resize-y bg-white'
+    : 'w-full font-mono text-sm p-3 border-2 border-rose-600 min-h-[420px] resize-y bg-rose-50/30';
+
+  // ---------- Render ----------
   return (
     <AnimatePresence>
       {yamlReady && yamlContent && (
@@ -63,41 +133,111 @@ export function YamlEditorPanel({
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="rm-box p-8 mt-8 bg-white w-full max-w-4xl"
           >
-            <div className="flex items-center justify-between mb-4 border-b-2 border-black pb-3">
-              <h3 className="text-2xl font-bold font-serif">Editor de YAML</h3>
-              <button
-                type="button"
-                onClick={onClose}
-                title="Cerrar el editor y volver al CV generado"
-                className="text-sm font-mono text-gray-600 hover:text-rose-700 flex items-center gap-1"
-              >
-                <X className="w-4 h-4" /> Cerrar
-              </button>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4 border-b-2 border-black pb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <h3 className="text-2xl font-bold font-serif">Editor de CV</h3>
+                {validation.valid ? (
+                  <span className="flex items-center gap-1 text-xs font-mono text-emerald-700">
+                    <CheckCircle2 className="w-4 h-4" /> YAML válido
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-xs font-mono text-rose-700">
+                    <AlertCircle className="w-4 h-4" /> YAML inválido
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* View-mode toggle */}
+                <div className="flex border-2 border-black">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('form')}
+                    aria-pressed={viewMode === 'form'}
+                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'form' ? 'bg-black text-white' : 'bg-white text-black'}`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" /> Formulario
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('yaml')}
+                    aria-pressed={viewMode === 'yaml'}
+                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'yaml' ? 'bg-black text-white' : 'bg-white text-black'}`}
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Ver YAML
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  title="Cerrar el editor y volver al CV generado"
+                  className="text-sm font-mono text-gray-600 hover:text-rose-700 flex items-center gap-1"
+                >
+                  <X className="w-4 h-4" /> Cerrar
+                </button>
+              </div>
             </div>
 
+            {/* Error banner (from the parent, e.g. backend render error) */}
             {yamlError && (
               <div className="mb-4 p-3 bg-rose-100 border-2 border-rose-700 text-rose-900 font-mono text-sm">
                 {yamlError}
               </div>
             )}
 
-            <textarea
-              value={yamlContent}
-              onChange={(e) => onYamlChange(e.target.value)}
-              spellCheck={false}
-              className="w-full font-mono text-sm p-3 border-2 border-black min-h-[420px] resize-y bg-gray-50 focus:bg-white"
-              placeholder="# YAML listo para revisión. Editá libremente y luego presioná 'Generar CV'."
-            />
+            {/* Inline validation error with line/column (yaml view) */}
+            {viewMode === 'yaml' && !validation.valid && (
+              <div className="mb-3 p-3 bg-rose-50 border-2 border-rose-500 text-rose-900 font-mono text-xs">
+                <div className="flex items-center gap-1 font-bold mb-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> Error de sintaxis YAML
+                  {validation.line !== undefined && (
+                    <span className="ml-2 text-rose-600">
+                      (línea {validation.line}
+                      {validation.column !== undefined ? `, columna ${validation.column}` : ''})
+                    </span>
+                  )}
+                </div>
+                <div className="text-rose-800">{validation.error}</div>
+              </div>
+            )}
 
+            {/* Body — form or yaml depending on viewMode */}
+            {viewMode === 'form' ? (
+              <YamlFormEditor formData={formData} onChange={handleFormChange} />
+            ) : (
+              <>
+                <textarea
+                  value={yamlContent}
+                  onChange={(e) => handleYamlTextChange(e.target.value)}
+                  spellCheck={false}
+                  className={textareaClass}
+                  placeholder="# YAML listo para revisión..."
+                  aria-invalid={!validation.valid}
+                  aria-describedby="yaml-validation-status"
+                />
+                <div id="yaml-validation-status" className="sr-only">
+                  {validation.valid
+                    ? 'YAML válido'
+                    : `YAML inválido: ${validation.error ?? ''}`}
+                </div>
+              </>
+            )}
+
+            {/* Action row — unchanged from the previous branch */}
             <div className="flex flex-wrap gap-3 mt-5">
               <button
                 type="button"
                 onClick={onRender}
                 disabled={status === 'generating'}
+                title={
+                  !validation.valid
+                    ? 'El YAML tiene errores. La IA los arreglará automáticamente al hacer clic.'
+                    : undefined
+                }
                 className={`rm-btn bg-blue-700 text-white px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Play className="w-4 h-4" />
-                Generar CV
+                {status === 'generating' ? 'Renderizando…' : 'Generar CV'}
               </button>
               <button
                 type="button"
@@ -121,7 +261,7 @@ export function YamlEditorPanel({
                 type="button"
                 onClick={onRepair}
                 disabled={yamlRepairing}
-                title="Pide a la IA que arregle la sintaxis/estructura del YAML sin modificar los datos factuales"
+                title="Pide a la IA que arregle la sintaxis/estructura del YAML preservando tus datos verbatim"
                 className={`rm-btn bg-purple-100 border-2 border-purple-700 text-purple-900 px-6 py-3 font-bold flex items-center gap-2 ${yamlRepairing ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Sparkles className="w-4 h-4" />
@@ -136,8 +276,11 @@ export function YamlEditorPanel({
             )}
 
             <p className="mt-4 text-xs font-mono text-gray-500">
-              El backend usa la YAML exactamente como está acá para renderizar. Si el YAML no es válido el endpoint
-              devuelve HTTP 400 con el error del parser.
+              {viewMode === 'form'
+                ? 'Estás editando el formulario. Los cambios se serializan a YAML automáticamente. Si preferís ver el YAML crudo, usá el toggle "Ver YAML" arriba.'
+                : 'Estás editando el YAML crudo. Si preferís un formulario con campos, usá el toggle "Formulario" arriba.'}
+              {' '}El backend usa la YAML exacta para renderizar. Si el YAML no es válido, el botón
+              "Generar CV" llama automáticamente a la IA para arreglarlo antes de renderizar.
             </p>
           </motion.div>
         </motion.div>
