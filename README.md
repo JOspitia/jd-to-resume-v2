@@ -24,6 +24,23 @@ El frontend es una SPA con shadcn/ui (estilo new-york) sobre Radix, decorada con
 
 ---
 
+## Dominios soportados (v2.6+)
+
+El selector de la barra superior derecha de **ToolApp** te deja elegir el perfil del CV antes de subirlo. El backend compone el prompt a partir de la *игра* (juego / "game") correspondiente en `backend/domain_games/`:
+
+| Игла | Para quién | Categorías de skills (ES) | Markers característicos |
+|---|---|---|---|
+| `tech` *(default)* | Ingenieros de software, full-stack, data/ML, DevOps, QA | *Lenguajes & Frameworks · DevOps & Automatización · Bases de Datos & Cloud · Testing & QA · Frontend & UX Engineering* | FastAPI · Playwright · Kubernetes · PostgreSQL · Diseñé / Implementé / Refactoricé |
+| `hr_recruiting` | Analistas de selección, talent acquisition, HRBP, employer branding, onboarding | *ATS & CRM · Sourcing & Estrategia de Canales · Screening & Assessment · Legislación Laboral & Compliance · Employer Branding & CX del Candidato · Onboarding & Retención* | Workday · LinkedIn Recruiter · Greenhouse · Entrevista por Competencias · time-to-fill · Recluté / Headhunteé / Cerré ofertas |
+| `psychology` | Psicólogos/as organizacional, clínico, educativo, social o forense | *Pruebas Psicotécnicas & Psicométricas · Evaluación & Diagnóstico Psicológico · Metodología de Selección · Intervención Terapéutica & Organizacional · Investigación, Docencia & Publicaciones · Ética & Deontología Profesional* | 16PF · DISC · MMPI-2 · 16PF + Wartegg · TCC · psicoeducación · BDI-II · consentimiento informado |
+
+- **Default = `tech`** cuando no seleccionás nada: preserva exactamente la salida de v2.5 (los prompts legacy viven ahora en `backend/domain_games/tech.py` byte-for-byte).
+- **API contract**: `/api/generate` y `/api/analyze-ats` aceptan `domain_game` opcional (string). Valores fuera de `{tech, hr_recruiting, psychology}` se rechazan con HTTP 422.
+- **Audit ATS** usa la misma игра: las *actionable_tips* y los *matched/missing keywords* dejan de sugerir *“añade Docker”* sobre un CV de Psicología.
+- Agregar una nueva игра (p. ej. *marketing*, *finance*, *design*) es un único archivo en `domain_games/` registrado en `__init__.py`.
+
+---
+
 ## Features
 
 ### 1. Tres motores LLM en cadena
