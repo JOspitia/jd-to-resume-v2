@@ -1818,6 +1818,10 @@ If the user's bullet says "Aporto experiencia en atracción: candidatos califica
 WHAT TO FIX (syntax only)
   - Indentation: normalize to 2 spaces.
   - String quoting: if a value contains a colon, hyphen, or another YAML special char without quotes, wrap the value in double quotes. Example: `point: Aporto experiencia: en atracción` becomes `point: "Aporto experiencia: en atracción"`.
+  - MULTILINE TEXT (VERY IMPORTANT): a long value like `summary` that got split across several lines by the user MUST be converted to a YAML block scalar. Use `>-` (folded, keeps it as one flowing paragraph) for prose like the summary, or `|-` (literal, preserves line breaks) for bullet-like content. Example:
+      WRONG: `summary: Psicóloga Organizacional con más de 2 años\n  de experiencia en selección`
+      RIGHT: `summary: >-\n    Psicóloga Organizacional con más de 2 años\n    de experiencia en selección`
+    NEVER leave a multi-line plain scalar — that is what produces `bad indentation of a sequence entry`.
   - List syntax: ensure each list item starts with `- `.
   - Missing colons: add them where the schema requires.
   - Type mismatches: a list that became a string should be split back into list items IF the content supports it. If the content is a single sentence, wrap it in a one-item list.
@@ -1946,7 +1950,18 @@ async def repair_yaml(
             repairs.append("LLM produced YAML that passes schema validation.")
             yaml_text = llm_yaml
 
-        # Both validations passed (either locally or after LLM repair)
+        # Both validations passed (either locally or after LLM repair).
+        # Re-serialize through yaml.safe_dump so the output is ALWAYS block-style
+        # and human-readable. The LLM frequently answers with JSON (technically
+        # valid YAML) which renders as one unreadable line in the textarea.
+        try:
+            normalized = _yaml_safe_dump_unicode(parsed if repairs == [] else _pyyaml.safe_load(yaml_text))
+            if normalized.strip() != yaml_text.strip():
+                repairs.append("Re-formateado a YAML legible (bloques y saltos de línea).")
+            yaml_text = normalized
+        except Exception as fmt_err:
+            print(f"[WARN] Could not normalize repaired YAML formatting: {fmt_err}")
+
         return {
             "ok": True,
             "yaml": yaml_text,
