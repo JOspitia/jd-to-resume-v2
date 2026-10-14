@@ -100,6 +100,24 @@ HTML_TEMPLATE = """
   .contact-info { text-align: center; font-size: 10.5pt; margin-bottom: 8px; }
   .contact-info a { color: #000; text-decoration: none; }
 
+  /* Profile URLs live on their own full-width line.
+     Keeping them on the same line as location/phone/email means a photo
+     squeezes the run and the layout wraps the URL at one of its hyphens:
+     "linkedin.com/in/julieth-andrea-caicedo-" / "goyeneche". The link
+     annotation survives but the extracted text does not, and ATS parsers
+     read the text layer, so a wrapped URL parses as a broken one.
+     On its own line the URL gets the whole page width, and `nowrap` makes a
+     mid-token break impossible even with an unusually long slug. */
+  .profile-links {
+    text-align: center; font-size: 10.5pt; margin-bottom: 8px;
+    word-break: keep-all; overflow-wrap: normal;
+  }
+  .profile-links a {
+    color: #000; text-decoration: none; white-space: nowrap;
+    display: inline-block; vertical-align: top;
+  }
+  .profile-links .sep { padding: 0 4pt; }
+
   /* Optional candidate photo. Laid out as a bordered circle in the header row
      so it matches what RenderCV's photo_position:left renders. */
   .header-row { display: flex; align-items: center; justify-content: center; gap: 14pt; }
@@ -147,13 +165,20 @@ HTML_TEMPLATE = """
     {% if location %}{% set _ = items.append(location) %}{% endif %}
     {% if phone %}{% set _ = items.append(phone) %}{% endif %}
     {% if email %}{% set _ = items.append(email) %}{% endif %}
-    {% if linkedin %}{% set _ = items.append('<a href="' ~ (linkedin | e) ~ '">' ~ (linkedin | ats_link('linkedin')) ~ '</a>') %}{% endif %}
-    {% if github %}{% set _ = items.append('<a href="' ~ (github | e) ~ '">' ~ (github | ats_link('github')) ~ '</a>') %}{% endif %}
-    {% if portfolio %}{% set _ = items.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
     {{ items|join(' | ') }}
   </div>
     </div>
   </div>
+
+  {# Profile URLs on a dedicated full-width line — see .profile-links in the
+     stylesheet for why a photo must not share the line with them. #}
+  {% set links = [] %}
+  {% if linkedin %}{% set _ = links.append('<a href="' ~ (linkedin | e) ~ '">' ~ (linkedin | ats_link('linkedin')) ~ '</a>') %}{% endif %}
+  {% if github %}{% set _ = links.append('<a href="' ~ (github | e) ~ '">' ~ (github | ats_link('github')) ~ '</a>') %}{% endif %}
+  {% if portfolio %}{% set _ = links.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
+  {% if links %}
+  <div class="profile-links">{{ links|join('<span class="sep">|</span>')|safe }}</div>
+  {% endif %}
 
   {% if summary %}
   <div class="resume-entry {% if page_break_section == 'summary' %}manual-page-break{% endif %}">
@@ -274,6 +299,36 @@ def _ats_link_label(url: str, network: str) -> str:
         slug = no_scheme.split("github.com/", 1)[1].strip("/")
         return escape(f"github.com/{slug}" if slug else "github.com")
     return escape(no_scheme)
+
+
+def _check_profile_urls_not_fragmented(pdf_path: str, parsed_data: dict) -> None:
+    """
+    Warn when a profile URL was split across lines in the rendered PDF.
+
+    ATS parsers read the extracted text layer, not the link annotations, so a
+    URL the layout engine wrapped at a hyphen looks broken to them even though
+    the annotation is intact. The fix is a layout change; this is the
+    canary that tells us when the layout regresses, since a silent wrap is
+    invisible to every other check.
+    """
+    try:
+        text = extract_text(pdf_path)
+    except Exception as err:  # pragma: no cover - defensive
+        print(f"[WARN] Could not verify profile URLs in {pdf_path}: {err}")
+        return
+
+    flat = re.sub(r"\s+", "", text)
+    for key in ("linkedin", "github", "portfolio"):
+        url = (parsed_data.get(key) or "").strip()
+        if not url:
+            continue
+        slug = re.sub(r"^https?://", "", url, flags=re.IGNORECASE)
+        slug = re.sub(r"^www\.", "", slug, flags=re.IGNORECASE).rstrip("/")
+        if slug and slug not in flat:
+            print(
+                f"[WARN] ATS: the {key} URL was fragmented in the rendered PDF "
+                f"and may parse as broken: {slug}"
+            )
 
 
 def _photo_to_data_uri(photo_path: Optional[str]) -> str:
@@ -1460,6 +1515,8 @@ IMPORTANT:
 
             await asyncio.to_thread(render_pdf_sync)
 
+        _check_profile_urls_not_fragmented(output_path, parsed_data)
+
         # Auto re-audit (REQ-4): when force_language='en' triggered the translation
         # path, internally invoke the ATS audit against the freshly rendered PDF so
         # the user sees new ats_score / ai_detection_score in the same response.
@@ -1735,6 +1792,8 @@ async def render_from_yaml(
                 page.pdf(path=output_path, prefer_css_page_size=True, print_background=True)
                 browser.close()
         await asyncio.to_thread(render_pdf_sync)
+
+    _check_profile_urls_not_fragmented(output_path, parsed_data)
 
     return {
         "download_url": f"/api/download/{output_filename}",
