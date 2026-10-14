@@ -57,6 +57,10 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
   // requests an AI-assisted YAML repair.
   const [yamlRepairing, setYamlRepairing] = useState(false);
   const [yamlRepairNotice, setYamlRepairNotice] = useState('');
+  // Pre-repair snapshot. Set right before we send the user's YAML to the LLM
+  // so a failed/garbage repair can never destroy their manual edits. The
+  // user can restore it with the "↩ Deshacer reparación" button.
+  const [yamlBackup, setYamlBackup] = useState<string | null>(null);
 
   const {
     setStatus,
@@ -92,16 +96,20 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     }
 
     // --- Auto-cleanup: if the YAML is broken, ask the IA to fix it first. ---
+    // Same safety rails as the manual REPARAR button: snapshot before the
+    // call, never touch the textarea on failure, reject degenerate output.
     let renderableYaml = yamlContent;
     const validation = validateYaml(yamlContent);
     if (!validation.valid) {
+      const preRepairYaml = yamlContent;
       setYamlRepairing(true);
+      setYamlBackup(preRepairYaml);
       setStepMessage(
         `YAML inválido (línea ${validation.line ?? '?'}): la IA lo está arreglando...`,
       );
       try {
         const repairFormData = new FormData();
-        repairFormData.append('yaml_content', yamlContent);
+        repairFormData.append('yaml_content', preRepairYaml);
         if (domainGame) repairFormData.append('domain_game', domainGame);
 
         const repairRes = await fetch(
@@ -125,16 +133,29 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
           if (!reparValidation.valid) {
             setYamlRepairing(false);
             setYamlError(
-              `La IA no pudo reparar el YAML: el resultado sigue inválido (línea ${reparValidation.line ?? '?'}): ${reparValidation.error}. Editá manualmente o volvé a intentar.`,
+              `No se pudo generar el CV: el YAML tiene un error (línea ${validation.line ?? '?'}: ${validation.error}) y la IA no logró arreglarlo (línea ${reparValidation.line ?? '?'}: ${reparValidation.error}). Tu texto NO se perdió — corregí a mano o usá "Deshacer reparación".`,
             );
             return;
           }
+
+          // Degenerate-output guard: reject a near-empty document (e.g. only
+          // `name:` survived) instead of silently rendering an empty CV.
+          const repairedLines = repairData.yaml.split('\n').filter((l: string) => l.trim()).length;
+          const originalLines = preRepairYaml.split('\n').filter((l: string) => l.trim()).length;
+          if (repairedLines < Math.max(3, Math.floor(originalLines * 0.4))) {
+            setYamlRepairing(false);
+            setYamlError(
+              `No se pudo generar el CV: la IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) y se habría perdido la mayor parte del CV. Tu texto NO se perdió.`,
+            );
+            return;
+          }
+
           renderableYaml = repairData.yaml;
           setYamlContent(repairData.yaml);
           const repairs = Array.isArray(repairData.repairs) ? repairData.repairs : [];
           setYamlRepairNotice(
             repairs.length > 0
-              ? `Tu YAML tenía errores. La IA los corrigió: ${repairs.join(' · ')}`
+              ? `Tu YAML tenía errores. La IA los corrigió automáticamente: ${repairs.join(' · ')}`
               : 'La IA revisó tu YAML y lo devolvió sin cambios.',
           );
         } else if (repairData?.error) {
@@ -145,7 +166,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setYamlRepairing(false);
-        setYamlError(`No se pudo auto-arreglar el YAML: ${msg}`);
+        setYamlError(`No se pudo auto-arreglar el YAML: ${msg}. Tu texto NO se perdió — corregí a mano o usá "Deshacer reparación".`);
         return;
       }
       setYamlRepairing(false);
@@ -322,9 +343,15 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     setYamlRepairNotice('');
     setYamlError('');
 
+    // Snapshot the user's manual edits BEFORE calling the LLM. A failed or
+    // degenerate repair must never be able to destroy their work.
+    const preRepairYaml = yamlContent;
+    setYamlBackup(preRepairYaml);
+
     try {
       const formData = new FormData();
-      formData.append('yaml_content', yamlContent);
+      formData.append('yaml_content', preRepairYaml);
+      if (domainGame) formData.append('domain_game', domainGame);
 
       const res = await fetch('http://localhost:8000/api/repair-yaml', {
         method: 'POST',
@@ -333,7 +360,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       if (!res.ok) throw new Error('No se pudo conectar con el endpoint de reparación YAML.');
       const data = await res.json();
 
-      if (typeof data?.yaml === 'string') {
+      if (typeof data?.yaml === 'string' && data.yaml.trim()) {
         // Validate the IA's output LOCALLY before accepting it. The IA
         // sometimes claims the YAML is valid but produces indentation
         // errors (e.g. `items:` at column 1 instead of under a list
@@ -342,17 +369,32 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
         const reparValidation = validateYaml(data.yaml);
         if (!reparValidation.valid) {
           setYamlRepairing(false);
+          // Do NOT touch yamlContent — the user's edits stay in the textarea.
           setYamlError(
-            `La IA no pudo reparar el YAML: el resultado sigue inválido (línea ${reparValidation.line ?? '?'}): ${reparValidation.error}. Editá manualmente o volvé a intentar.`,
+            `La IA no pudo reparar el YAML: el resultado sigue inválido (línea ${reparValidation.line ?? '?'}): ${reparValidation.error}. Tu texto original NO se perdió — corregí a mano o usá "Deshacer reparación".`,
           );
           return;
         }
+
+        // Degenerate-output guard: the LLM occasionally answers with a valid
+        // but near-empty document (e.g. only `name:` survives). Accepting it
+        // would silently wipe the CV. Require a minimum amount of substance.
+        const repairedLines = data.yaml.split('\n').filter((l: string) => l.trim()).length;
+        const originalLines = preRepairYaml.split('\n').filter((l: string) => l.trim()).length;
+        if (repairedLines < Math.max(3, Math.floor(originalLines * 0.4))) {
+          setYamlRepairing(false);
+          setYamlError(
+            `La IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) — se habría perdido la mayor parte del CV. Tu texto original NO se perdió.`,
+          );
+          return;
+        }
+
         setYamlContent(data.yaml);
       } else if (data?.error) {
         setYamlError(data.error);
         return;
       } else {
-        setYamlError('La IA no pudo reparar el YAML (respuesta vacía).');
+        setYamlError('La IA no pudo reparar el YAML (respuesta vacía). Tu texto original NO se perdió.');
         return;
       }
       const noticeParts: string[] = [];
@@ -392,7 +434,18 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     setYamlReady(false);
     setYamlError('');
     setYamlRepairNotice('');
+    setYamlBackup(null);
     setEditBeforeGenerate(false);
+  };
+
+  // Restore the pre-repair snapshot. Safety net for when the LLM produced a
+  // technically-valid but wrong result: the user's original text is always
+  // one click away.
+  const handleRestoreYamlBackup = () => {
+    if (!yamlBackup) return;
+    setYamlContent(yamlBackup);
+    setYamlError('');
+    setYamlRepairNotice('Se restauró tu texto anterior a la reparación.');
   };
 
   /** Clears the editor state used by the global "Nuevo / Limpiar" action. */
@@ -400,6 +453,8 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     setYamlContent(null);
     setYamlReady(false);
     setYamlError('');
+    setYamlBackup(null);
+    setYamlRepairNotice('');
   };
 
   const ops: YamlEditorOps = { open };
@@ -411,11 +466,13 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     yamlError,
     yamlRepairing,
     yamlRepairNotice,
+    yamlBackup,
     ops,
     handleRenderFromYaml,
     handleRegenerateYaml,
     handleAuditYaml,
     handleRepairYaml,
+    handleRestoreYamlBackup,
     handleReopenYamlEditor,
     handleCloseYamlEditor,
     resetYamlEditor,
