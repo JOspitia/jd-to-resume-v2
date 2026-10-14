@@ -11,9 +11,10 @@ if sys.platform == "win32":
 
 import json
 import asyncio
+import base64
 from html import escape
 from typing import Optional
-from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException
+from fastapi import FastAPI, UploadFile, Form, File, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -28,6 +29,7 @@ import re
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
 from language import detect_language
+from photo_helpers import save_photo as _save_photo, prune_orphaned_photos as _prune_photos
 from domain_games import get_game
 from audit_prompts import build_audit_prompt as _build_audit_prompt_lib
 from yaml_helpers import (
@@ -51,6 +53,31 @@ app.add_middleware(
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# Candidate photos. Kept separate from generated PDFs so "Limpiar" can clear
+# one without touching the other.
+PHOTOS_DIR = os.path.join(OUTPUT_DIR, "photos")
+
+
+async def _persist_uploaded_photo(photo: Optional[UploadFile]) -> Optional[str]:
+    """
+    Validate and store an optional candidate photo. Returns the absolute path,
+    or None when no photo was sent.
+
+    Never raises: a bad photo degrades to "no photo" rather than failing the
+    whole generation, which would strand the user with no CV at all.
+    """
+    if photo is None or not photo.filename:
+        return None
+    try:
+        data = await photo.read()
+        return _save_photo(data, PHOTOS_DIR)
+    except ValueError as exc:
+        print(f"[PHOTO] rejected: {exc}")
+        return None
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[PHOTO] unexpected error: {exc}")
+        return None
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -72,6 +99,15 @@ HTML_TEMPLATE = """
   h1 { font-size: 24pt; font-weight: bold; text-align: center; margin: 0 0 5px 0; text-transform: uppercase; }
   .contact-info { text-align: center; font-size: 10.5pt; margin-bottom: 8px; }
   .contact-info a { color: #000; text-decoration: none; }
+
+  /* Optional candidate photo. Laid out as a bordered circle in the header row
+     so it matches what RenderCV's photo_position:left renders. */
+  .header-row { display: flex; align-items: center; justify-content: center; gap: 14pt; }
+  .header-row .photo {
+    width: 3.2cm; height: 3.2cm; border-radius: 50%; object-fit: cover;
+    border: 1pt solid #000; flex: 0 0 auto;
+  }
+  .header-row .header-text { flex: 1 1 auto; }
   
   h2 { font-size: 12pt; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid black; padding-bottom: 2px; margin-top: 12px; margin-bottom: 6px; color: #000; page-break-after: avoid; break-after: avoid; }
   
@@ -100,6 +136,11 @@ HTML_TEMPLATE = """
 </style>
 </head>
 <body>
+  <div class="header-row">
+    {% if photo_uri %}
+      <img class="photo" src="{{ photo_uri }}" alt="" />
+    {% endif %}
+    <div class="header-text">
   <h1>{{ name }}</h1>
   <div class="contact-info">
     {% set items = [] %}
@@ -111,9 +152,9 @@ HTML_TEMPLATE = """
     {% if portfolio %}{% set _ = items.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
     {{ items|join(' | ') }}
   </div>
+    </div>
+  </div>
 
-
-  
   {% if summary %}
   <div class="resume-entry {% if page_break_section == 'summary' %}manual-page-break{% endif %}">
     <h2>{{ labels.summary }}</h2>
@@ -235,13 +276,43 @@ def _ats_link_label(url: str, network: str) -> str:
     return escape(no_scheme)
 
 
-def _render_html_template(parsed_data: dict, labels: dict, page_break_section: Optional[str]) -> str:
+def _photo_to_data_uri(photo_path: Optional[str]) -> str:
+    """
+    Inline the candidate photo as a data URI for the Playwright renderer.
+
+    RenderCV takes a filesystem path, but the HTML engine has no file access of
+    its own, so the bytes are embedded directly. Returns "" when there is no
+    usable photo, which makes the template skip the <img> entirely.
+    """
+    if not photo_path or not os.path.isfile(photo_path):
+        return ""
+    import mimetypes
+    mime = mimetypes.guess_type(photo_path)[0] or "image/png"
+    try:
+        with open(photo_path, "rb") as fh:
+            payload = base64.b64encode(fh.read()).decode("ascii")
+    except OSError:
+        return ""
+    return f"data:{mime};base64,{payload}"
+
+
+def _render_html_template(
+    parsed_data: dict,
+    labels: dict,
+    page_break_section: Optional[str],
+    photo_path: Optional[str] = None,
+) -> str:
     """Render the Playwright HTML template with the ATS helpers registered."""
     template = Template(HTML_TEMPLATE)
     template.globals["ats_link"] = _ats_link_label
     # Also expose it as a filter so the template can write `url | ats_link('linkedin')`.
     template.environment.filters["ats_link"] = lambda url, network: _ats_link_label(url, network)
-    return template.render(**parsed_data, labels=labels, page_break_section=page_break_section)
+    return template.render(
+        **parsed_data,
+        labels=labels,
+        page_break_section=page_break_section,
+        photo_uri=_photo_to_data_uri(photo_path),
+    )
 
 
 def extract_text(file_path: str) -> str:
@@ -974,6 +1045,7 @@ async def generation_pipeline(
     force_language: Optional[str] = None,
     domain_game: Optional[str] = None,
     edit_before_generate: bool = False,
+    photo_path: Optional[str] = None,
 ):
     """
     The end-to-end generation pipeline. Returns an SSE stream of progress events and
@@ -1360,14 +1432,15 @@ IMPORTANT:
         rendered = False
         if use_rendercv:
             try:
-                print(f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section})...")
+                print(f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section}, photo={bool(photo_path)})...")
                 await asyncio.to_thread(
                     render_cv_with_rendercv, 
                     parsed_data, 
                     output_path, 
                     theme, 
                     fit_single_page, 
-                    page_break_section
+                    page_break_section,
+                    photo_path
                 )
                 rendered = True
             except Exception as r_err:
@@ -1375,7 +1448,7 @@ IMPORTANT:
 
         if not rendered:
             print(f"[INFO] 📄 Rendering PDF with Playwright HTML engine (page_break_section={page_break_section})...")
-            html_content = _render_html_template(parsed_data, labels, page_break_section)
+            html_content = _render_html_template(parsed_data, labels, page_break_section, photo_path)
             
             def render_pdf_sync():
                 with sync_playwright() as p:
@@ -1464,7 +1537,8 @@ async def generate_resume(
     strict_edits_only: Optional[bool] = Form(False),
     force_language: Optional[str] = Form(None),
     domain_game: Optional[str] = Form(None),
-    edit_before_generate: Optional[bool] = Form(False)
+    edit_before_generate: Optional[bool] = Form(False),
+    photo: Optional[UploadFile] = File(None),
 ):
     # Validate force_language early so unsupported values are rejected with HTTP 422
     # before any upload work or LLM call happens.
@@ -1492,6 +1566,8 @@ async def generate_resume(
     with open(file_path, "wb") as f:
          f.write(await file.read())
 
+    photo_path = await _persist_uploaded_photo(photo)
+
     return StreamingResponse(
         generation_pipeline(
             file_path,
@@ -1510,6 +1586,7 @@ async def generate_resume(
             force_language,
             domain_game,
             edit_before_generate or False,
+            photo_path,
         ),
         media_type="text/event-stream"
     )
@@ -1566,6 +1643,7 @@ async def render_from_yaml(
     jd: Optional[str] = Form(None),
     custom_instructions: Optional[str] = Form(None),
     domain_game: Optional[str] = Form(None),
+    photo: Optional[UploadFile] = File(None),
 ):
     """
     Render-only endpoint: takes the YAML edited by the user, parses it, and
@@ -1604,6 +1682,8 @@ async def render_from_yaml(
             detail=f"Expected a YAML mapping at the top level, got {type(parsed_data).__name__}"
         )
 
+    photo_path = await _persist_uploaded_photo(photo)
+
     # Compose labels using the same fallback chain as /api/generate so the
     # rendered PDF is consistent regardless of which path produced the
     # parsed_data (LLM vs YAML). Order: game ES (preferred, the user's
@@ -1630,7 +1710,7 @@ async def render_from_yaml(
     rendered = False
     if use_rendercv:
         try:
-            print(f"[INFO] 🎨 Render-from-YAML: RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section})...")
+            print(f"[INFO] 🎨 Render-from-YAML: RenderCV theme '{theme}' (fit_single_page={fit_single_page}, page_break_section={page_break_section}, photo={bool(photo_path)})...")
             await asyncio.to_thread(
                 render_cv_with_rendercv,
                 parsed_data,
@@ -1638,6 +1718,7 @@ async def render_from_yaml(
                 theme,
                 fit_single_page or False,
                 page_break_section,
+                photo_path,
             )
             rendered = True
         except Exception as r_err:
@@ -1645,7 +1726,7 @@ async def render_from_yaml(
 
     if not rendered:
         print(f"[INFO] 📄 Render-from-YAML: Playwright HTML engine (page_break_section={page_break_section})...")
-        html_content = _render_html_template(parsed_data, labels, page_break_section)
+        html_content = _render_html_template(parsed_data, labels, page_break_section, photo_path)
         def render_pdf_sync():
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
@@ -2147,7 +2228,15 @@ async def clear_cache():
                         deleted_count += 1
                     except Exception as err:
                         print(f"Could not remove {fpath}: {err}")
-        return {"status": "ok", "deleted_files": deleted_count, "message": "Cache y CVs generados eliminados correctamente."}
+        # Candidate photos live in a subdirectory, so the loop above (which
+        # only unlinks files) never reached them. Drop the whole directory.
+        photos_removed = _prune_photos(PHOTOS_DIR, keep=set())
+        return {
+            "status": "ok",
+            "deleted_files": deleted_count,
+            "deleted_photos": photos_removed,
+            "message": "Cache, CVs generados y fotos eliminados correctamente.",
+        }
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
