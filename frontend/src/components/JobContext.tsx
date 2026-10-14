@@ -1,12 +1,19 @@
-import { motion } from 'framer-motion';
+import { Briefcase } from 'lucide-react';
 
 /**
- * JobContext — T7 of the UX refactor (specs S1, S6).
+ * JobContext — T5 of the UX refactor (specs S5, S6).
  *
- * Step 2 of the main flow: the job description (or free-form requirements)
- * textarea plus the "Additional Context" links that the backend injects into
- * the prompt (`jd`, `target_role`, `linkedin_url`, `github_url`,
- * `portfolio_url`).
+ * Step 3 of the main flow:
+ *   1. Target role (compact single-line input, sits ABOVE the JD).
+ *   2. Job description / requirements (full-width textarea).
+ *   3. Profile links (GitHub | LinkedIn | Portfolio) in a single row
+ *      so the user doesn't see 3 stacked input fields that eat vertical
+ *      space.
+ *
+ * The step2Mode toggle (JD vs custom requirements) stays because it
+ * changes the placeholder + label, not the layout.
+ *
+ * Wrapped by <Section number={3} title="LA VACANTE"> in ToolApp.
  */
 
 export type JobContextProps = {
@@ -25,7 +32,9 @@ export type JobContextProps = {
 };
 
 const inputClass =
-  "w-full border-2 border-black bg-white p-3 font-sans focus:outline-none focus:ring-4 focus:ring-blue-100";
+  "w-full border-2 border-black bg-white p-2.5 font-sans text-sm focus:outline-none focus:ring-4 focus:ring-blue-100";
+
+const linkInputClass = inputClass + ' placeholder-gray-400';
 
 export function JobContext({
   jd,
@@ -42,98 +51,111 @@ export function JobContext({
   onPortfolioUrlChange,
 }: JobContextProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ delay: 0.2 }}
-      className="rm-box p-8 md:p-10 flex flex-col bg-white relative"
-    >
-      <div className="absolute -top-4 -left-4 rm-tag bg-orange-500 text-white px-4 py-2 text-lg">STEP_2</div>
-
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 mt-2">
-        <h2 className="text-xl font-bold font-serif">
-          {step2Mode === 'jd' ? 'Oferta de Trabajo (Job Description)' : 'Requerimientos de Modificación'}
-        </h2>
-        <div className="flex gap-1 bg-gray-100 p-1 border-2 border-black">
-          <button
-            type="button"
-            onClick={() => onStep2ModeChange('jd')}
-            className={`px-3 py-1 text-xs font-bold transition-all ${step2Mode === 'jd' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'}`}
-          >
-            💼 Oferta de Trabajo
-          </button>
-          <button
-            type="button"
-            onClick={() => onStep2ModeChange('custom')}
-            className={`px-3 py-1 text-xs font-bold transition-all ${step2Mode === 'custom' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'}`}
-          >
-            📝 Requerimientos CV
-          </button>
-        </div>
+    <div className="space-y-4">
+      {/* Target role — compact single-line input, ABOVE the JD */}
+      <div className="flex flex-col gap-1.5">
+        <label
+          htmlFor="target-role"
+          className="font-bold font-mono text-xs uppercase tracking-wide text-gray-700 flex items-center gap-1.5"
+        >
+          <Briefcase className="w-3.5 h-3.5" /> Cargo objetivo
+        </label>
+        <input
+          id="target-role"
+          type="text"
+          value={targetRole}
+          onChange={(e) => onTargetRoleChange(e.target.value)}
+          placeholder="e.g. Senior Frontend Engineer"
+          className={inputClass}
+        />
       </div>
 
-      <textarea
-        value={jd}
-        onChange={(e) => onJdChange(e.target.value)}
-        placeholder={
-          step2Mode === 'jd'
-            ? "Pega aquí los requisitos o descripción de la oferta laboral..."
-            : "Ejemplo: Cambiar fecha 2026-08 por 2026-09..."
-        }
-        className="flex-1 w-full border-2 border-black bg-white p-5 font-sans resize-none focus:outline-none focus:ring-4 focus:ring-blue-100 min-h-[200px] text-base placeholder-gray-500"
-      />
-
-      <p className="mt-2 text-xs text-gray-500 italic">
-        * Si no cuentas con una oferta específica, puedes alternar a "Requerimientos CV" o dejar este campo vacío para optimización general ATS.
-      </p>
-
-      {/* Additional Context — the URLs/role that enrich the prompt. */}
-      <div className="mt-8 border-t-2 border-gray-300 pt-6 grid md:grid-cols-2 gap-6">
-        <div className="flex flex-col gap-2">
-          <label className="font-bold font-mono text-sm uppercase tracking-wide">Target Role Title</label>
-          <input
-            type="text"
-            value={targetRole}
-            onChange={(e) => onTargetRoleChange(e.target.value)}
-            placeholder="e.g. Senior Frontend Eng"
-            className={inputClass}
-          />
+      {/* JD / requirements — full-width textarea with mode toggle */}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <label
+            htmlFor="jd"
+            className="font-bold font-mono text-xs uppercase tracking-wide text-gray-700"
+          >
+            {step2Mode === 'jd' ? 'Oferta de trabajo' : 'Requerimientos de modificación'}
+          </label>
+          <div
+            className="flex gap-1 bg-gray-100 p-0.5 border border-black"
+            role="tablist"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={step2Mode === 'jd'}
+              onClick={() => onStep2ModeChange('jd')}
+              className={`px-2.5 py-0.5 text-xs font-bold transition-all ${
+                step2Mode === 'jd' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              💼 Oferta
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={step2Mode === 'custom'}
+              onClick={() => onStep2ModeChange('custom')}
+              className={`px-2.5 py-0.5 text-xs font-bold transition-all ${
+                step2Mode === 'custom' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              📝 Requerimientos
+            </button>
+          </div>
         </div>
+        <textarea
+          id="jd"
+          value={jd}
+          onChange={(e) => onJdChange(e.target.value)}
+          placeholder={
+            step2Mode === 'jd'
+              ? "Pega acá los requisitos o descripción de la oferta laboral..."
+              : "Ejemplo: Cambiar fecha 2026-08 por 2026-09..."
+          }
+          className="w-full border-2 border-black bg-white p-3 font-sans resize-y focus:outline-none focus:ring-4 focus:ring-blue-100 min-h-[160px] text-sm placeholder-gray-500"
+        />
+        <p className="text-xs text-gray-500 italic">
+          * Si no contás con una oferta específica, cambiá a "Requerimientos" o dejá vacío para optimización general ATS.
+        </p>
+      </div>
 
-        <div className="flex flex-col gap-2">
-          <label className="font-bold font-mono text-sm uppercase tracking-wide">LinkedIn Profile</label>
-          <input
-            type="url"
-            value={linkedinUrl}
-            onChange={(e) => onLinkedinUrlChange(e.target.value)}
-            placeholder="https://linkedin.com/in/..."
-            className={inputClass}
-          />
+      {/* Profile links — single row */}
+      <div className="border-t-2 border-gray-200 pt-3">
+        <div className="text-xs font-mono text-gray-500 uppercase tracking-wide mb-2">
+          Links (opcional)
         </div>
-
-        <div className="flex flex-col gap-2">
-          <label className="font-bold font-mono text-sm uppercase tracking-wide">Portafolio / Sitio Web</label>
-          <input
-            type="url"
-            value={portfolioUrl}
-            onChange={(e) => onPortfolioUrlChange(e.target.value)}
-            placeholder="https://miportafolio.com"
-            className={inputClass}
-          />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <label className="font-bold font-mono text-sm uppercase tracking-wide">GitHub(Opcional)</label>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <input
             type="url"
             value={githubUrl}
             onChange={(e) => onGithubUrlChange(e.target.value)}
-            placeholder="https://github.com/..."
-            className={inputClass}
+            placeholder="GitHub URL"
+            aria-label="GitHub URL"
+            className={linkInputClass}
+          />
+          <input
+            type="url"
+            value={linkedinUrl}
+            onChange={(e) => onLinkedinUrlChange(e.target.value)}
+            placeholder="LinkedIn URL"
+            aria-label="LinkedIn URL"
+            className={linkInputClass}
+          />
+          <input
+            type="url"
+            value={portfolioUrl}
+            onChange={(e) => onPortfolioUrlChange(e.target.value)}
+            placeholder="Portafolio / Web"
+            aria-label="Portafolio / Web"
+            className={linkInputClass}
           />
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 

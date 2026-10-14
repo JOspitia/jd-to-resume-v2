@@ -1,13 +1,16 @@
-import { motion } from 'framer-motion';
-import { Upload } from 'lucide-react';
-import type { ChangeEvent, RefObject } from 'react';
+import { useState, type ChangeEvent, type DragEvent, type RefObject } from 'react';
+import { UploadCloud, FileText } from 'lucide-react';
 
 /**
- * CvUploader — T6 of the UX refactor (specs S1, S6).
+ * CvUploader — T4 of the UX refactor (spec S9).
  *
- * Step 1 of the main flow: the PDF drop zone plus the "extract LinkedIn
- * info" toggle, both bound to the `useProfile` state that feeds the
- * `/api/generate` FormData (`file`, `extract_linkedin_info`).
+ * Drop-zone with visual feedback: the dashed border thickens and the
+ * background darkens on dragover, and the file name is shown prominently
+ * once a file is selected. The "extract LinkedIn" toggle sits at the bottom
+ * of the card, adjacent to the uploader so the "scrape my profile" decision
+ * is made while the user is thinking about the source document.
+ *
+ * Wrapped by <Section number={2} title="TU CV"> in ToolApp.
  */
 
 export type CvUploaderProps = {
@@ -25,18 +28,54 @@ export function CvUploader({
   extractLinkedinInfo,
   onExtractLinkedinChange,
 }: CvUploaderProps) {
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped && fileInputRef.current) {
+      // Forward through the same <input type=file> change handler so
+      // the rest of the pipeline (validation, state update) is identical
+      // to the click-to-browse path.
+      const dt = new DataTransfer();
+      dt.items.add(dropped);
+      fileInputRef.current.files = dt.files;
+      const fakeEvent = { target: fileInputRef.current } as ChangeEvent<HTMLInputElement>;
+      onFileChange(fakeEvent);
+    }
+  };
+
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ delay: 0.1 }}
-      className="rm-box p-8 md:p-10 flex flex-col bg-white relative"
-    >
-      <div className="absolute -top-4 -left-4 rm-tag bg-orange-500 text-white px-4 py-2 text-lg">STEP_1</div>
-      <h2 className="text-2xl font-bold mb-6 font-serif mt-2">Upload Resume</h2>
+    <div className="space-y-4">
       <div
-        className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-400 bg-gray-50 hover:bg-white hover:border-blue-600 cursor-pointer transition-all duration-200 p-8 min-h-[250px]"
+        role="button"
+        tabIndex={0}
         onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`flex flex-col items-center justify-center border-2 border-dashed cursor-pointer transition-all duration-200 p-10 min-h-[220px] gap-3 ${
+          dragOver
+            ? 'border-blue-700 bg-blue-50 scale-[1.01]'
+            : file
+              ? 'border-emerald-600 bg-emerald-50/40'
+              : 'border-gray-400 bg-gray-50 hover:bg-white hover:border-blue-600'
+        }`}
       >
         <input
           type="file"
@@ -47,48 +86,31 @@ export function CvUploader({
         />
         {file ? (
           <>
-            <div className="relative mb-4 flex items-center justify-center">
-              <svg
-                className="w-16 h-16 text-red-600"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-              </svg>
-              <span className="absolute mt-2 font-bold text-red-600" style={{ fontSize: '12px' }}>
-                PDF
-              </span>
-            </div>
+            <FileText className="w-12 h-12 text-emerald-700" strokeWidth={1.5} />
             <p className="font-bold text-center break-words max-w-full text-lg">{file.name}</p>
-            <p className="text-gray-500 text-sm mt-2">Click to replace</p>
+            <p className="text-emerald-700 text-sm font-mono">Click to replace</p>
           </>
         ) : (
           <>
-            <Upload className="w-12 h-12 mb-4 text-gray-800" strokeWidth={1.5} />
-            <p className="font-bold text-center text-xl mb-1">Click to browse file</p>
-            <p className="text-gray-500 font-medium text-sm">Strictly PDF format(Max: 5MB)</p>
+            <UploadCloud className="w-14 h-14 text-gray-700" strokeWidth={1.5} />
+            <p className="font-bold text-center text-lg">
+              {dragOver ? 'Soltá el PDF acá' : 'Arrastrá tu CV o hacé clic'}
+            </p>
+            <p className="text-gray-500 font-medium text-xs font-mono">PDF · máximo 5MB</p>
           </>
         )}
       </div>
 
-      {/* Only extract LinkedIn info on first generation — not on refinement passes (no need to re-scrape).
-          The checkbox sits next to the uploader so the "scrape my profile" decision is made while the user
-          is thinking about the source document; the LinkedIn URL itself lives in <JobContext />. */}
-      <label className="flex items-center gap-3 bg-white border-2 border-black p-4 font-mono font-bold cursor-pointer hover:bg-gray-50 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] select-none mt-6">
+      <label className="flex items-center gap-3 bg-white border-2 border-black p-3 font-mono font-bold cursor-pointer hover:bg-gray-50 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] select-none">
         <input
           type="checkbox"
           checked={extractLinkedinInfo}
           onChange={(e) => onExtractLinkedinChange(e.target.checked)}
-          className="w-5 h-5 accent-blue-700 cursor-pointer"
+          className="w-4 h-4 accent-blue-700 cursor-pointer"
         />
-        <span className="text-sm md:text-base">Extraer e integrar información del perfil</span>
+        <span className="text-sm">Extraer e integrar información del perfil de LinkedIn</span>
       </label>
-    </motion.div>
+    </div>
   );
 }
 

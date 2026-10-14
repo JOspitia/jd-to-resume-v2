@@ -1,14 +1,17 @@
 import { motion } from 'framer-motion';
-import { Code2, Briefcase, Brain } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { Code2, Briefcase, Brain, type LucideIcon } from 'lucide-react';
 import type { DomainGame } from '../hooks/useProfile';
 
 /**
- * ProfileSelector — T5 of the UX refactor (spec S7).
+ * ProfileSelector — T6 of the UX refactor (spec S10).
  *
- * The domain profile is the main differentiator of the product, so it stays
- * the most prominent element of the page: full width, own card, own accent
- * tag, one card per domain with an icon and a one-line description.
+ * Three large tiles, one per domain. The selected tile is filled with the
+ * brand color and inverted text. The icons are 28px (bigger than before)
+ * and the description sits right under the label so each tile is
+ * self-explanatory in a single glance.
+ *
+ * Wrapped by <Section number={1} title="PERFIL"> in ToolApp, so this
+ * component no longer renders its own `rm-tag` or heading.
  */
 
 type ProfileOption = {
@@ -46,38 +49,41 @@ export type ProfileSelectorProps = {
 
 export function ProfileSelector({ domainGame, onChange }: ProfileSelectorProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.05 }}
-      className="rm-box p-6 md:p-7 flex flex-col bg-white relative"
-    >
-      <div className="absolute -top-4 -left-4 rm-tag bg-purple-600 text-white px-4 py-2 text-lg">PROFILE</div>
-      <h2 className="text-2xl font-bold mb-3 font-serif mt-2">Select Profile</h2>
-      <p className="text-sm text-gray-600 mb-5 font-mono">
-        Choose the profile of the CV you are tailoring. The prompt, skill taxonomy and section labels adapt to the domain.
-      </p>
-      <div className="grid sm:grid-cols-3 gap-4">
-        {PROFILE_OPTIONS.map(({ id, Icon, label, description }) => {
-          const selected = domainGame === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onChange(id)}
-              aria-pressed={selected}
-              className={`rm-btn p-4 flex flex-col items-start text-left gap-2 ${selected ? 'bg-blue-700 text-white' : 'bg-white text-black'}`}
+    <div className="grid sm:grid-cols-3 gap-4" role="radiogroup" aria-label="Dominio profesional">
+      {PROFILE_OPTIONS.map(({ id, Icon, label, description }) => {
+        const selected = domainGame === id;
+        return (
+          <motion.button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(id)}
+            whileHover={{ y: -2 }}
+            whileTap={{ y: 0 }}
+            className={`p-5 text-left border-2 flex flex-col gap-2 transition-all ${
+              selected
+                ? 'border-blue-700 bg-blue-700 text-white shadow-[4px_4px_0px_0px_rgba(29,78,216,1)]'
+                : 'border-black bg-white text-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-50'
+            }`}
+          >
+            <div className="flex items-center gap-2 w-full">
+              <Icon className="w-7 h-7 shrink-0" strokeWidth={1.75} />
+              <span className="font-bold font-mono text-sm md:text-base uppercase tracking-wide">
+                {label}
+              </span>
+            </div>
+            <p
+              className={`text-xs leading-snug ${
+                selected ? 'text-blue-50' : 'text-gray-600'
+              }`}
             >
-              <div className="flex items-center gap-2 w-full">
-                <Icon className="w-5 h-5 shrink-0" />
-                <span className="font-bold font-mono text-base uppercase tracking-wide">{label}</span>
-              </div>
-              <p className={`text-xs leading-snug ${selected ? 'text-blue-100' : 'text-gray-600'}`}>{description}</p>
-            </button>
-          );
-        })}
-      </div>
-    </motion.div>
+              {description}
+            </p>
+          </motion.button>
+        );
+      })}
+    </div>
   );
 }
 

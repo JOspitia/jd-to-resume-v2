@@ -9,6 +9,7 @@ import { useYamlEditor } from './hooks/useYamlEditor';
 import type { Generation } from './hooks/useGeneration';
 import type { YamlEditorOps } from './hooks/useYamlEditor';
 
+import { Section } from './components/Section';
 import { ProfileSelector } from './components/ProfileSelector';
 import { CvUploader } from './components/CvUploader';
 import { JobContext } from './components/JobContext';
@@ -20,31 +21,45 @@ import { YamlEditorPanel } from './components/YamlEditorPanel';
 import { AuditPanel } from './components/AuditPanel';
 
 /**
- * ToolApp — T15 of the UX refactor (specs S1-S7).
+ * ToolApp — T2 of the UX refactor (specs S1-S12).
  *
- * Thin orchestrator: it wires the four hooks together and composes the layout.
- * All the logic lives in `hooks/` and all the markup in `components/`.
+ * Thin orchestrator: it wires the four hooks together and composes the
+ * layout. Each step in the main flow is a `<Section number={n} title="…">`
+ * with a numbered tag and a semantic <h2>. The ActionBar is the only
+ * sticky element (spec S7) and the only thing it carries is the primary
+ * "Generar CV" CTA — every secondary action (preview, audit, translate,
+ * reset) lives in the ResultsPanel where it is contextually relevant.
  *
- * Layout (adaptive, S1): the main flow is always visible — profile, uploader,
- * job context, advanced options — and the contextual surfaces (progress,
- * results, YAML editor, ATS audit) appear below / over it when relevant.
+ * Layout order:
+ *   1. PERFIL            — ProfileSelector
+ *   2. TU CV             — CvUploader
+ *   3. LA VACANTE        — JobContext
+ *   4. OPCIONES          — AdvancedOptions (collapsible, default open on
+ *                          first visit)
+ *   - ActionBar (sticky bottom, full width, just Generate)
+ *   - GenerationProgress (only while status === 'generating' || 'error')
+ *   - ResultsPanel       (only when status === 'success')
+ *   - YamlEditorPanel    (only when yamlReady)
+ *   - AuditPanel         (only when atsData is set)
+ *
+ * Mobile-first: every section is full width on small screens and the
+ * ActionBar spans the viewport. The page bottom padding (pb-44) ensures
+ * the sticky bar never covers the last interactive element.
  */
 export default function ToolApp({ onBack }: { onBack: () => void }) {
   const profile = useProfile();
 
-  // Late-bound bridges. `useGeneration` and `useAudit` depend on each other
-  // (the SSE reader re-runs the audit; the audit reports a missing file in the
-  // generation status area) and the SSE reader opens the YAML editor panel
-  // owned by `useYamlEditor`. Both dependencies travel through refs that are
-  // filled in right below each hook; every handler dereferences them at call
-  // time, long after the construction cycle is resolved.
+  // Late-bound bridges (see spec S6 of yaml-editor-ux-refactor.md for the
+  // construction-cycle story). Both `useGeneration` and `useYamlEditor` need
+  // to reach back into the other hook's API, but the hooks can't depend on
+  // each other at definition time. We resolve that here.
   const generationRef = useRef<Generation | null>(null);
   const yamlOpsRef = useRef<YamlEditorOps | null>(null);
 
   const handleMissingFile = useCallback(() => {
     const generation = generationRef.current;
     if (!generation) return;
-    generation.setErrorMessage("Por favor selecciona un archivo PDF de currículum.");
+    generation.setErrorMessage('Por favor selecciona un archivo PDF de currículum.');
     generation.setStatus('error');
   }, []);
 
@@ -64,55 +79,60 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     generation.resetGeneration();
     audit.resetAudit();
     yamlEditor.resetYamlEditor();
-
-    // Call backend to purge cached PDFs and temp outputs
     try {
-      await fetch("http://localhost:8000/api/clear-cache", {
-        method: "POST",
-      });
+      await fetch('http://localhost:8000/api/clear-cache', { method: 'POST' });
     } catch (e) {
-      console.error("No se pudo limpiar la caché del backend:", e);
+      console.error('No se pudo limpiar la caché del backend:', e);
     }
   };
 
   return (
-    <div className="min-h-screen text-black flex flex-col items-center pt-16 pb-44 px-6 md:px-12 selection:bg-blue-600 selection:text-white relative">
-      {/* Decorative Accent Badges & Action Buttons */}
-      <div className="absolute top-8 left-8 flex items-center gap-3">
-        <button onClick={onBack} className="rm-btn bg-white hover:bg-gray-100 text-black px-4 py-2 flex items-center gap-2">
-          <ArrowLeft className="w-5 h-5" /> Back
+    <div className="min-h-screen text-black flex flex-col items-center pt-10 pb-44 px-4 md:px-8 selection:bg-blue-600 selection:text-white relative">
+      {/* Top bar — back + reset, compact */}
+      <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
+        <button
+          onClick={onBack}
+          className="rm-btn bg-white hover:bg-gray-100 text-black px-3 py-1.5 flex items-center gap-1.5 text-sm"
+        >
+          <ArrowLeft className="w-4 h-4" /> Volver
         </button>
         <button
           onClick={handleResetProcess}
           title="Limpiar campos y borrar la caché de CVs para iniciar de nuevo"
-          className="rm-btn bg-rose-100 hover:bg-rose-200 border-rose-600 text-rose-900 px-4 py-2 flex items-center gap-2 text-sm font-bold shadow-[2px_2px_0px_0px_rgba(225,29,72,1)]"
+          className="rm-btn bg-rose-100 hover:bg-rose-200 border-rose-600 text-rose-900 px-3 py-1.5 flex items-center gap-1.5 text-xs font-bold shadow-[2px_2px_0px_0px_rgba(225,29,72,1)]"
         >
-          <RotateCcw className="w-4 h-4 text-rose-700" /> Nuevo / Limpiar
+          <RotateCcw className="w-3.5 h-3.5 text-rose-700" /> Nuevo
         </button>
       </div>
-      <div className="absolute top-12 right-12 rm-tag bg-blue-700 text-white px-3 py-1 rotate-[3deg]">100 % FREE</div>
 
-      <div className="w-full max-w-5xl space-y-10 z-10 relative">
-        {/* Header Area */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center space-y-4 pt-10 pb-8"
-        >
-          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-black leading-tight drop-shadow-sm font-serif">
-            Perfect Your Resume. <br />
-            <span className="text-blue-700 underline decoration-4 underline-offset-8 decoration-orange-500">Beat the ATS.</span>
-          </h1>
-          <p className="text-xl md:text-2xl font-medium text-gray-800 max-w-2xl mx-auto mt-6">
-            Upload your existing PDF and paste the job description.Our AI transforms it into a perfectly tailored masterpiece.
-          </p>
-        </motion.div>
+      {/* Compact header (was a 7xl hero, now 2xl-3xl) — spec S1 */}
+      <motion.header
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="text-center w-full max-w-3xl mt-4 mb-8 z-10"
+      >
+        <h1 className="text-2xl md:text-3xl font-extrabold font-serif tracking-tight text-black">
+          Perfect Your Resume.{' '}
+          <span className="text-blue-700 underline decoration-4 underline-offset-4 decoration-orange-500">
+            Beat the ATS.
+          </span>
+        </h1>
+        <p className="text-sm md:text-base text-gray-700 mt-2">
+          Subí tu CV, elegí el perfil, pegá la vacante — generamos un PDF
+          adaptado en minutos.
+        </p>
+      </motion.header>
 
-        {/* 1 · Domain profile — the product differentiator, always on top (S7) */}
-        <ProfileSelector domainGame={profile.domainGame} onChange={profile.setDomainGame} />
+      {/* Main flow — numbered sections */}
+      <div className="w-full max-w-3xl space-y-6 z-10">
+        <Section number={1} title="PERFIL">
+          <ProfileSelector
+            domainGame={profile.domainGame}
+            onChange={profile.setDomainGame}
+          />
+        </Section>
 
-        {/* 2-3 · Main flow: source document + job context (S1) */}
-        <div className="grid md:grid-cols-2 gap-10">
+        <Section number={2} title="TU CV">
           <CvUploader
             file={profile.file}
             fileInputRef={profile.fileInputRef}
@@ -120,6 +140,9 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             extractLinkedinInfo={profile.extractLinkedinInfo}
             onExtractLinkedinChange={profile.setExtractLinkedinInfo}
           />
+        </Section>
+
+        <Section number={3} title="LA VACANTE">
           <JobContext
             jd={profile.jd}
             onJdChange={profile.setJd}
@@ -134,40 +157,28 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             portfolioUrl={profile.portfolioUrl}
             onPortfolioUrlChange={profile.setPortfolioUrl}
           />
-        </div>
+        </Section>
 
-        {/* 4 · Advanced options — collapsed for the ~80% who never touch them (S2) */}
-        <AdvancedOptions
-          selectedTheme={profile.selectedTheme}
-          onThemeChange={profile.setSelectedTheme}
-          fitSinglePage={profile.fitSinglePage}
-          onFitSinglePageChange={profile.setFitSinglePage}
-          pageBreakSection={profile.pageBreakSection}
-          onPageBreakSectionChange={profile.setPageBreakSection}
-          autoValidateATS={profile.autoValidateATS}
-          onAutoValidateAtsChange={profile.setAutoValidateATS}
-          editBeforeGenerate={profile.editBeforeGenerate}
-          onEditBeforeGenerateChange={profile.setEditBeforeGenerate}
-          strictEditsOnly={profile.strictEditsOnly}
-          onStrictEditsOnlyChange={profile.setStrictEditsOnly}
-          customPrompt={profile.customPrompt}
-          onCustomPromptChange={profile.setCustomPrompt}
-        />
+        <Section number={4} title="OPCIONES AVANZADAS">
+          <AdvancedOptions
+            selectedTheme={profile.selectedTheme}
+            onThemeChange={profile.setSelectedTheme}
+            fitSinglePage={profile.fitSinglePage}
+            onFitSinglePageChange={profile.setFitSinglePage}
+            pageBreakSection={profile.pageBreakSection}
+            onPageBreakSectionChange={profile.setPageBreakSection}
+            autoValidateATS={profile.autoValidateATS}
+            onAutoValidateAtsChange={profile.setAutoValidateATS}
+            editBeforeGenerate={profile.editBeforeGenerate}
+            onEditBeforeGenerateChange={profile.setEditBeforeGenerate}
+            strictEditsOnly={profile.strictEditsOnly}
+            onStrictEditsOnlyChange={profile.setStrictEditsOnly}
+            customPrompt={profile.customPrompt}
+            onCustomPromptChange={profile.setCustomPrompt}
+          />
+        </Section>
 
-        {/* 5 · Fixed action bar (S3) */}
-        <ActionBar
-          status={generation.status}
-          atsStatus={audit.atsStatus}
-          elapsedSeconds={generation.elapsedSeconds}
-          hasFile={!!profile.file}
-          lastOutputLanguage={generation.lastOutputLanguage}
-          showReset={!!(profile.file || profile.jd || generation.status !== 'idle' || audit.atsStatus !== 'idle')}
-          onGenerate={generation.handleGenerate}
-          onAudit={() => audit.handleValidateATS()}
-          onReset={handleResetProcess}
-        />
-
-        {/* 6 · Live progress + failures */}
+        {/* Generation progress (only while running) */}
         <GenerationProgress
           status={generation.status}
           progress={generation.progress}
@@ -176,7 +187,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           errorMessage={generation.errorMessage}
         />
 
-        {/* 7 · Results — below the main flow, never replacing it (S4) */}
+        {/* Results panel (only on success) */}
         <ResultsPanel
           status={generation.status}
           downloadUrl={generation.downloadUrl}
@@ -195,7 +206,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           onReset={handleResetProcess}
         />
 
-        {/* 8 · YAML editor — contextual overlay over the main flow (S5) */}
+        {/* YAML editor overlay */}
         <YamlEditorPanel
           yamlContent={yamlEditor.yamlContent}
           yamlReady={yamlEditor.yamlReady}
@@ -212,7 +223,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           onClose={yamlEditor.handleCloseYamlEditor}
         />
 
-        {/* 9 · ATS + AI-tone audit results */}
+        {/* ATS + AI-tone audit results */}
         <AuditPanel
           atsStatus={audit.atsStatus}
           atsData={audit.atsData}
@@ -227,6 +238,14 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           onRegenerateWithFeedback={generation.handleRegenerateWithFeedback}
         />
       </div>
+
+      {/* Sticky bottom — only the primary CTA lives here (spec S7, S8) */}
+      <ActionBar
+        status={generation.status}
+        elapsedSeconds={generation.elapsedSeconds}
+        hasFile={!!profile.file}
+        onGenerate={generation.handleGenerate}
+      />
     </div>
   );
 }
