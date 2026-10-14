@@ -67,10 +67,13 @@ def clean_date_str(date_val: str, is_end_date: bool = False) -> str:
         
     return "present" if is_end_date else "2020"
 
-def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = "sb2nov") -> Dict[str, Any]:
+def convert_llm_json_to_rendercv_dict(parsed_data: Dict[str, Any], theme: str = "sb2nov", fit_single_page: bool = False) -> Dict[str, Any]:
     """
     Transforms the LLM output structure into RenderCV valid schema.
     Applies localized section titles from `section_labels`.
+
+    When `fit_single_page` is set, tightens page margins, line spacing and
+    section spacing so a long CV is pushed back onto a single page.
     """
     name = parsed_data.get("name", "Candidate").strip() or "Candidate"
     email = parsed_data.get("email", "").strip()
@@ -279,6 +282,10 @@ def render_cv_with_rendercv(
     Renders CV to PDF using RenderCV Python API.
     Returns the absolute path to the generated PDF.
     """
+    # convert_llm_json_to_rendercv_dict applies the compact layout internally
+    # when fit_single_page is set (margins, line spacing, section spacing), so
+    # it must be forwarded here. Passing it previously raised TypeError, which
+    # silently pushed every RenderCV render onto the Playwright fallback.
     rendercv_dict = convert_llm_json_to_rendercv_dict(
         parsed_data, 
         theme=theme, 

@@ -11,6 +11,7 @@ if sys.platform == "win32":
 
 import json
 import asyncio
+from html import escape
 from typing import Optional
 from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
@@ -105,9 +106,9 @@ HTML_TEMPLATE = """
     {% if location %}{% set _ = items.append(location) %}{% endif %}
     {% if phone %}{% set _ = items.append(phone) %}{% endif %}
     {% if email %}{% set _ = items.append(email) %}{% endif %}
-    {% if linkedin %}{% set _ = items.append('<a href="' ~ linkedin ~ '">LinkedIn</a>') %}{% endif %}
-    {% if github %}{% set _ = items.append('<a href="' ~ github ~ '">GitHub</a>') %}{% endif %}
-    {% if portfolio %}{% set _ = items.append('<a href="' ~ portfolio ~ '">' ~ (labels.portfolio if (labels and 'portfolio' in labels) else ('Portafolio' if (labels and labels.summary != 'Professional Summary') else 'Portfolio')) ~ '</a>') %}{% endif %}
+    {% if linkedin %}{% set _ = items.append('<a href="' ~ (linkedin | e) ~ '">' ~ (linkedin | ats_link('linkedin')) ~ '</a>') %}{% endif %}
+    {% if github %}{% set _ = items.append('<a href="' ~ (github | e) ~ '">' ~ (github | ats_link('github')) ~ '</a>') %}{% endif %}
+    {% if portfolio %}{% set _ = items.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
     {{ items|join(' | ') }}
   </div>
 
@@ -204,6 +205,44 @@ HTML_TEMPLATE = """
 </body>
 </html>
 """
+
+def _ats_link_label(url: str, network: str) -> str:
+    """
+    Render a profile URL as machine-readable visible text.
+
+    ATS crawlers read the PDF's extracted text layer, not its link
+    annotations. An anchor whose visible text is just "LinkedIn" therefore
+    hides the URL from them: the crawler sees the word and has nothing to
+    follow. This produces the same label RenderCV already emits —
+    `linkedin.com/in/<slug>` — so both renderers agree and the URL survives
+    text extraction while remaining a clickable link.
+
+    HTML-escaped: the result is injected into the template as raw markup.
+    """
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return ""
+    no_scheme = re.sub(r"^https?://", "", cleaned, flags=re.IGNORECASE)
+    no_scheme = re.sub(r"^www\.", "", no_scheme, flags=re.IGNORECASE)
+    no_scheme = no_scheme.rstrip("/")
+
+    if network == "linkedin" and "linkedin.com/" in no_scheme:
+        slug = no_scheme.split("linkedin.com/", 1)[1].strip("/")
+        return escape(f"linkedin.com/{slug or 'in'}")
+    if network == "github" and "github.com/" in no_scheme:
+        slug = no_scheme.split("github.com/", 1)[1].strip("/")
+        return escape(f"github.com/{slug}" if slug else "github.com")
+    return escape(no_scheme)
+
+
+def _render_html_template(parsed_data: dict, labels: dict, page_break_section: Optional[str]) -> str:
+    """Render the Playwright HTML template with the ATS helpers registered."""
+    template = Template(HTML_TEMPLATE)
+    template.globals["ats_link"] = _ats_link_label
+    # Also expose it as a filter so the template can write `url | ats_link('linkedin')`.
+    template.environment.filters["ats_link"] = lambda url, network: _ats_link_label(url, network)
+    return template.render(**parsed_data, labels=labels, page_break_section=page_break_section)
+
 
 def extract_text(file_path: str) -> str:
     doc = fitz.open(file_path)
@@ -1336,8 +1375,7 @@ IMPORTANT:
 
         if not rendered:
             print(f"[INFO] 📄 Rendering PDF with Playwright HTML engine (page_break_section={page_break_section})...")
-            template = Template(HTML_TEMPLATE)
-            html_content = template.render(**parsed_data, labels=labels, page_break_section=page_break_section)
+            html_content = _render_html_template(parsed_data, labels, page_break_section)
             
             def render_pdf_sync():
                 with sync_playwright() as p:
@@ -1607,12 +1645,7 @@ async def render_from_yaml(
 
     if not rendered:
         print(f"[INFO] 📄 Render-from-YAML: Playwright HTML engine (page_break_section={page_break_section})...")
-        template = Template(HTML_TEMPLATE)
-        html_content = template.render(
-            **parsed_data,
-            labels=labels,
-            page_break_section=page_break_section,
-        )
+        html_content = _render_html_template(parsed_data, labels, page_break_section)
         def render_pdf_sync():
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
