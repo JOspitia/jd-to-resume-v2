@@ -2,6 +2,49 @@
 
 > Adaptar `jd-to-resume` (hoy sesgado a CVs tech) para soportar tres dominios profesionales con prompts, taxonomía de skills y section_labels localizados: **tech**, **hr_recruiting** y **psychology**. Cero regresiones sobre la rama tech actual.
 
+## Estado actual
+
+**8/10 tasks done, 2 blocked.** 6 commits sobre `fix/success-buttons-grid-layout` HEAD. Branch **pusheada** a `origin/feat/multi-domain-tailoring`. PR abierto contra `main` (recomendado mergear antes de `feat/yaml-editor` que sale de esta branch).
+
+| # | Task | Specs | Estado | Commit |
+|---|---|---|---|---|
+| T1 | Registry + 3 игляs (tech, hr_recruiting, psychology) | S1, S2, S5 | ✅ done | `c68c28b` |
+| T2 | Wire-up `generation_pipeline` con `get_game(domain_game)` | S1, S3 | ✅ done | `23fed30` |
+| T3 | Selector UI en `ToolApp.tsx` | S4, S5 | ✅ done | `17266d0` |
+| T4 | `section_labels_es/en` per game (fallback en main.py) | S1, S5 | ✅ done | `67e7c9d` (consolidado con T6) |
+| T5 | `SKILL_TAXONOMY` per game + regla 14 reescrita | S5, S6 | ✅ done | `c68c28b` (regla 14 en cada `strict_rules_block`) + `feefcee` (tests verifican taxonomías distintas) |
+| T6 | Audit prompts domain-aware (extracted a `audit_prompts.py`) | S6 | ✅ done | `67e7c9d` (+ 15 tests en `test_audit_prompts.py`) |
+| T7 | Sample CVs por dominio + JDs canónicas | S2 | 🟦 **blocked** | Esperando que me digas qué perfiles de HR/Psicología querés que muestre (no fabrico nombres/empresas yo). |
+| T8 | Test suite de humo (routing + tech regression) | S3 | ✅ done | `feefcee` (33 tests en `test_domain_routing.py`) + `67e7c9d` (15 tests en `test_audit_prompts.py`) = **48/48 pasan** |
+| T9 | README con sección "Dominios soportados" | S1, S2, S4, S5 | ✅ done | `b3b61bb` |
+| T10 | Smoke end-to-end + tag `v2.6.0` | S1, S2, S6 | 🟦 **blocked** | Necesita API key de LLM en `backend/.env` + vos corriendo el stack localmente. El sandbox no puede levantar FastAPI ni hacer LLM calls. |
+
+## Verificación
+
+```
+$ git log --oneline fix/success-buttons-grid-layout..feat/multi-domain-tailoring
+b3b61bb docs(domain-games): add Supported Domains section to README
+67e7c9d feat(domain-games): domain-aware audit prompts + section-labels fallback
+feefcee test(domain-games): smoke tests for registry + tech regression
+17266d0 feat(ui): add domain profile selector (tech / hr_recruiting / psychology)
+23fed30 feat(domain-games): wire generation pipeline to game registry
+c68c28b feat(domain-games): extract tech/hr/psychology prompt games into registry
+
+$ cd backend && pytest tests/ -q
+......................... 48 passed in 0.05s
+```
+
+`domain_game` propaga end-to-end en `backend/main.py`:
+- `generate_resume()` Form param → `generation_pipeline(domain_game=...)` → `get_game(domain_game)` (default `tech`).
+- `/api/analyze-ats` Form param → `_run_audit_against_text(..., audit_game=...)`.
+- `_run_internal_audit` (auto re-audit en translate-to-english) → `_run_audit_against_text`.
+- Próxima capa: `/api/render-from-yaml` y `/api/analyze-yaml` (feature `feat/yaml-editor`, ya mergeado en la misma chain).
+
+## Dependencias hacia adelante
+
+`feat/yaml-editor` (branch separada) usa `domain_game` como base para la propagación de taxonomía/skills en el audit del YAML. Si el flujo tech/hr/psychology cambia acá, el editor YAML hereda automáticamente.
+
+
 ## Specs
 
 **S1 — Alcance del producto.** *"normalmente el programa esta implementado para cvs de tecnologia y desarrollo"* — el comportamiento actual cubre CVs tech y debe seguir cubriéndolos sin cambios visibles para el usuario que no active nada nuevo.
