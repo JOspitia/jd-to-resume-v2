@@ -193,8 +193,13 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   };
 
 
-  const handleValidateATS = async () => {
-    if (!file) {
+  const handleValidateATS = async (overrideFile?: File | null) => {
+    // overrideFile is used by the audit-after-render flow (T8 of yaml-editor
+    // feature) which audits the freshly rendered PDF instead of the original
+    // upload. Falls back to the uploaded `file` state for the standalone
+    // SOLO AUDITAR ATS button.
+    const fileToAudit = overrideFile ?? file;
+    if (!fileToAudit) {
       setErrorMessage("Por favor selecciona un archivo PDF de currículum.");
       setStatus('error');
       return;
@@ -204,7 +209,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     setAtsErrorMessage('');
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToAudit);
     formData.append("jd", jd);
 
     const controller = new AbortController();
@@ -307,6 +312,27 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
       setEditBeforeGenerate(false);
       // Track the new version in scoreHistory as the next refinado.
       generationVersionRef.current += 1;
+
+      // T8 of yaml-editor feature: if autoValidateATS is on, audit the freshly
+      // rendered PDF (fetched from download_url) so the user gets the audit
+      // without needing to click the standalone SOLO AUDITAR ATS button.
+      // Network failures are swallowed silently so the success card stays
+      // visible. Matches the original WIP-yaml spec T9.
+      if (autoValidateATS) {
+        try {
+          const auditResp = await fetch(`http://localhost:8000${downloadPath}`);
+          if (!auditResp.ok) {
+            throw new Error(`audit fetch failed: ${auditResp.status}`);
+          }
+          const auditBlob = await auditResp.blob();
+          const renderedFile = new File([auditBlob], filename, { type: 'application/pdf' });
+          await handleValidateATS(renderedFile);
+        } catch (auditErr) {
+          // Silent on purpose: the success card is already showing and
+          // the user can still trigger the audit manually.
+          console.warn('[audit-after-render] failed (silent):', auditErr);
+        }
+      }
     } catch (err: any) {
       clearTimeout(timeoutId);
       const msg = err.name === 'AbortError'
