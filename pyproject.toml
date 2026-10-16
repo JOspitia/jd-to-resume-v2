@@ -36,3 +36,4 @@ python_files = ["test_*.py"]
 # import time that are never torn down, polluting every later test that
 # imports render_service. Remove this ignore once the fixture is fixed.
 addopts = "-ra -q --ignore=tests/test_yaml_endpoints.py"
+asyncio_mode = "auto"
