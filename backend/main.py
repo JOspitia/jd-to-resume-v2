@@ -418,164 +418,31 @@ def _render_html_template(
 
 
 def extract_text(file_path: str) -> str:
-    doc = fitz.open(file_path)
-    # Concatenate plain text plus all /Link annotations so that PDF hyperlinks
-    # that render as bare labels (e.g. "LinkedIn") are also surfaced as their
-    # real URLs in the extracted text. The LLM and our header extractor can
-    # then see them.
-    text_parts = []
-    for page in doc:
-        text_parts.append(page.get_text())
-        try:
-            for link in page.get_links():
-                uri = link.get("uri", "").strip()
-                if uri:
-                    text_parts.append(" " + uri)
-        except Exception:
-            # Some PDFs have malformed link structures; skip silently.
-            pass
-    extracted = " ".join(text_parts)
-    # Debug: log any linked URLs we found so the user can verify their PDF
-    # actually has the /Link annotations we expect.
-    urls_found = []
-    for page in doc:
-        try:
-            for link in page.get_links():
-                uri = link.get("uri", "").strip()
-                if uri:
-                    urls_found.append(uri)
-        except Exception:
-            pass
-    if urls_found:
-        print(f"[EXTRACT] PDF /Link URIs found ({len(urls_found)}): {urls_found[:10]}")
-    return extracted
-
-
-# --- Header extraction from a Base Resume ----------------------------------------
-# Pulls contact fields out of the raw PDF text so they survive regeneration even
-# when the user does not retype them in the form. Uses targeted regex patterns
-# that bias toward precision over recall — a missed field is better than a wrong
-# one, since the LLM can still see the full text in the prompt and the user can
-# correct any false negative manually.
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_PHONE_RE = re.compile(r"(\+?\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}")
-_GITHUB_RE = re.compile(r"(?:https?://)?(?:www\.)?github\.com/[A-Za-z0-9._-]+/?", re.IGNORECASE)
-_LINKEDIN_RE = re.compile(r"(?:https?://)?(?:www\.)?linkedin\.com/in/[A-Za-z0-9._-]+/?", re.IGNORECASE)
-_PORTFOLIO_RE = re.compile(r"(?:https?://)?(?:www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)?\.(?:com|net|org|io|dev|me|co|app|page|site|xyz|store|portfolio)(?:/[A-Za-z0-9._~:/?#@!$&'()*+,;=-]*)?", re.IGNORECASE)
-# Common email providers that look like domains but are not portfolio sites.
-# When matching _PORTFOLIO_RE, exclude any candidate whose host matches one of these.
-_PORTFOLIO_EXCLUDE_DOMAINS = {
-    "gmail.com", "yahoo.com", "yahoo.es", "hotmail.com", "outlook.com",
-    "live.com", "icloud.com", "me.com", "aol.com", "protonmail.com",
-    "mail.com", "zoho.com", "yandex.com", "yandex.ru",
-}
+    """Backward-compatible wrapper around the PyMuPDFParser adapter."""
+    return _get_resume_parser().extract_text(file_path)
 
 
 def _extract_header_from_pdf_text(resume_text: str) -> dict:
-    """
-    Best-effort extraction of contact fields from the Base Resume plain text.
-    Returns a dict with keys: email, phone, github, linkedin, portfolio,
-    has_placeholder_github, has_placeholder_linkedin, has_placeholder_portfolio.
-    Each value is a string (possibly empty) — callers decide how to merge with
-    form-provided values. The *_placeholder booleans flag words like "GitHub"
-    or "LinkedIn" appearing as bare tokens (no URL) so the UI can warn the user
-    that the resume had placeholders but no real URLs were found.
-    """
-    if not resume_text:
-        return {
-            "email": "", "phone": "", "github": "", "linkedin": "", "portfolio": "",
-            "has_placeholder_github": False, "has_placeholder_linkedin": False, "has_placeholder_portfolio": False,
-        }
+    """Backward-compatible wrapper around the PyMuPDFParser adapter."""
+    return _get_resume_parser().extract_header(resume_text)
 
-    # Email: prefer the first match that doesn't look like an example/noreply
-    email_match = ""
-    for m in _EMAIL_RE.finditer(resume_text):
-        candidate = m.group(0)
-        if "example" in candidate.lower() or "noreply" in candidate.lower():
-            continue
-        email_match = candidate
-        break
 
-    # Phone: prefer + prefix and 10+ digits
-    phone_match = ""
-    for m in _PHONE_RE.finditer(resume_text):
-        candidate = m.group(0)
-        digits = re.sub(r"\D", "", candidate)
-        if len(digits) >= 10:
-            phone_match = candidate.strip()
-            break
+_RESUME_PARSER = None
 
-    github_match = _GITHUB_RE.search(resume_text)
-    linkedin_match = _LINKEDIN_RE.search(resume_text)
 
-    # Portfolio: scan URL-like strings, exclude github/linkedin/email domains
-    portfolio_match = ""
-    seen_domains = set(_PORTFOLIO_EXCLUDE_DOMAINS)
-    if github_match:
-        seen_domains.add("github.com")
-    if linkedin_match:
-        seen_domains.add("linkedin.com")
-    # Always exclude the email's domain — it will appear in the text as
-    # `something@gmail.com` and our regex will match the bare `gmail.com`.
-    if email_match and "@" in email_match:
-        email_domain = email_match.split("@", 1)[1].strip().lower()
-        if email_domain:
-            seen_domains.add(email_domain)
-    print(f"[EXTRACT] portfolio exclusion set: {sorted(seen_domains)}")
-    for m in _PORTFOLIO_RE.finditer(resume_text):
-        candidate = m.group(0)
-        candidate_lower = candidate.lower()
-        # Pull the host portion (between optional scheme and first /)
-        host_match = re.match(r"(?:https?://)?(?:www\.)?([^/]+)", candidate_lower)
-        host = host_match.group(1) if host_match else candidate_lower
-        # Filter out matches that are part of an email address (preceded by '@' or '.' or alphanumeric)
-        match_start = m.start()
-        if match_start > 0:
-            char_before = resume_text[match_start - 1]
-            if char_before in "@.0123456789abcdefghijklmnopqrstuvwxyz":
-                # Part of a longer string (probably email or path). Skip.
-                continue
-        if host in seen_domains:
-            print(f"[EXTRACT] portfolio skip (excluded domain): '{candidate}' host='{host}'")
-            continue
-        if any(skip in candidate_lower for skip in ["example.com", "test.com", "yourname", "placeholder"]):
-            print(f"[EXTRACT] portfolio skip (skip word): '{candidate}'")
-            continue
-        # Normalize to https:// if no scheme
-        if not candidate_lower.startswith("http"):
-            candidate = "https://" + candidate
-        print(f"[EXTRACT] portfolio MATCHED: '{candidate}' (host='{host}')")
-        portfolio_match = candidate
-        break
+def _get_resume_parser():
+    """Lazy accessor for the parser adapter. Lazy so module import doesn't
+    pull ``adapters.parser.pymupdf_adapter`` (and its ``fitz`` dependency)
+    into the test-suite import graph before tests have a chance to
+    monkeypatch env vars. The first call instantiates; subsequent calls
+    reuse the same instance."""
+    global _RESUME_PARSER
+    if _RESUME_PARSER is None:
+        from adapters.parser.pymupdf_adapter import PyMuPDFParser
 
-    # Detect placeholder words: a line containing only "LinkedIn | GitHub | Portafolio"
-    # or similar where each platform is just a token, not a URL. We flag them so
-    # the UI can warn the user to fill the form.
-    has_placeholder_github = False
-    has_placeholder_linkedin = False
-    has_placeholder_portfolio = False
-    if not github_match:
-        # Look for the word "github" alone in a header-ish context (first 5 lines).
-        # Use word boundary + not part of "github.io" or similar domains.
-        first_lines = "\n".join(resume_text.split("\n")[:8])
-        has_placeholder_github = bool(re.search(r"\bgithub\b", first_lines, re.IGNORECASE)) and not github_match
-    if not linkedin_match:
-        first_lines = "\n".join(resume_text.split("\n")[:8])
-        has_placeholder_linkedin = bool(re.search(r"\blinkedin\b", first_lines, re.IGNORECASE)) and not linkedin_match
-    if not portfolio_match:
-        first_lines = "\n".join(resume_text.split("\n")[:8])
-        has_placeholder_portfolio = bool(re.search(r"\bportafolio\b|\bportfolio\b", first_lines, re.IGNORECASE)) and not portfolio_match
+        _RESUME_PARSER = PyMuPDFParser()
+    return _RESUME_PARSER
 
-    return {
-        "email": email_match,
-        "phone": phone_match,
-        "github": github_match.group(0) if github_match else "",
-        "linkedin": linkedin_match.group(0) if linkedin_match else "",
-        "portfolio": portfolio_match,
-        "has_placeholder_github": has_placeholder_github,
-        "has_placeholder_linkedin": has_placeholder_linkedin,
-        "has_placeholder_portfolio": has_placeholder_portfolio,
-    }
 
 class GeminiResumeOutput(BaseModel):
     name: str = Field(description="Full Name")
