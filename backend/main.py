@@ -33,6 +33,20 @@ from schemas.api_models import GeminiResumeOutput  # noqa: F401 — re-exported 
 from application.services.translation_service import build_language_override as _build_language_override
 from adapters.storage.filesystem_storage import FilesystemStorage  # noqa: F401 — exposed for tests
 from routes.assets_router import build_assets_router  # noqa: F401 — composition root uses it
+
+
+# Backward-compatible wrapper for the photo-upload helper. The real
+# implementation lives in ``photo_helpers.save_photo``; the storage
+# adapter (``FilesystemStorage.save_photo``) also wraps the same helper.
+# Kept here so the existing ``generate_resume`` endpoint signature
+# (`_persist_uploaded_photo(photo)`) still resolves without a sweeping
+# refactor of every endpoint.
+async def _persist_uploaded_photo(photo):
+    """Persist the optional candidate photo. Returns absolute path or None."""
+    if photo is None:
+        return None
+    content = await photo.read()
+    return _save_photo(content, _PHOTOS_DIR)
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIASGIMiddleware
