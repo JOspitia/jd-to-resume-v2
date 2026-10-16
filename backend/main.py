@@ -459,109 +459,22 @@ class GeminiResumeOutput(BaseModel):
     achievements: list[str] = Field(description="List of specific achievements or awards")
 
 async def call_llm_api(prompt_text: str) -> str:
-    provider = os.getenv("LLM_PROVIDER", "gemini").lower().strip()
-    primary_error_msg = None
-    
-    # 1. Try Primary Provider (DeepSeek / OpenAI Compatible) if configured
-    if provider in ["openai", "openai_compatible", "minimax", "kimi", "moonshot", "deepseek", "openrouter", "groq"]:
-        try:
-            from openai import OpenAI
-            api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
-            base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL") or "https://api.openai.com/v1"
-            model_name = os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL") or "gpt-4o-mini"
-            
-            if not api_key:
-                raise ValueError(f"Falta la clave API para {provider}.")
-                
-            print(f"[LLM INFO] Intentando proveedor primario '{provider}' ({model_name}) en {base_url}...")
-            # Set explicit 45s timeout on HTTP client to give DeepSeek enough time under high load
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=45.0)
-            
-            def _run_openai():
-                extra_args = {}
-                if "minimax" not in base_url and "moonshot" not in base_url and "kimi" not in base_url:
-                    extra_args["response_format"] = {"type": "json_object"}
-                    
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": "You are a professional technical recruiter and resume writer. Always respond strictly in valid JSON format."},
-                        {"role": "user", "content": prompt_text}
-                    ],
-                    temperature=0.3,
-                    **extra_args
-                )
-                return response.choices[0].message.content
-                
-            return await asyncio.wait_for(asyncio.to_thread(_run_openai), timeout=50.0)
-        except Exception as primary_err:
-            primary_error_msg = str(primary_err)
-            print(f"[LLM WARN] El proveedor primario '{provider}' falló/agotó tiempo ({primary_err})")
-            print("[LLM INFO] Activando respaldo automático a Gemini...")
+    """Backward-compatible wrapper that delegates to the LLM orchestrator.
 
-    # 2. Fallback Provider: Gemini
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    gemini_error_msg = None
-    
-    if gemini_key and not gemini_key.startswith("AQ."):
-        genai.configure(api_key=gemini_key)
-        generation_config = {"response_mime_type": "application/json"}
-        
-        models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
-        
-        for m_name in models_to_try:
-            try:
-                print(f"[LLM INFO] Intentando modelo Gemini de respaldo: '{m_name}'...")
-                model = genai.GenerativeModel(m_name, generation_config=generation_config)
-                res = await asyncio.wait_for(asyncio.to_thread(model.generate_content, prompt_text), timeout=50.0)
-                if res and res.text:
-                    print(f"[LLM INFO] Gemini '{m_name}' funcionó correctamente.")
-                    return res.text
-            except Exception as e:
-                print(f"[LLM WARN] El modelo Gemini '{m_name}' falló/agotó tiempo: {e}")
-                gemini_error_msg = e
-                continue
-    else:
-        gemini_error_msg = "GEMINI_API_KEY no configurada o no válida"
-        print("[LLM WARN] Gemini no disponible, continuando al siguiente fallback...")
+    The cascade logic that used to live here (try OpenAI-Compatible,
+    fall back to Gemini, fall back to DeepSeek direct) now lives in
+    ``application.services.llm_orchestrator.LLMOrchestrator``. Each
+    provider is its own adapter under ``adapters/llm/``; the
+    orchestrator owns the fallback policy and timeouts.
+    """
+    from adapters.llm.factory import build_llm_providers
+    from application.services.llm_orchestrator import LLMOrchestrator
 
-    # 3. Fallback Provider: DeepSeek directo (no a través de OpenAI compat)
-    print("[LLM INFO] Activando fallback a DeepSeek directo...")
-    deepseek_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
-    
-    if not deepseek_key:
-        deepseek_key = os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
-        print(f"[LLM INFO] Usando LLM_API_KEY como fallback de DeepSeek: {'Sí' if deepseek_key else 'No'}")
-    
-    if not deepseek_key:
-        err_detail = f" (Primario: {primary_error_msg}, Gemini: {gemini_error_msg})" if primary_error_msg or gemini_error_msg else ""
-        raise ValueError(f"Fallaron todos los modelos.{err_detail} Necesitas configurar al menos una API key válida (LLM_API_KEY, GEMINI_API_KEY, o DEEPSEEK_API_KEY).")
-    
-    try:
-        from openai import OpenAI
-        print(f"[LLM INFO] Intentando DeepSeek directo con modelo deepseek-chat...")
-        deepseek_client = OpenAI(
-            api_key=deepseek_key,
-            base_url="https://api.deepseek.com/v1",
-            timeout=60.0
-        )
-        
-        def _run_deepseek():
-            response = deepseek_client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": "You are a professional technical recruiter and resume writer. Always respond strictly in valid JSON format."},
-                    {"role": "user", "content": prompt_text}
-                ],
-                temperature=0.3,
-                response_format={"type": "json_object"}
-            )
-            return response.choices[0].message.content
-            
-        return await asyncio.wait_for(asyncio.to_thread(_run_deepseek), timeout=55.0)
-    except Exception as deepseek_err:
-        err_detail = f" (Primario: {primary_error_msg}, Gemini: {gemini_error_msg})" if primary_error_msg or gemini_error_msg else ""
-        raise ValueError(f"Fallaron todos los modelos: {deepseek_err}{err_detail}")
+    providers = build_llm_providers()
+    print(f"[LLM] Iniciando cascada con {len(providers)} proveedor(es): "
+          f"{[p.name for p in providers]}")
+    orchestrator = LLMOrchestrator(providers)
+    return await orchestrator.complete(prompt_text)
 
 
 # In-memory cache to avoid re-extracting LinkedIn on every refinement pass
