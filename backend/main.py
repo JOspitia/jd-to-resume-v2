@@ -55,7 +55,8 @@ app = FastAPI()
 # process can read to any origin on the public internet.
 _cors_origins_raw = os.getenv(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173",
+    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,"
+    "http://localhost:4173,http://127.0.0.1:4173",
 )
 _cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
 
