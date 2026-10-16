@@ -69,14 +69,18 @@ def client(monkeypatch):
 class TestDownloadPathTraversal:
     def test_regex_matches_legacy_filename(self):
         # Belt-and-braces: confirm the allowlist matches the format the
-        # pipeline actually writes.
-        from main import _DOWNLOAD_FILENAME_RE
+        # pipeline actually writes. The regex now lives in
+        # ``adapters.storage.filesystem_storage`` (commit 6 of the hexagonal
+        # refactor).
+        from adapters.storage.filesystem_storage import FilesystemStorage
 
-        assert _DOWNLOAD_FILENAME_RE.fullmatch(f"tailored_resume_{int(time.time())}.pdf")
+        regex = FilesystemStorage.download_filename_regex()
+        assert regex.fullmatch(f"tailored_resume_{int(time.time())}.pdf")
 
     def test_regex_rejects_path_traversal_segments(self):
-        from main import _DOWNLOAD_FILENAME_RE
+        from adapters.storage.filesystem_storage import FilesystemStorage
 
+        regex = FilesystemStorage.download_filename_regex()
         bad = [
             "../etc/passwd",
             "..\\windows\\system32\\config\\sam",
@@ -90,13 +94,16 @@ class TestDownloadPathTraversal:
             "tailored_resume_1",
         ]
         for name in bad:
-            assert _DOWNLOAD_FILENAME_RE.fullmatch(name) is None, name
+            assert regex.fullmatch(name) is None, name
 
     def test_valid_filename_in_output_dir_returns_pdf(self, client):
         c, mod = client
-        # Drop a fake PDF into the real OUTPUT_DIR (which main.py creates
-        # on import).
-        out_dir = Path(mod.OUTPUT_DIR)
+        # Drop a fake PDF into the real output dir (which FilesystemStorage
+        # creates on instantiation).
+        from adapters.storage.filesystem_storage import FilesystemStorage
+
+        storage = FilesystemStorage(mod._OUTPUT_DIR, mod._PHOTOS_DIR)
+        out_dir = storage.output_dir
         out_dir.mkdir(parents=True, exist_ok=True)
         filename = f"tailored_resume_{int(time.time())}.pdf"
         target = out_dir / filename

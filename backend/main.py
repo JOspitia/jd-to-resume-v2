@@ -27,6 +27,12 @@ from playwright.sync_api import sync_playwright
 import tempfile
 import time
 import re
+
+# Hexagonal split: section delegates to dedicated modules.
+from schemas.api_models import GeminiResumeOutput  # noqa: F401 — re-exported for backward compat
+from application.services.translation_service import build_language_override as _build_language_override
+from adapters.storage.filesystem_storage import FilesystemStorage  # noqa: F401 — exposed for tests
+from routes.assets_router import build_assets_router  # noqa: F401 — composition root uses it
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIASGIMiddleware
@@ -82,44 +88,27 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIASGIMiddleware)
 
-# Persistent directory for generated PDFs — survives uvicorn hot-reloads
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# --- Module-level paths (kept for backward compat with tests + scripts) ---
+# The values are owned by FilesystemStorage in the composition root below.
+# Tests that need to drop fake PDFs into the output dir use these.
+_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+_PHOTOS_DIR = os.path.join(_OUTPUT_DIR, "photos")
 
-# Candidate photos. Kept separate from generated PDFs so "Limpiar" can clear
-# one without touching the other.
-PHOTOS_DIR = os.path.join(OUTPUT_DIR, "photos")
-
-# Only files matching this naming convention are ever written by
-# ``generation_pipeline`` and ``render_from_yaml``. /api/download uses it as a
-# strict allowlist so path-traversal attempts (e.g. "..\\..\\windows\\...")
-# get rejected before touching the filesystem.
-_DOWNLOAD_FILENAME_RE = re.compile(r"^tailored_resume_\d+\.pdf$")
+# --- Composition root: wire adapters into routes ---
+# This is where the hexagonal architecture becomes concrete: every use case
+# receives its adapters via the router factory, never via global imports.
+# Future PRs will add generate/audit/yaml_editor routers here too.
+_storage = FilesystemStorage(_OUTPUT_DIR, _PHOTOS_DIR)
+app.include_router(build_assets_router(_storage))
 
 
-async def _persist_uploaded_photo(photo: Optional[UploadFile]) -> Optional[str]:
-    """
-    Validate and store an optional candidate photo. Returns the absolute path,
-    or None when no photo was sent.
+# --- Module-level paths (kept for backward compat with tests + scripts) ---
+# The values are owned by FilesystemStorage in the composition root below.
+# Tests that need to drop fake PDFs into the output dir use these.
+_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+_PHOTOS_DIR = os.path.join(_OUTPUT_DIR, "photos")
 
-    Never raises: a bad photo degrades to "no photo" rather than failing the
-    whole generation, which would strand the user with no CV at all.
-    """
-    if photo is None or not photo.filename:
-        return None
-    try:
-        data = await photo.read()
-        return _save_photo(data, PHOTOS_DIR)
-    except ValueError as exc:
-        print(f"[PHOTO] rejected: {exc}")
-        return None
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[PHOTO] unexpected error: {exc}")
-        return None
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 @app.get("/")
 def read_root():
@@ -187,20 +176,6 @@ def _get_resume_parser():
     return _RESUME_PARSER
 
 
-class GeminiResumeOutput(BaseModel):
-    name: str = Field(description="Full Name")
-    phone: str = Field(description="Phone Number")
-    email: str = Field(description="Email Address")
-    portfolio: str = Field(description="Portfolio Website URL")
-    linkedin: str = Field(description="LinkedIn URL")
-    github: str = Field(description="GitHub URL")
-    summary: str = Field(description="Concise professional summary")
-    education: list[dict] = Field(description="List with school, degree, dates, gpa")
-    skills: list[dict] = Field(description="List with category and items (strings)")
-    experience: list[dict] = Field(description="List of dicts with: company, role, dates, points (list)")
-    projects: list[dict] = Field(description="List of dicts with: name, dates, points (list), url (optional live URL), github_url (optional GitHub repo URL)")
-    achievements: list[str] = Field(description="List of specific achievements or awards")
-
 async def call_llm_api(prompt_text: str) -> str:
     """Backward-compatible wrapper that delegates to the LLM orchestrator.
 
@@ -245,76 +220,6 @@ async def extract_linkedin_profile_data(linkedin_url: str) -> str:
     return await service.extract(linkedin_url)
 
 
-def _build_language_override(target_language: str, source_language: str) -> str:
-    """
-    Build the LANGUAGE OVERRIDE block prepended AND appended to the system prompt when
-    force_language is set. Priority is absolute over rule 8 (LANGUAGE MATCHING).
-
-    The block is intentionally aggressive: it ignores the JD language even if the JD
-    is in Spanish, because the user explicitly requested a forced translation via
-    the Translate to English button.
-    """
-    return f"""
-LANGUAGE OVERRIDE (ABSOLUTE PRIORITY — overrides rule 8 LANGUAGE MATCHING):
-- The user explicitly requested the output CV in English ({target_language}).
-- IGNORE the source JD language and the base resume source language ({source_language}).
-- Produce ALL text fields (summary, experience[*].points, projects[*].points, skills[*].category,
-  skills[*].items, education[*].degree, achievements[*], section_labels) in ENGLISH.
-- Never mix languages in the same document.
-- Even if the JD is in Spanish, English wins. Even if rule 8 says otherwise, this wins.
-
-DO NOT TRANSLATE (keep verbatim):
-- Brand names: BBVA, Mercadona, Carrefour, Google, Microsoft, Amazon, Mercado Libre, Rappi, Glovo, etc.
-- Product names: iPhone, Android, RenderCV, Typst, Playwright, FastAPI, LangGraph, LangChain, etc.
-- Tech stack: React, Python, TypeScript, JavaScript, FastAPI, AWS, Docker, Kubernetes, PostgreSQL,
-  Postgres, Redis, GraphQL, REST, OpenAI, Gemini, Vite, Tailwind, shadcn/ui, etc.
-  NEVER use Spanish variants (e.g. "Reaccionar", "Pitón") — always English canonical names.
-- Proper nouns (cities): keep in local script (Medellín, Bogotá, Madrid, Sevilla, A Coruña).
-  Do NOT anglicise accents.
-- Proper nouns (countries): use EN convention (España → Spain, México → Mexico; Colombia and
-  Argentina stay the same in EN).
-- Certification credential codes: AZ-900, AWS Cloud Practitioner, PMP, CISSP, etc. Keep verbatim.
-
-MUST TRANSLATE / ADAPT:
-- Honorifics: Sr. / Sra. → OMIT (do not render).
-- Ongoing dates: "Actualmente", "Presente", "Hoy" → "Present".
-- Spanish vocational training degrees:
-    * "Ciclo Formativo de Grado Superior" / "CFGS" → "Higher Vocational Training".
-    * "Formación Profesional" / "FP" (generic) → "Vocational Degree".
-    * "Grado Medio" → "Vocational Degree (Intermediate level)".
-    * "Grado Superior" → "Higher Vocational Training".
-- National IDs:
-    * "DNI" → "National ID (DNI)".
-    * "Cédula de ciudadanía" → "National ID (Cédula)".
-    * "Cédula de identidad" → "National ID".
-    * "NIE" → "Foreign Resident ID (NIE)".
-- Driver's license: "Carnet de conducir B" / "Licencia de conducir B" → "Driver's license (Category B)".
-- Phone numbers: keep the original digits verbatim. Do NOT invent a +1 US prefix when the digits
-  are Spanish/Colombian/etc. — the existing sanitize_phone in render_service.py handles prefix.
-
-ANTI-AI REAFFIRMATION (applies EQUALLY to English output):
-- burstiness, vary_bullet_syntax, anti_repetition_project_footprint, natural_language_markers
-  (rules 15, 17, 18, 20) continue to apply with equal force.
-- DO NOT substitute the Spanish pattern examples with English AI clichés:
-  NEVER use: "spearheaded", "delved into", "tackled", "orchestrated synergy",
-  "navigated complexities", "synergized", "leveraged stakeholder value", "testament to".
-- USE the four EN-native narrative patterns instead, varied across consecutive bullets:
-  * Pattern A (Outcome-First): "Reduced response latency by 40% by refactoring the FastAPI endpoints..."
-  * Pattern B (Challenge-First): "Faced with 8s p99 latency on the checkout flow, I rebuilt the queue layer with Redis Streams..."
-  * Pattern C (Action-First): "Led the migration of the legacy monolith to Kubernetes, decommissioning 12 services over 4 months..."
-  * Pattern D (Tool-First): "Through Playwright + FastAPI + SSE, automated E2E coverage for 40 critical user paths..."
-- Vary sentence length and cadence: mix 1-line statements with 2-line contextual achievements.
-
-SECTION LABELS:
-- section_labels MUST be in English: "Professional Summary", "Education", "Skills",
-  "Work Experience", "Projects", "Achievements", "Portfolio".
-"""
-
-
-# Per-game audit prompt configuration lives in `audit_prompts.py` (imported
-# above) so the prompt builder is testable without importing main.py (which
-# pulls in fastapi, fitz, google.generativeai, etc). The wrapper kept below
-# preserves the original underscore-prefixed name used by the call sites.
 def _build_audit_prompt(resume_text: str, jd_text: str, audit_game) -> str:
     """
     Thin wrapper around `audit_prompts.build_audit_prompt` so call sites
@@ -1569,32 +1474,6 @@ def _strip_yaml_fences(text: str) -> str:
             t = t[:-3].rstrip()
     return t
 
-
-@app.get("/api/download/{filename}")
-async def download_resume(filename: str):
-    """Serve a generated PDF from the persistent output directory.
-
-    Two layers of defence against path traversal:
-
-    1. Strict regex on the URL segment so callers can only ask for files
-       matching the exact naming convention that ``generation_pipeline``
-       writes (``tailored_resume_<unix_ts>.pdf``).
-    2. ``Path.resolve()`` + ``is_relative_to(OUTPUT_DIR)`` to catch any
-       segment that survives the regex (defence in depth).
-    """
-    if not _DOWNLOAD_FILENAME_RE.fullmatch(filename):
-        raise HTTPException(status_code=400, detail="Invalid filename format")
-
-    output_dir_resolved = Path(OUTPUT_DIR).resolve()
-    file_path = (output_dir_resolved / filename).resolve()
-
-    if not file_path.is_relative_to(output_dir_resolved):
-        raise HTTPException(status_code=400, detail="Invalid filename format")
-
-    if not file_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    return FileResponse(file_path, filename=filename, media_type="application/pdf")
 
 @app.post("/api/clear-cache")
 async def clear_cache():
