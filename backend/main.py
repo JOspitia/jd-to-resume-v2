@@ -4,8 +4,9 @@ import io
 
 # Force UTF-8 stdout/stderr on Windows so print() with non-ASCII chars
 # (emojis, accented chars, etc.) does not raise UnicodeEncodeError against
-# the default cp1252 codec.
-if sys.platform == "win32":
+# the default cp1252 codec. Skipped under pytest so re-importing this module
+# in tests does not leak wrapped streams past the test's captured buffers.
+if sys.platform == "win32" and os.getenv("DISABLE_STDIO_REWRAP") != "1" and "pytest" not in sys.modules:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
@@ -13,8 +14,9 @@ import json
 import asyncio
 import base64
 from html import escape
+from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, UploadFile, Form, File, BackgroundTasks, HTTPException
+from fastapi import FastAPI, UploadFile, Form, File, BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -25,6 +27,10 @@ from playwright.sync_api import sync_playwright
 import tempfile
 import time
 import re
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIASGIMiddleware
+from slowapi.util import get_remote_address
 
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
@@ -42,12 +48,38 @@ load_dotenv()
 
 app = FastAPI()
 
+# CORS: defaults to local Vite dev origins; override with a comma-separated
+# CORS_ALLOWED_ORIGINS env var when deploying behind a tunnel or production
+# frontend. We deliberately do NOT use a wildcard: combined with the previous
+# path-traversal bug in /api/download it would expose any file the server
+# process can read to any origin on the public internet.
+_cors_origins_raw = os.getenv(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173",
+)
+_cors_origins = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    allow_credentials=False,
 )
+
+# Rate limiting (slowapi): protect every endpoint from runaway scripts that
+# could drain the user's LLM quota. The default ``RATE_LIMIT_DEFAULT`` is
+# conservative (5/minute per remote IP) and override-able via env. Use
+# ``RATELIMIT_ENABLED=0`` to disable entirely (e.g. local benchmarking).
+_rl_default = os.getenv("RATE_LIMIT_DEFAULT", "5/minute")
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[_rl_default],
+    enabled=os.getenv("RATELIMIT_ENABLED", "1") != "0",
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIASGIMiddleware)
 
 # Persistent directory for generated PDFs — survives uvicorn hot-reloads
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -56,6 +88,12 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # Candidate photos. Kept separate from generated PDFs so "Limpiar" can clear
 # one without touching the other.
 PHOTOS_DIR = os.path.join(OUTPUT_DIR, "photos")
+
+# Only files matching this naming convention are ever written by
+# ``generation_pipeline`` and ``render_from_yaml``. /api/download uses it as a
+# strict allowlist so path-traversal attempts (e.g. "..\\..\\windows\\...")
+# get rejected before touching the filesystem.
+_DOWNLOAD_FILENAME_RE = re.compile(r"^tailored_resume_\d+\.pdf$")
 
 
 async def _persist_uploaded_photo(photo: Optional[UploadFile]) -> Optional[str]:
@@ -595,30 +633,67 @@ async def call_llm_api(prompt_text: str) -> str:
 
     # 2. Fallback Provider: Gemini
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not gemini_key or gemini_key.startswith("AQ."):
-        err_detail = f" (Error en DeepSeek/Primario: {primary_error_msg})" if primary_error_msg else ""
-        raise ValueError(f"Fallo en modelo primario{err_detail}. Además, la GEMINI_API_KEY no es válida. Obtén una clave gratuita en https://aistudio.google.com/app/apikey")
+    gemini_error_msg = None
+    
+    if gemini_key and not gemini_key.startswith("AQ."):
+        genai.configure(api_key=gemini_key)
+        generation_config = {"response_mime_type": "application/json"}
         
-    genai.configure(api_key=gemini_key)
-    generation_config = {"response_mime_type": "application/json"}
+        models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+        
+        for m_name in models_to_try:
+            try:
+                print(f"[LLM INFO] Intentando modelo Gemini de respaldo: '{m_name}'...")
+                model = genai.GenerativeModel(m_name, generation_config=generation_config)
+                res = await asyncio.wait_for(asyncio.to_thread(model.generate_content, prompt_text), timeout=50.0)
+                if res and res.text:
+                    print(f"[LLM INFO] Gemini '{m_name}' funcionó correctamente.")
+                    return res.text
+            except Exception as e:
+                print(f"[LLM WARN] El modelo Gemini '{m_name}' falló/agotó tiempo: {e}")
+                gemini_error_msg = e
+                continue
+    else:
+        gemini_error_msg = "GEMINI_API_KEY no configurada o no válida"
+        print("[LLM WARN] Gemini no disponible, continuando al siguiente fallback...")
+
+    # 3. Fallback Provider: DeepSeek directo (no a través de OpenAI compat)
+    print("[LLM INFO] Activando fallback a DeepSeek directo...")
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
     
-    models_to_try = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
-    last_err = None
+    if not deepseek_key:
+        deepseek_key = os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
+        print(f"[LLM INFO] Usando LLM_API_KEY como fallback de DeepSeek: {'Sí' if deepseek_key else 'No'}")
     
-    for m_name in models_to_try:
-        try:
-            print(f"[LLM INFO] Intentando modelo Gemini de respaldo: '{m_name}'...")
-            model = genai.GenerativeModel(m_name, generation_config=generation_config)
-            res = await asyncio.wait_for(asyncio.to_thread(model.generate_content, prompt_text), timeout=50.0)
-            if res and res.text:
-                return res.text
-        except Exception as e:
-            print(f"[LLM WARN] El modelo Gemini '{m_name}' falló/agotó tiempo: {e}")
-            last_err = e
-            continue
+    if not deepseek_key:
+        err_detail = f" (Primario: {primary_error_msg}, Gemini: {gemini_error_msg})" if primary_error_msg or gemini_error_msg else ""
+        raise ValueError(f"Fallaron todos los modelos.{err_detail} Necesitas configurar al menos una API key válida (LLM_API_KEY, GEMINI_API_KEY, o DEEPSEEK_API_KEY).")
+    
+    try:
+        from openai import OpenAI
+        print(f"[LLM INFO] Intentando DeepSeek directo con modelo deepseek-chat...")
+        deepseek_client = OpenAI(
+            api_key=deepseek_key,
+            base_url="https://api.deepseek.com/v1",
+            timeout=60.0
+        )
+        
+        def _run_deepseek():
+            response = deepseek_client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": "You are a professional technical recruiter and resume writer. Always respond strictly in valid JSON format."},
+                    {"role": "user", "content": prompt_text}
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+            return response.choices[0].message.content
             
-    err_detail = f" (Error primario: {primary_error_msg})" if primary_error_msg else ""
-    raise ValueError(f"Fallaron todos los modelos. Gemini: {last_err}{err_detail}")
+        return await asyncio.wait_for(asyncio.to_thread(_run_deepseek), timeout=55.0)
+    except Exception as deepseek_err:
+        err_detail = f" (Primario: {primary_error_msg}, Gemini: {gemini_error_msg})" if primary_error_msg or gemini_error_msg else ""
+        raise ValueError(f"Fallaron todos los modelos: {deepseek_err}{err_detail}")
 
 
 # In-memory cache to avoid re-extracting LinkedIn on every refinement pass
@@ -1386,7 +1461,10 @@ IMPORTANT:
 
         
         yield f"data: {json.dumps({'step': 'Generating Tailored Resume Content', 'progress': 75})}\n\n"
-        content = await call_llm_api(prompt)
+        try:
+            content = await asyncio.wait_for(call_llm_api(prompt), timeout=60.0)
+        except asyncio.TimeoutError:
+            raise TimeoutError("La generación del CV excedió el límite de 60 segundos. Intenta con un CV más simple o una descripción de trabajo más corta.")
         
         clean_content = content.strip()
         if "```" in clean_content:
@@ -2288,10 +2366,29 @@ def _strip_yaml_fences(text: str) -> str:
 
 @app.get("/api/download/{filename}")
 async def download_resume(filename: str):
-    file_path = os.path.join(OUTPUT_DIR, filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path, filename=filename, media_type="application/pdf")
-    return {"error": "File not found"}
+    """Serve a generated PDF from the persistent output directory.
+
+    Two layers of defence against path traversal:
+
+    1. Strict regex on the URL segment so callers can only ask for files
+       matching the exact naming convention that ``generation_pipeline``
+       writes (``tailored_resume_<unix_ts>.pdf``).
+    2. ``Path.resolve()`` + ``is_relative_to(OUTPUT_DIR)`` to catch any
+       segment that survives the regex (defence in depth).
+    """
+    if not _DOWNLOAD_FILENAME_RE.fullmatch(filename):
+        raise HTTPException(status_code=400, detail="Invalid filename format")
+
+    output_dir_resolved = Path(OUTPUT_DIR).resolve()
+    file_path = (output_dir_resolved / filename).resolve()
+
+    if not file_path.is_relative_to(output_dir_resolved):
+        raise HTTPException(status_code=400, detail="Invalid filename format")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(file_path, filename=filename, media_type="application/pdf")
 
 @app.post("/api/clear-cache")
 async def clear_cache():
