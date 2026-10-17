@@ -2,100 +2,295 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens — foundation for the neo-brutalist design system.
+ *
+ * Conventions:
+ *   - Colors: HSL channel triplets ("H S% L%") so Tailwind's `hsl(var(--token))`
+ *     can compose opacity utilities (e.g. `bg-primary/50`) and theme switching
+ *     becomes a single class flip on <html>.
+ *   - Spacing: 8pt grid. Named steps beyond Tailwind's default scale.
+ *   - Type: modular scale, ratio 1.25 (Major Third). Heading line-heights
+ *     tighten at the larger sizes; body line-heights stay roomy.
+ *   - Motion: semantic durations + easings. Respect `prefers-reduced-motion`.
+ *   - Shadow: hard offset (neo) for brutalist surfaces, soft layered
+ *     shadows for floating UI (toasts, modals).
+ */
+
 @layer base {
   :root {
-    --background: 60 4% 89%; /* #E5E5E0 equivalent in HSL */
-    --foreground: 0 0% 0%;   /* #000000 */
-    
-    --card: 0 0% 100%;
+    /* ---------- Color: light mode (warm off-white, brutalist) ---------- */
+    --background: 60 9% 89%;          /* #E5E5E0 — paper grid */
+    --foreground: 0 0% 0%;            /* pure black ink */
+
+    --card: 0 0% 100%;                /* #FFFFFF cards float on background */
     --card-foreground: 0 0% 0%;
 
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 0%;
 
-    --primary: 224 76% 48%; /* #1D4ED8 (Royal Blue) */
+    --primary: 224 76% 40%;           /* #1D4ED8 royal blue (darker for AA text) */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 25 95% 53%; /* #F97316 (Orange) */
+    --secondary: 21 90% 40%;          /* #C2410C dark orange (AA body text) */
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 0 0% 90%;
-    --muted-foreground: 0 0% 40%;
-
-    --accent: 60 4% 95%; 
+    --accent: 60 4% 95%;              /* #F2F2EE — muted surface */
     --accent-foreground: 0 0% 0%;
 
-    --destructive: 0 100% 60%;
+    --muted: 0 0% 90%;
+    --muted-foreground: 0 0% 35%;    /* darker than --color for AA */
+
+    --success: 142 71% 30%;            /* #15803D */
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 40%;            /* #CA8A04 */
+    --warning-foreground: 0 0% 100%;
+
+    --info: 199 89% 35%;              /* #0E7490 */
+    --info-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 42%;         /* #B91C1C */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 0%;
+    --border: 0 0% 0%;                /* brutalist hard black borders */
     --input: 0 0% 0%;
-    --ring: 0 0% 0%;
+    --ring: 224 76% 40%;              /* primary blue for focus rings */
 
-    --radius: 0px; /* STRICTLY SHARP CORNERS */
+    /* ---------- Radius ---------- */
+    /* Brutalist by default (0px) — surfaces stay sharp. Add `rounded-md`
+       opt-in for components that want softer corners (badges, avatars). */
+    --radius: 0px;
+
+    /* ---------- Typography scale (1.25 ratio) ---------- */
+    --font-size-xs: 0.75rem;          /* 12 */
+    --font-size-sm: 0.875rem;         /* 14 */
+    --font-size-base: 1rem;          /* 16 */
+    --font-size-lg: 1.125rem;         /* 18 */
+    --font-size-xl: 1.25rem;          /* 20 */
+    --font-size-2xl: 1.5rem;          /* 24 */
+    --font-size-3xl: 1.875rem;        /* 30 */
+    --font-size-4xl: 2.25rem;         /* 36 */
+    --font-size-5xl: 3rem;            /* 48 */
+    --font-size-6xl: 3.75rem;         /* 60 */
+    --font-size-7xl: 4.5rem;          /* 72 */
+
+    /* Line-height per role */
+    --leading-tight: 1.1;
+    --leading-snug: 1.25;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.625;
+
+    /* Letter-spacing per role */
+    --tracking-tighter: -0.03em;
+    --tracking-tight: -0.02em;
+    --tracking-normal: 0;
+    --tracking-wide: 0.05em;
+    --tracking-widest: 0.2em;
+
+    /* ---------- Spacing (8pt grid) ---------- */
+    --space-1: 0.25rem;               /* 4 — sub-step for fine tuning */
+    --space-2: 0.5rem;                /* 8 */
+    --space-3: 0.75rem;               /* 12 */
+    --space-4: 1rem;                  /* 16 — base unit */
+    --space-6: 1.5rem;                /* 24 */
+    --space-8: 2rem;                  /* 32 */
+    --space-12: 3rem;                 /* 48 */
+    --space-16: 4rem;                 /* 64 */
+    --space-24: 6rem;                 /* 96 */
+    --space-32: 8rem;                 /* 128 */
+
+    /* ---------- Motion ---------- */
+    --duration-instant: 0ms;
+    --duration-fast: 100ms;          /* micro-interactions */
+    --duration-base: 200ms;          /* default UI */
+    --duration-slow: 300ms;          /* larger surfaces */
+    --duration-slower: 500ms;        /* page transitions */
+
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+    --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+    --ease-emphasis: cubic-bezier(0.2, 0, 0, 1.2);
+
+    /* ---------- Shadows ---------- */
+    /* Brutalist hard offset shadows — preserved from the original system */
+    --shadow-neo-xs: 1px 1px 0 0 hsl(var(--border));
+    --shadow-neo-sm: 2px 2px 0 0 hsl(var(--border));
+    --shadow-neo: 4px 4px 0 0 hsl(var(--border));
+    --shadow-neo-md: 5px 5px 0 0 hsl(var(--border));
+    --shadow-neo-lg: 6px 6px 0 0 hsl(var(--border));
+    --shadow-neo-xl: 8px 8px 0 0 hsl(var(--border));
+
+    /* Soft layered shadows for floating UI (toasts, modals) */
+    --shadow-soft-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    --shadow-soft-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+  }
+
+  /* ---------- Dark mode ---------- */
+  /* Triggered by adding `class="dark"` to <html> or via `prefers-color-scheme`
+     when no explicit theme is set. Brutalist aesthetic preserved: hard
+     borders stay (light gray on dark), shadows invert their offset color. */
+  .dark {
+    --background: 220 18% 10%;        /* deep blue-black ink paper */
+    --foreground: 60 9% 95%;          /* warm off-white text */
+
+    --card: 220 15% 14%;              /* slightly lifted from background */
+    --card-foreground: 60 9% 95%;
+
+    --popover: 220 15% 14%;
+    --popover-foreground: 60 9% 95%;
+
+    --primary: 217 91% 60%;           /* #3B82F6 — brighter blue for dark bg */
+    --primary-foreground: 220 18% 10%;
+
+    --secondary: 24 95% 53%;          /* #F97316 — orange stays vivid */
+    --secondary-foreground: 220 18% 10%;
+
+    --accent: 220 15% 18%;
+    --accent-foreground: 60 9% 95%;
+
+    --muted: 220 15% 20%;
+    --muted-foreground: 60 9% 65%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 220 18% 10%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 220 18% 10%;
+
+    --info: 199 89% 55%;
+    --info-foreground: 220 18% 10%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 60 9% 95%;
+
+    --border: 60 9% 85%;              /* light borders on dark bg */
+    --input: 60 9% 85%;
+    --ring: 217 91% 60%;
+  }
+
+  /* Respect the user's OS theme only when no explicit class is set. */
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) {
+      color-scheme: dark;
+    }
   }
 }
 
 @layer base {
+  /* Apply CSS reset via Tailwind's border-border default. */
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground;
-    font-family: 'Noto Sans', 'Geist Sans', sans-serif;
-    background-image: 
-      linear-gradient(90deg, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
-      linear-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Noto Sans', 'Geist Sans', system-ui, -apple-system, sans-serif;
+    /* Signature brutalist grid overlay — preserved from the original design.
+       Opacity is lower (0.04) so it doesn't fight with content on dark bg. */
+    background-image:
+      linear-gradient(90deg, hsl(var(--foreground) / 0.05) 1px, transparent 1px),
+      linear-gradient(0deg, hsl(var(--foreground) / 0.05) 1px, transparent 1px);
     background-size: 40px 40px;
-    background-color: #E5E5E0;
+    /* Smoother text rendering for the mix of serif + mono we ship. */
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Merriweather', serif;
-    letter-spacing: -0.02em;
+    font-family: 'Merriweather', 'Source Serif Pro', Georgia, serif;
+    @apply tracking-tight;
+    line-height: var(--leading-tight);
+  }
+
+  /* Visible focus ring for keyboard users. Replaces the default browser
+     outline with a brutalist-style offset ring that matches the design. */
+  :focus-visible {
+    outline: 3px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Respect users who prefer reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Skip-to-content link for keyboard / screen reader users. Hidden
+     until focused. Lives at the top of <body> in App.tsx. */
+  .skip-link {
+    position: absolute;
+    top: -100px;
+    left: 0;
+    z-index: 1000;
+    padding: var(--space-3) var(--space-4);
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    font-weight: 700;
+    text-decoration: none;
+    border: 2px solid hsl(var(--border));
+    box-shadow: var(--shadow-neo-sm);
+  }
+  .skip-link:focus {
+    top: var(--space-2);
+    left: var(--space-2);
   }
 }
 
-.rm-box {
-  border: 2px solid black;
-  box-shadow: 4px 4px 0px 0px rgba(0,0,0,1);
-  border-radius: var(--radius);
-  background-color: white;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
+@layer components {
+  /*
+   * Legacy brutalist primitives — preserved verbatim for PR1.
+   * Re-implemented as a proper Tailwind component layer in PR2.
+   */
+  .rm-box {
+    border: 2px solid hsl(var(--border));
+    box-shadow: var(--shadow-neo);
+    border-radius: var(--radius);
+    background-color: hsl(var(--card));
+    transition: transform var(--duration-fast) var(--ease-standard),
+                box-shadow var(--duration-fast) var(--ease-standard);
+  }
 
-.rm-box:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: 6px 6px 0px 0px rgba(0,0,0,1);
-}
+  .rm-box:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: var(--shadow-neo-lg);
+  }
 
-.rm-btn {
-  border: 2px solid black;
-  box-shadow: 4px 4px 0px 0px rgba(0,0,0,1);
-  border-radius: var(--radius);
-  transition: transform 0.1s, box-shadow 0.1s;
-  font-family: 'JetBrains Mono', monospace;
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
+  .rm-btn {
+    border: 2px solid hsl(var(--border));
+    box-shadow: var(--shadow-neo);
+    border-radius: var(--radius);
+    transition: transform var(--duration-fast) var(--ease-standard),
+                box-shadow var(--duration-fast) var(--ease-standard);
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: var(--tracking-wide);
+  }
 
-.rm-btn:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 5px 5px 0px 0px rgba(0,0,0,1);
-}
+  .rm-btn:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: var(--shadow-neo-md);
+  }
 
-.rm-btn:active {
-  transform: translate(3px, 3px);
-  box-shadow: 1px 1px 0px 0px rgba(0,0,0,1);
-}
+  .rm-btn:active {
+    transform: translate(3px, 3px);
+    box-shadow: var(--shadow-neo-xs);
+  }
 
-.rm-tag {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  font-weight: 600;
-  border: 2px solid black;
-  box-shadow: 2px 2px 0px 0px rgba(0,0,0,1);
+  .rm-tag {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: var(--font-size-sm);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    font-weight: 600;
+    border: 2px solid hsl(var(--border));
+    box-shadow: var(--shadow-neo-sm);
+  }
 }

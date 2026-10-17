@@ -7,11 +7,20 @@ export default function App() {
 
   return (
     <>
-      {view === 'landing' ? (
-        <LandingPage onStart={() => setView('tool')} />
-      ) : (
-        <ToolApp onBack={() => setView('landing')} />
-      )}
+      {/* Skip link — first focusable element in the DOM for keyboard users.
+          CSS `.skip-link` (in index.css) hides it off-screen until it
+          receives focus, then snaps it to the top-left corner. Lands focus
+          on #main-content which wraps the active view. */}
+      <a href="#main-content" className="skip-link">
+        Saltar al contenido principal
+      </a>
+      <main id="main-content">
+        {view === 'landing' ? (
+          <LandingPage onStart={() => setView('tool')} />
+        ) : (
+          <ToolApp onBack={() => setView('landing')} />
+        )}
+      </main>
     </>
   );
 }
