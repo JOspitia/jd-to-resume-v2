@@ -91,7 +91,14 @@ async def enforce_rate_limit(request: Request, scope: str) -> None:
     # Drop hits outside the window.
     hits = [t for t in hits if (now - t) < window]
     if len(hits) >= limit:
-        _RL_HITS[key] = hits
+        # Persist the at-limit snapshot so concurrent requests see the
+        # same window. Drop the key entirely if the filter emptied the
+        # list, so the dict doesn't accumulate dead ``scope:ip`` entries
+        # on a long-running server with many distinct callers.
+        if hits:
+            _RL_HITS[key] = hits
+        else:
+            _RL_HITS.pop(key, None)
         raise HTTPException(
             status_code=429,
             detail=f"Rate limit exceeded for {scope!r}: {limit} requests per {window:.0f}s",
