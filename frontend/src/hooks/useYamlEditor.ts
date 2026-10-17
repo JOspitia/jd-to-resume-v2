@@ -3,7 +3,7 @@ import type { Profile } from './useProfile';
 import type { Generation } from './useGeneration';
 import type { Audit } from './useAudit';
 import { validateYaml } from '../lib/yamlValidator';
-import { apiUrl } from '../lib/api';
+import { apiUrl, fetchWithTimeout } from '../lib/api';
 
 /**
  * useYamlEditor — T3 of the UX refactor (specs S5, S6).
@@ -207,15 +207,11 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     // is re-sent on every render-from-yaml pass.
     if (photo) formData.append('photo', photo);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      const res = await fetch(apiUrl('/api/render-from-yaml'), {
+      const res = await fetchWithTimeout(apiUrl('/api/render-from-yaml'), {
         method: 'POST',
         body: formData,
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`Render-from-YAML failed (${res.status}): ${errText || res.statusText}`);
@@ -265,7 +261,6 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
         }
       }
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
       const isAbort = err instanceof DOMException && err.name === 'AbortError';
       const message = err instanceof Error ? err.message : 'Error desconocido al renderizar desde YAML.';
       const msg = isAbort
@@ -307,15 +302,11 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     if (jd) formData.append('jd', jd);
     if (domainGame) formData.append('domain_game', domainGame);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      const res = await fetch(apiUrl('/api/analyze-yaml'), {
+      const res = await fetchWithTimeout(apiUrl('/api/analyze-yaml'), {
         method: 'POST',
         body: formData,
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`Audit-from-YAML failed (${res.status}): ${errText || res.statusText}`);
@@ -341,7 +332,6 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       setYamlReady(false);
       setEditBeforeGenerate(false);
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
       const isAbort = err instanceof DOMException && err.name === 'AbortError';
       const message = err instanceof Error ? err.message : 'Error desconocido al auditar desde YAML.';
       const msg = isAbort

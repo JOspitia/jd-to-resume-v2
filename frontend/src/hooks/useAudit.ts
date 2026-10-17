@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { Profile } from './useProfile';
-import { apiUrl } from '../lib/api';
+import { apiUrl, fetchWithTimeout } from '../lib/api';
 import type { AuditData } from '../types/audit';
 
 /**
@@ -114,16 +114,11 @@ export function useAudit(
     // "tech" game and the LLM audits the HR CV against tech keywords.
     if (domainGame) formData.append("domain_game", domainGame);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second (1 minute) timeout
-
     try {
-      const res = await fetch(apiUrl("/api/analyze-ats"), {
+      const res = await fetchWithTimeout(apiUrl("/api/analyze-ats"), {
         method: "POST",
         body: formData,
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
 
       if (!res.ok) {
         // The backend returns 4xx/5xx with body shape
@@ -166,7 +161,6 @@ export function useAudit(
         });
       }
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
       const isAbort = err instanceof DOMException && err.name === 'AbortError';
       const message = err instanceof Error ? err.message : "Ocurrió un error inesperado al analizar el ATS.";
       setAtsErrorMessage(

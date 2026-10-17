@@ -56,3 +56,40 @@ export function apiUrl(path: string): string {
   const tail = path.startsWith('/') ? path : `/${path}`;
   return `${base}${tail}`;
 }
+
+/** Default ceiling for one-shot JSON endpoints (analyze-ats, render-from-yaml). */
+export const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
+/** Longer ceiling for SSE pipelines that stream the full PDF (generate). */
+export const SSE_FETCH_TIMEOUT_MS = 120_000;
+
+/**
+ * Wrap ``fetch`` with an ``AbortController`` that fires after
+ * ``timeoutMs`` and returns whatever the caller passes in via
+ * ``options``. The timer is always cleared in the ``finally`` block
+ * so successful requests don't leak pending timers.
+ *
+ * The thrown error on timeout is a ``DOMException`` whose ``name`` is
+ * ``"AbortError"`` — handlers can branch on that to render a friendly
+ * message.
+ *
+ * Usage:
+ *
+ *   const controller = new AbortController();
+ *   const res = await fetchWithTimeout('/api/x', { method: 'POST' });
+ *   // ... or for SSE:
+ *   const res = await fetchWithTimeout('/api/generate', { ... },
+ *                                      SSE_FETCH_TIMEOUT_MS);
+ */
+export async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
