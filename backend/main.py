@@ -235,28 +235,23 @@ _linkedin_cache: dict = {}
 
 
 async def extract_linkedin_profile_data(linkedin_url: str) -> str:
-    """Backward-compatible wrapper that delegates to ``LinkedInService``.
-
-    The three strategies (ProxyCurl -> Playwright auth -> Public urllib)
-    live under ``adapters/linkedin/``; the orchestration + LLM pass-through
-    + cache live in ``application.services.linkedin_service.LinkedInService``.
+    """Backward-compatible wrapper that closes over the composition-root
+    defaults (the ``call_llm_api`` singleton + the module-level
+    ``_linkedin_cache``) and delegates to the canonical implementation
+    in :func:`application.services.linkedin_service.extract_linkedin_profile_data`.
 
     Credentials are read once at startup via ``load_dotenv()`` above. To
-    rotate a LinkedIn provider key (ProxyCurl, etc.), restart the server —
-    the same reload contract as the LLM providers. We previously called
-    ``load_dotenv(override=True)`` per request so devs could rotate keys
-    without a restart, but that re-reads ``.env`` from disk on every
-    LinkedIn extraction and contradicts the LLM-key reload semantics.
+    rotate a LinkedIn provider key (ProxyCurl, etc.), restart the server
+    — same contract as the LLM providers.
     """
-    from adapters.linkedin.factory import build_linkedin_strategies
-    from application.services.linkedin_service import LinkedInService
+    from application.services.linkedin_service import (
+        extract_linkedin_profile_data as _extract,
+    )
 
     _logger.info(
         "[LINKEDIN EXTRACTOR] Iniciando extraccion para: %s", linkedin_url
     )
-    strategies = build_linkedin_strategies()
-    service = LinkedInService(strategies, llm_call=call_llm_api, cache=_linkedin_cache)
-    return await service.extract(linkedin_url)
+    return await _extract(linkedin_url, llm_call=call_llm_api, cache=_linkedin_cache)
 
 
 if __name__ == "__main__":

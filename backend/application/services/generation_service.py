@@ -32,6 +32,7 @@ import time
 from typing import AsyncIterator, Optional
 
 from application.services.llm_orchestrator import LLMOrchestrator
+from application.services.linkedin_service import extract_linkedin_profile_data
 from application.services.translation_service import build_language_override
 from domain_games import get_game
 from language import detect_language
@@ -264,7 +265,7 @@ class GenerationService:
             linkedin_extracted_text = ""
             if extract_linkedin_info and linkedin_url and linkedin_url.strip():
                 yield f"data: {json.dumps({'step': 'Extrayendo datos del perfil de LinkedIn...', 'progress': 35})}\n\n"
-                from main import extract_linkedin_profile_data
+                # Imported at top — see the module-level import block.
                 linkedin_extracted_text = await extract_linkedin_profile_data(
                     linkedin_url.strip()
                 )

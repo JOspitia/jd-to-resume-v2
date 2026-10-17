@@ -190,4 +190,30 @@ class LinkedInService:
         return await self._llm_call(prompt)
 
 
-__all__ = ["LinkedInService"]
+async def extract_linkedin_profile_data(
+    linkedin_url: str,
+    *,
+    llm_call,
+    cache: dict[str, str] | None = None,
+) -> str:
+    """Module-level entry point so callers (like ``GenerationService``)
+    can import a single async function instead of instantiating
+    ``LinkedInService`` themselves.
+
+    The composition root (``main.py``) keeps a thin wrapper that closes
+    over the module-level ``_linkedin_cache`` and its ``call_llm_api`` so
+    external scripts and the existing
+    ``main.extract_linkedin_profile_data`` shim continue to work.
+
+    Moved from ``main.py`` during the final pass of the MP-02 circular
+    import cleanup — eliminates the last ``from main import`` inside a
+    service hot path.
+    """
+    from adapters.linkedin.factory import build_linkedin_strategies
+
+    strategies = build_linkedin_strategies()
+    service = LinkedInService(strategies, llm_call=llm_call, cache=cache)
+    return await service.extract(linkedin_url)
+
+
+__all__ = ["LinkedInService", "extract_linkedin_profile_data"]
