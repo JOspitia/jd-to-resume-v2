@@ -120,7 +120,6 @@ from render_service import render_cv_with_rendercv
 from language import detect_language
 from photo_helpers import save_photo as _save_photo, prune_orphaned_photos as _prune_photos
 from domain_games import get_game
-from audit_prompts import build_audit_prompt as _build_audit_prompt_lib
 from yaml_helpers import (
     serialize_resume_data_as_text as _serialize_resume_data_as_text,
     yaml_safe_dump_unicode as _yaml_safe_dump_unicode,
@@ -195,54 +194,43 @@ _PHOTOS_DIR = os.path.join(_OUTPUT_DIR, "photos")
 _storage = FilesystemStorage(_OUTPUT_DIR, _PHOTOS_DIR)
 app.include_router(build_assets_router(_storage))
 
+# Single LLM orchestrator shared across all LLM-backed services. Building it
+# is expensive (loads openai / google.generativeai SDKs) so we do it once at
+# module-init and pass the instance to every service that needs LLM.
+from application.services.llm_orchestrator import LLMOrchestrator
+from adapters.llm.factory import build_llm_providers
+_llm_orchestrator = LLMOrchestrator(build_llm_providers())
+
+# Audit service: shared by /api/analyze-ats, /api/analyze-yaml, and the
+# generation pipeline's auto re-audit (REQ-4). Wires a PyMuPDF parser so
+# the ``audit_pdf`` path can extract text from a freshly uploaded resume.
+from application.services.audit_service import AuditService
+from adapters.parser.pymupdf_adapter import PyMuPDFParser
+_audit_service = AuditService(_llm_orchestrator, PyMuPDFParser())
+
+# /api/analyze-ats: the frontend-driven audit endpoint.
+from routes.audit_router import build_audit_router
+app.include_router(build_audit_router(_audit_service))
+
 # YAML editor (render-from-yaml, analyze-yaml, repair-yaml): DI of the
 # LLM-backed repair service + the storage for output path resolution.
-# The PdfRenderer is built per-request inside the render handler because
-# the choice depends on the user-selected theme.
+# The audit_service is also injected so analyze-yaml can delegate.
 from application.services.yaml_editor_service import YamlEditorService
-from application.services.llm_orchestrator import LLMOrchestrator
 from routes.yaml_editor_router import build_yaml_editor_router
-
-
-def _build_yaml_editor_service() -> YamlEditorService:
-    """Late-bind the LLM orchestrator so importing ``main`` is cheap."""
-    from adapters.llm.factory import build_llm_providers
-
-    orchestrator = LLMOrchestrator(build_llm_providers())
-    return YamlEditorService(orchestrator)
-
-
-_yaml_editor_service = _build_yaml_editor_service()
+_yaml_editor_service = YamlEditorService(_llm_orchestrator)
 app.include_router(
-    build_yaml_editor_router(_yaml_editor_service, _storage)
+    build_yaml_editor_router(
+        _yaml_editor_service, _storage, audit_service=_audit_service
+    )
 )
 
 # /api/generate: the SSE streaming CV generation pipeline. DI of the
 # service (orchestrates the full LLM cascade + render) + storage (output
-# path resolution). The LLM orchestrator is built lazily inside the
-# service so the heavy SDKs are only loaded on first request.
+# path resolution) + audit_service (for the auto re-audit on translation).
 from application.services.generation_service import GenerationService
 from routes.generate_router import build_generate_router
-
-
-def _build_generation_service() -> GenerationService:
-    """Late-bind the LLM orchestrator so importing ``main`` is cheap."""
-    from adapters.llm.factory import build_llm_providers
-
-    orchestrator = LLMOrchestrator(build_llm_providers())
-    return GenerationService(_storage, orchestrator)
-
-
-_generation_service = _build_generation_service()
+_generation_service = GenerationService(_storage, _llm_orchestrator, _audit_service)
 app.include_router(build_generate_router(_generation_service, _storage))
-
-
-# --- Module-level paths (kept for backward compat with tests + scripts) ---
-# The values are owned by FilesystemStorage in the composition root below.
-# Tests that need to drop fake PDFs into the output dir use these.
-_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-_PHOTOS_DIR = os.path.join(_OUTPUT_DIR, "photos")
-
 
 
 @app.get("/")
@@ -336,106 +324,6 @@ async def extract_linkedin_profile_data(linkedin_url: str) -> str:
     strategies = build_linkedin_strategies()
     service = LinkedInService(strategies, llm_call=call_llm_api, cache=_linkedin_cache)
     return await service.extract(linkedin_url)
-
-
-def _build_audit_prompt(resume_text: str, jd_text: str, audit_game) -> str:
-    """
-    Thin wrapper around `audit_prompts.build_audit_prompt` so call sites
-    in main.py keep the original name. The body of the audit prompt
-    (per-game taxonomy + seed matched/missing keywords + actionable_tips
-    templates) lives in `backend/audit_prompts.py` and is unit-tested
-    there.
-    """
-    return _build_audit_prompt_lib(resume_text, jd_text, audit_game)
-
-
-async def _run_audit_against_text(
-    resume_text: str,
-    jd_text: str,
-    audit_game,
-) -> dict:
-    """
-    Single source of truth for the ATS-audit LLM call.
-
-    All three audit paths in this app delegate here:
-      * `_run_internal_audit` (auto-fired after a forced translate-to-en flow).
-      * `POST /api/analyze-ats` (frontend-driven audit on a freshly uploaded CV).
-      * `POST /api/analyze-yaml` (audit on a YAML dict the user has edited
-        before rendering — T5 of the yaml-editor feature).
-
-    Composes the per-game prompt, calls the LLM, strips any ```json```
-    markdown fence and returns the parsed dict. Raises ValueError if the
-    response is not a JSON object (caller is responsible for HTTP mapping).
-    """
-    prompt = _build_audit_prompt(
-        resume_text=resume_text,
-        jd_text=jd_text,
-        audit_game=audit_game,
-    )
-    content = await call_llm_api(prompt)
-
-    clean_content = content.strip()
-    if "```" in clean_content:
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_content)
-        if match:
-            clean_content = match.group(1)
-
-    try:
-        parsed = json.loads(clean_content)
-    except Exception:
-        parsed = json.loads(content)
-
-    # Some LLM clients wrap the payload in a list; take the first element.
-    if isinstance(parsed, list) and len(parsed) > 0:
-        parsed = parsed[0]
-
-    if not isinstance(parsed, dict):
-        raise ValueError(f"Audit response was not a dict (got {type(parsed).__name__})")
-    return parsed
-
-
-@app.post("/api/analyze-ats")
-async def analyze_ats(
-    request: Request,
-    file: UploadFile,
-    jd: Optional[str] = Form(None),
-    domain_game: Optional[str] = Form(None)
-):
-    await enforce_rate_limit(request, scope="analyze-ats")
-    # Validate domain_game (same contract as /api/generate).
-    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
-    if domain_game is not None and domain_game not in ALLOWED_GAMES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"domain_game must be one of {sorted(ALLOWED_GAMES)} or omitted, got {domain_game!r}"
-        )
-
-    try:
-        load_dotenv(override=True)
-        temp_dir = tempfile.gettempdir()
-        file_path = os.path.join(temp_dir, file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
-
-        resume_text = extract_text(file_path)
-
-        effective_jd = jd.strip() if (jd and jd.strip()) else "Optimización general y mejoramiento de calidad del CV"
-
-        # Audit prompt is composed from the selected game's vocabulary so the
-        # 'actionable_tips' stop suggesting tech-only artifacts (e.g. 'Add Docker')
-        # for HR or Psychology CVs. The single source of truth for the
-        # LLM call lives in `_run_audit_against_text` (shared with
-        # `_run_internal_audit` and the upcoming `/api/analyze-yaml`).
-        audit_game = get_game(domain_game)
-        return await _run_audit_against_text(
-            resume_text=resume_text,
-            jd_text=effective_jd,
-            audit_game=audit_game,
-        )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e)}
 
 
 # --- YAML editor: handlers + helpers moved to ``routes/yaml_editor_router.py``
