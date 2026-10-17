@@ -12,7 +12,6 @@ const TECH_STACK = [
   { name: 'TypeScript', iconUrl: 'https://cdn.simpleicons.org/typescript/3178C6' },
   { name: 'Tailwind CSS', iconUrl: 'https://cdn.simpleicons.org/tailwindcss/06B6D4' },
   { name: 'FastAPI', iconUrl: 'https://cdn.simpleicons.org/fastapi/009688' },
-  { name: 'Google Gemini', iconUrl: 'https://cdn.simpleicons.org/googlegemini/8E75B2' },
   { name: 'Python', iconUrl: 'https://cdn.simpleicons.org/python/3776AB' },
 ] as const;
 
@@ -20,7 +19,7 @@ const FEATURES = [
   {
     title: 'Generación con IA',
     titleClass: 'text-primary',
-    body: 'Subís tu CV maestro y la descripción de la vacante. Gemini reescribe la estructura mapeando cada skill y proyecto a los keywords exactos del algoritmo — sin inventar métricas.',
+    body: 'Subís tu CV maestro y la descripción de la vacante. La IA que configures reescribe la estructura mapeando cada skill y proyecto a los keywords exactos del algoritmo — sin inventar métricas.',
   },
   {
     title: 'Auditoría ATS',
@@ -120,9 +119,9 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             transition={{ delay: 0.2 }}
             className="text-lg md:text-2xl font-medium max-w-2xl text-muted-foreground mt-8 mb-12 leading-relaxed"
           >
-            Subí tu CV maestro, pegá la descripción de la vacante y nuestra IA
-            (Gemini) genera un PDF ATS-friendly listo para enviar. Después podés
-            editar el YAML directamente, auditarlo contra el sistema ATS o
+            Subí tu CV maestro, pegá la descripción de la vacante y la IA que
+            vos configures genera un PDF ATS-friendly listo para enviar. Después
+            podés editar el YAML directamente, auditarlo contra el sistema ATS o
             traducirlo al inglés — sin volver a empezar.
           </motion.p>
           <motion.div
