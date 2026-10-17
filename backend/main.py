@@ -263,15 +263,14 @@ async def call_llm_api(prompt_text: str) -> str:
     ``application.services.llm_orchestrator.LLMOrchestrator``. Each
     provider is its own adapter under ``adapters/llm/``; the
     orchestrator owns the fallback policy and timeouts.
-    """
-    from adapters.llm.factory import build_llm_providers
-    from application.services.llm_orchestrator import LLMOrchestrator
 
-    providers = build_llm_providers()
-    print(f"[LLM] Iniciando cascada con {len(providers)} proveedor(es): "
-          f"{[p.name for p in providers]}")
-    orchestrator = LLMOrchestrator(providers)
-    return await orchestrator.complete(prompt_text)
+    We delegate to the module-level ``_llm_orchestrator`` singleton
+    (built once at app startup, lines 173-178) so we don't re-construct
+    the provider cascade on every call. Each provider adapter loads
+    its SDK / reads env vars / opens an HTTP client at init — that work
+    is expensive and was previously duplicated on every LLM call.
+    """
+    return await _llm_orchestrator.complete(prompt_text)
 
 
 # In-memory cache to avoid re-extracting LinkedIn on every refinement pass.
