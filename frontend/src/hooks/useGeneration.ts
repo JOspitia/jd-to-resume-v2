@@ -3,6 +3,7 @@ import type { RefObject } from 'react';
 import type { Profile } from './useProfile';
 import type { Audit } from './useAudit';
 import type { YamlEditorOps } from './useYamlEditor';
+import { apiUrl } from '../lib/api';
 
 /**
  * useGeneration — T2 of the UX refactor (specs S1, S4, S6).
@@ -210,7 +211,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     }
 
     try {
-      const response = await fetch("http://localhost:8000/api/generate", {
+      const response = await fetch(apiUrl("/api/generate"), {
         method: "POST",
         body: formData,
       });
@@ -260,7 +261,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
                 }
 
                 if (data.download_url) {
-                  const fullUrl = `http://localhost:8000${data.download_url}`;
+                  const fullUrl = apiUrl(data.download_url);
                   setDownloadUrl(fullUrl);
                   // Extract and store just the filename for future refinement passes
                   const filename = data.download_url.split('/').pop() || null;

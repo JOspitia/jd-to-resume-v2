@@ -8,6 +8,7 @@ import { useGeneration } from './hooks/useGeneration';
 import { useYamlEditor } from './hooks/useYamlEditor';
 import type { Generation } from './hooks/useGeneration';
 import type { YamlEditorOps } from './hooks/useYamlEditor';
+import { apiUrl } from './lib/api';
 
 import { Section } from './components/Section';
 import { ProfileSelector } from './components/ProfileSelector';
@@ -83,7 +84,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     audit.resetAudit();
     yamlEditor.resetYamlEditor();
     try {
-      await fetch('http://localhost:8000/api/clear-cache', { method: 'POST' });
+      await fetch(apiUrl('/api/clear-cache'), { method: 'POST' });
     } catch (e) {
       console.error('No se pudo limpiar la caché del backend:', e);
     }

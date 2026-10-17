@@ -3,6 +3,7 @@ import type { Profile } from './useProfile';
 import type { Generation } from './useGeneration';
 import type { Audit } from './useAudit';
 import { validateYaml } from '../lib/yamlValidator';
+import { apiUrl } from '../lib/api';
 
 /**
  * useYamlEditor — T3 of the UX refactor (specs S5, S6).
@@ -115,7 +116,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
         if (domainGame) repairFormData.append('domain_game', domainGame);
 
         const repairRes = await fetch(
-          'http://localhost:8000/api/repair-yaml',
+          apiUrl('/api/repair-yaml'),
           { method: 'POST', body: repairFormData },
         );
         if (!repairRes.ok) {
@@ -209,7 +210,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      const res = await fetch('http://localhost:8000/api/render-from-yaml', {
+      const res = await fetch(apiUrl('/api/render-from-yaml'), {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -225,7 +226,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       }
       const downloadPath: string = data.download_url;
       const filename: string = data.filename || downloadPath.split('/').pop() || '';
-      setDownloadUrl(`http://localhost:8000${downloadPath}`);
+      setDownloadUrl(apiUrl(downloadPath));
       setGeneratedPdfFilename(filename);
       setStatus('success');
       setStepMessage('CV renderizado');
@@ -250,7 +251,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       // visible. Matches the original WIP-yaml spec T9.
       if (autoValidateATS) {
         try {
-          const auditResp = await fetch(`http://localhost:8000${downloadPath}`);
+          const auditResp = await fetch(apiUrl(downloadPath));
           if (!auditResp.ok) {
             throw new Error(`audit fetch failed: ${auditResp.status}`);
           }
@@ -307,7 +308,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      const res = await fetch('http://localhost:8000/api/analyze-yaml', {
+      const res = await fetch(apiUrl('/api/analyze-yaml'), {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -371,7 +372,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       formData.append('yaml_content', preRepairYaml);
       if (domainGame) formData.append('domain_game', domainGame);
 
-      const res = await fetch('http://localhost:8000/api/repair-yaml', {
+      const res = await fetch(apiUrl('/api/repair-yaml'), {
         method: 'POST',
         body: formData,
       });

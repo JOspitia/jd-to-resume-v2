@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { Profile } from './useProfile';
+import { apiUrl } from '../lib/api';
 
 /**
  * useAudit — T4 of the UX refactor (spec S6).
@@ -116,7 +117,7 @@ export function useAudit(
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second (1 minute) timeout
 
     try {
-      const res = await fetch("http://localhost:8000/api/analyze-ats", {
+      const res = await fetch(apiUrl("/api/analyze-ats"), {
         method: "POST",
         body: formData,
         signal: controller.signal,
