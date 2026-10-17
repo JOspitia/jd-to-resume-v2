@@ -164,13 +164,15 @@ export function useAudit(
           format: data.ats_formatting_score ?? 0,
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        setAtsErrorMessage("La solicitud de análisis ATS agotó el tiempo de espera (1 min). Por favor reintenta.");
-      } else {
-        setAtsErrorMessage(err.message || "Ocurrió un error inesperado al analizar el ATS.");
-      }
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const message = err instanceof Error ? err.message : "Ocurrió un error inesperado al analizar el ATS.";
+      setAtsErrorMessage(
+        isAbort
+          ? "La solicitud de análisis ATS agotó el tiempo de espera (1 min). Por favor reintenta."
+          : message
+      );
       setAtsStatus('error');
     }
   };

@@ -329,8 +329,8 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
           }
         }
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || "An unexpected error occurred.");
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "An unexpected error occurred.");
       setStatus('error');
     } finally {
       // The AbortController timeout is one-shot — always clear it so

@@ -264,11 +264,13 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
           console.warn('[audit-after-render] failed (silent):', auditErr);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearTimeout(timeoutId);
-      const msg = err.name === 'AbortError'
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const message = err instanceof Error ? err.message : 'Error desconocido al renderizar desde YAML.';
+      const msg = isAbort
         ? 'El render desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
-        : (err.message || 'Error desconocido al renderizar desde YAML.');
+        : message;
       setYamlError(msg);
       setStatus('error');
     }
@@ -338,11 +340,13 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       // Generar CV to render with the audited YAML.
       setYamlReady(false);
       setEditBeforeGenerate(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearTimeout(timeoutId);
-      const msg = err.name === 'AbortError'
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const message = err instanceof Error ? err.message : 'Error desconocido al auditar desde YAML.';
+      const msg = isAbort
         ? 'La auditoría desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
-        : (err.message || 'Error desconocido al auditar desde YAML.');
+        : message;
       setYamlError(msg);
       setAtsStatus('error');
     }
@@ -434,8 +438,8 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
         noticeParts.push('Errores restantes que la IA no pudo resolver: ' + data.schema_errors.join(' · '));
       }
       setYamlRepairNotice(noticeParts.join('\n') || (data?.ok ? 'YAML válido — sin cambios.' : 'Reparación parcial.'));
-    } catch (err: any) {
-      setYamlError(err.message || 'Error al reparar el YAML.');
+    } catch (err: unknown) {
+      setYamlError(err instanceof Error ? err.message : 'Error al reparar el YAML.');
     } finally {
       setYamlRepairing(false);
     }
