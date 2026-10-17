@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ShieldCheck, BarChart3, AlertCircle, CheckCircle2, AlertTriangle, Sparkles, Edit3, RefreshCw } from 'lucide-react';
 
+import type { AuditData } from '../types/audit';
+
 /**
  * AuditPanel — T13 of the UX refactor (specs S4, S6).
  *
@@ -11,7 +13,7 @@ import { ShieldCheck, BarChart3, AlertCircle, CheckCircle2, AlertTriangle, Spark
 
 export type AuditPanelProps = {
   atsStatus: 'idle' | 'analyzing' | 'success' | 'error';
-  atsData: any | null;
+  atsData: AuditData | null;
   atsErrorMessage: string;
   selectedKeywords: string[];
   onToggleKeyword: (keyword: string) => void;

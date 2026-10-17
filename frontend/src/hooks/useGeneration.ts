@@ -4,6 +4,7 @@ import type { Profile } from './useProfile';
 import type { Audit } from './useAudit';
 import type { YamlEditorOps } from './useYamlEditor';
 import { apiUrl } from '../lib/api';
+import type { AuditData } from '../types/audit';
 
 /**
  * useGeneration — T2 of the UX refactor (specs S1, S4, S6).
@@ -80,15 +81,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
   // `forceTranslateToEnglish` is set on click and reset in handleGenerate's finally block.
   const [forceTranslateToEnglish, setForceTranslateToEnglish] = useState<boolean>(false);
   const [lastOutputLanguage, setLastOutputLanguage] = useState<OutputLanguage>('unknown');
-  const [auditScores, setAuditScores] = useState<{
-    ats_score?: number;
-    ai_detection_score?: number;
-    match_level?: string;
-    ai_tone_verdict?: string;
-    ats_formatting_score?: number;
-    matched_keywords?: string[];
-    missing_keywords?: string[];
-  } | null>(null);
+  const [auditScores, setAuditScores] = useState<AuditData | null>(null);
   const [translationMeta, setTranslationMeta] = useState<{
     source_language?: string;
     target_language?: string;

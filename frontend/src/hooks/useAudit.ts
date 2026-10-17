@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { Profile } from './useProfile';
 import { apiUrl } from '../lib/api';
+import type { AuditData } from '../types/audit';
 
 /**
  * useAudit — T4 of the UX refactor (spec S6).
@@ -39,7 +40,7 @@ export function useAudit(
   const { file, jd, domainGame } = profile;
 
   const [atsStatus, setAtsStatus] = useState<AuditStatus>('idle');
-  const [atsData, setAtsData] = useState<any | null>(null);
+  const [atsData, setAtsData] = useState<AuditData | null>(null);
   const [atsErrorMessage, setAtsErrorMessage] = useState('');
 
   // Score history — tracks ATS evolution across regeneration versions
