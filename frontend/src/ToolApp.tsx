@@ -78,7 +78,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
    * cache. Lives here because it is the one handler that touches several
    * hooks at once.
    */
-  const handleResetProcess = async () => {
+  const handleResetProcess = useCallback(async () => {
     profile.resetProfile();
     generation.resetGeneration();
     audit.resetAudit();
@@ -88,7 +88,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     } catch (e) {
       console.error('No se pudo limpiar la caché del backend:', e);
     }
-  };
+  }, [profile, generation, audit, yamlEditor]);
 
   return (
     <div className="min-h-screen text-foreground flex flex-col items-center pt-10 pb-44 px-4 md:px-8 selection:bg-primary selection:text-primary-foreground relative">
