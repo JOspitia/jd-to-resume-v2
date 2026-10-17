@@ -21,6 +21,7 @@ import { YamlEditorPanel } from './components/YamlEditorPanel';
 import { AuditPanel } from './components/AuditPanel';
 import { PhotoField } from './components/PhotoField';
 import { Button } from './components/ui/Button';
+import { ThemeToggle } from './components/ThemeToggle';
 
 /**
  * ToolApp — T2 of the UX refactor (specs S1-S12).
@@ -110,6 +111,11 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
         >
           <RotateCcw className="w-3.5 h-3.5" /> Nuevo
         </Button>
+      </div>
+
+      {/* Theme toggle — top right corner of ToolApp */}
+      <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
+        <ThemeToggle />
       </div>
 
       {/* Compact header (was a 7xl hero, now 2xl-3xl) — spec S1 */}

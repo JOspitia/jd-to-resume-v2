@@ -4,6 +4,7 @@ import { ArrowRight, Code, Sparkles } from 'lucide-react';
 import { Button, buttonVariants } from './components/ui/Button';
 import { Card } from './components/ui/Card';
 import { Badge } from './components/ui/Badge';
+import { ThemeToggle } from './components/ThemeToggle';
 
 const TECH_STACK = [
   { name: 'React', iconUrl: 'https://cdn.simpleicons.org/react/61DAFB' },
@@ -89,6 +90,9 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
         >
           <Code className="w-5 h-5" aria-hidden="true" /> GitHub
         </a>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+        </div>
       </nav>
 
       <div className="w-full max-w-7xl mx-auto px-6 md:px-12 flex flex-col items-center mt-12 md:mt-24 space-y-24">
