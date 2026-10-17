@@ -300,15 +300,13 @@ async def extract_linkedin_profile_data(linkedin_url: str) -> str:
 
 
 # --- YAML editor: handlers + helpers moved to ``routes/yaml_editor_router.py``
-# and ``application/services/yaml_editor_service.py``. The legacy module-level
-# helpers below are kept as backward-compat shims because existing tests
-# (notably ``tests/test_content_drift.py``) still import them from ``main``.
+# and ``application/services/yaml_editor_service.py``. The two legacy
+# module-level helpers below are kept as backward-compat shims because
+# ``tests/test_content_drift.py`` imports them from ``main`` (this file
+# is the import target the docstring points readers at).
 from application.services.yaml_editor_service import (
-    parse_yaml_safe as _parse_yaml_safe,
-    validate_yaml_schema as _validate_yaml_schema,
     content_tokens as _content_tokens,
     content_drift as _content_drift,
-    strip_yaml_fences as _strip_yaml_fences,
 )
 
 
