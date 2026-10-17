@@ -98,3 +98,47 @@ Migrado a `import.meta.env.VITE_API_BASE_URL` con helper
 - **Vitest + RTL setup**: no hay test infra en frontend.
 - **`tests/test_yaml_endpoints.py`** legacy: roto desde el hex
   split pero no recolectado. Cleanup pendiente.
+
+## 2026-10-17 — Sesión "Frontend code review"
+
+**Tipo:** bug-fix + refactor (frontend).
+
+### Bugs
+
+- **BUG-01**: `/api/generate` no tenía `AbortController` ni timeout, a diferencia de `analyze-ats` y `render-from-yaml` que ya usan 60s. SSE backend hung podía dejar requests abiertas indefinidamente. Fix: AbortController con 120s ceiling + `clearTimeout` en finally.
+- **BUG-02**: closure de `forceTranslateToEnglish` (state de React) podía capturar el valor viejo cuando el usuario hacía click en "Translate to English" inmediatamente antes de `handleGenerate`. Fix: usar `shouldTranslate` (variable local ya resuelta param > state) en vez del state directo.
+- **BUG-03**: 4 listas en `AuditPanel.tsx` usaban `key={i}` (índice de array) en `map` callbacks. Para listas interactivas (botones de keywords con checkbox, labels de tips) el índice como key es frágil: si el backend reordena keywords en el próximo audit, los checkboxes pueden quedar marcando valores equivocados. Fix: `key={kw}` / `key={tip}` en las 4 listas. También removimos el `, i: number` parameter ya inutilizado.
+- **BUG-04**: `useProfile.ts` revocaba la Object URL de la foto en 3 sitios (manual en `handlePhotoChange`, manual en `clearPhoto`, cleanup en `useEffect`). El cleanup capturaba el mismo valor que las manuales, revocando doble. Fix: borrar las manuales, dejar el `useEffect` cleanup como único punto de revocación (cubre los 3 escenarios: cambio de foto, clear, unmount).
+
+### Malas prácticas
+
+- **MP-02**: 5 `catch (err: any)` en `useGeneration`, `useYamlEditor`, `useAudit`. Fix: `catch (err: unknown)` + narrowing explícito con `err instanceof DOMException && err.name === 'AbortError'` para aborts y `err instanceof Error ? err.message : fallback` para mensajes. TypeScript ahora chequea los accesos.
+- **MP-03**: `let interval: any` en `useGeneration` (timer de elapsedSeconds). Fix: `ReturnType<typeof setInterval> | null`.
+- **MP-04**: `handleResetProcess` en `ToolApp` era función inline recreada en cada render, forzando re-render de `ResultsPanel` aunque no cambiara. Fix: envuelta en `useCallback` con deps `[profile, generation, audit, yamlEditor]`.
+- **MP-05**: `resetProfile` mezcla prefs de sesión (theme, fit, page break) con flags de comportamiento (`strictEditsOnly`, `extractLinkedinInfo`). Documentamos explícitamente en el JSDoc qué sobrevive reset y por qué (preservando v2.5 UX byte-for-byte sin tocar comportamiento).
+
+### Type safety (`any` → interface)
+
+- **MP-01 + DUP-03**: el shape del response de `/api/analyze-ats` estaba declarado 3 veces con tipos parciales o `any` (`useAudit.ts:42`, `AuditPanel.tsx:14`, `useGeneration.ts:83-91`). Fix: extraer `AuditData` interface en `frontend/src/types/audit.ts` (8 campos opcionales) y migrar los 3 sitios. Si el backend agrega un campo nuevo, modificar solo `AuditData` y TS avisa a cada consumidor.
+
+### Código duplicado
+
+- **DUP-01**: bloque "degenerate-output guard" (cuenta líneas con contenido + threshold 40% con floor de 3) aparecía idéntico entre `handleRenderFromYaml` y `handleRepairYaml`, solo difería en el mensaje. Fix: extraer `validateRepairOutput(repairedYaml, originalYaml)` como top-level helper que retorna `{ ok: true } | { ok: false; message: string }`.
+- **DUP-02**: 3 endpoints repetían el patrón `new AbortController + setTimeout(controller.abort, 60000) + fetch + clearTimeout`. Fix: helper `fetchWithTimeout(url, options, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS = 60_000)` en `lib/api.ts` + export `SSE_FETCH_TIMEOUT_MS = 120_000` por si migramos SSE después.
+
+### `key={i}` extras (revisión, no modificados)
+
+- `ScoreHistory.tsx:33` y 5 sitios en `YamlFormEditor.tsx`: NO son el mismo anti-pattern que BUG-03. `ScoreHistory` es display-only. `YamlFormEditor` tiene callbacks de update posicionales (`data.map((e, idx) => idx === i ? ...`) que requieren index tracking. Cambiar a keys estables requeriría rediseñar las callbacks — fuera de scope.
+
+### Métricas
+
+- Tests backend: 222/222 sigue verde.
+- Sin cambios en backend.
+- 2 archivos nuevos: `frontend/src/types/audit.ts`, ninguno en backend.
+- 0 `catch (err: any)`, 0 `any` en shapes de audit (los 3 sitios migrados).
+
+### Pendiente (no bloqueante)
+
+- `tests/test_yaml_endpoints.py` legacy roto: no recolectado, explota si se corre puntual. Cleanup pendiente.
+- MP-01 cosmetic: imports no-lazy restantes en `main.py`.
+- Vitest + RTL setup: sigue sin test infra frontend.
