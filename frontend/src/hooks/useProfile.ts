@@ -75,21 +75,26 @@ export function useProfile() {
       setPhotoError('La foto supera el límite de 5 MB.');
       return;
     }
-    // Revoke the previous object URL so repeated picks do not leak memory.
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    // The previous object URL is revoked by the effect cleanup below
+    // whenever ``photoPreview`` changes — no manual revoke needed here,
+    // which used to double-revoke the same URL.
     setPhoto(picked);
     setPhotoPreview(URL.createObjectURL(picked));
   };
 
   const clearPhoto = () => {
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    // Effect cleanup revokes the active URL when ``photoPreview`` flips
+    // back to null; no manual revoke needed here either.
     setPhoto(null);
     setPhotoPreview(null);
     setPhotoError('');
     if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
-  // Release the object URL when the hook unmounts.
+  // Release the active object URL whenever the user picks a different
+  // photo, clears it, or unmounts. Single source of truth — the manual
+  // revokes that used to live in handlePhotoChange / clearPhoto would
+  // double-revoke the same URL on every photo swap.
   useEffect(() => {
     return () => {
       if (photoPreview) URL.revokeObjectURL(photoPreview);
