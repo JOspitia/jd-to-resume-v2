@@ -103,6 +103,12 @@ class LinkedInService:
     ) -> None:
         self._strategies: list[LinkedInScraper] = list(strategies)
         self._llm_call = llm_call
+        # Store the cache *by reference*, not by copy — this is intentional.
+        # ``backend/main.py`` passes a module-level dict into every fresh
+        # ``LinkedInService`` instance so the cache survives across the
+        # per-request service re-instantiation. If callers copy here instead
+        # (e.g. ``dict(cache)`` or ``cache.copy()``), the cache never persists
+        # between calls and every LinkedIn extraction re-pays the full cost.
         self._cache: dict[str, str] = cache if cache is not None else {}
 
     @property
