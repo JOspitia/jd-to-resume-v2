@@ -71,9 +71,13 @@ class GenerationService:
         self,
         storage: ResumeStorage,
         llm_orchestrator: LLMOrchestrator,
+        audit_service: Optional["AuditService"] = None,
     ) -> None:
         self._storage = storage
         self._llm = llm_orchestrator
+        # Audit service is optional: if not injected, the auto re-audit
+        # on force_language='en' is silently skipped.
+        self._audit_service = audit_service
 
     # ------------------------------------------------------------------ #
     # Public streaming entry point
@@ -656,17 +660,24 @@ IMPORTANT:
 
         Used by the generation pipeline's auto re-audit step (REQ-4) when
         ``force_language='en'`` triggers the translation path.
+
+        Delegates to the injected ``AuditService``. ``custom_instructions``
+        is part of the legacy signature but the audit pipeline today only
+        uses ``jd``; it stays for backward compat.
         """
-        from main import _run_audit_against_text
-        # Extract text from the rendered PDF and feed the audit pipeline.
-        resume_text = _get_resume_parser().extract_text(pdf_path)
+        if self._audit_service is None:
+            raise RuntimeError(
+                "GenerationService.run_internal_audit called without an "
+                "AuditService wired in. Pass audit_service=... to the "
+                "constructor."
+            )
         effective_jd = (
             (jd or "").strip()
             or "Optimización general y mejoramiento de calidad del CV"
         )
         audit_game = get_game(domain_game)
-        return await _run_audit_against_text(
-            resume_text=resume_text,
+        return await self._audit_service.audit_pdf(
+            pdf_path=pdf_path,
             jd_text=effective_jd,
             audit_game=audit_game,
         )
