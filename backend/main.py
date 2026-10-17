@@ -104,7 +104,15 @@ async def enforce_rate_limit(request: Request, scope: str) -> None:
             detail=f"Rate limit exceeded for {scope!r}: {limit} requests per {window:.0f}s",
         )
     hits.append(now)
-    _RL_HITS[key] = hits
+    # Mirror the 429-path's cleanup: only persist the key when its list is
+    # non-empty. In the happy path ``hits`` is always non-empty after the
+    # append above, but applying the symmetry keeps the two branches
+    # equivalent and protects future refactors that might skip the append
+    # (e.g. when no counter is incremented).
+    if hits:
+        _RL_HITS[key] = hits
+    else:
+        _RL_HITS.pop(key, None)
 
 from dotenv import load_dotenv
 from photo_helpers import save_photo as _save_photo
