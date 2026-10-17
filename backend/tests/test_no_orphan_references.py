@@ -33,6 +33,7 @@ themselves) so it can run on every push and stay below a second.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 from pathlib import Path
@@ -173,12 +174,22 @@ def test_main_module_imports_without_nameerror_on_helpers() -> None:
         f"    print('FAIL', {str(MAIN_PATH)!r}, e)\n"
         "    sys.exit(2)\n"
     )
+    # Inject a dummy LLM key so the module-load LLMOrchestrator
+    # construction at module-init time does not raise ValueError when
+    # no real keys are configured in this environment. The key value
+    # is irrelevant — the subprocess never makes an actual LLM call.
+    test_env = {
+        "LLM_API_KEY": "test-no-llm-call-expected",
+        "PATH": os.environ.get("PATH", ""),
+        "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+    }
     proc = __import__("subprocess").run(
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
         timeout=30,
         cwd=str(MAIN_PATH.parent.parent),
+        env=test_env,
     )
     assert proc.returncode == 0, (
         f"`import main` raised NameError in a clean subprocess. "
