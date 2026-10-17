@@ -5,6 +5,10 @@ import {
 import { ScoreHistory } from './ScoreHistory';
 import type { ScoreEntry } from '../hooks/useAudit';
 
+import { Card } from './ui/Card';
+import { Button, buttonVariants } from './ui/Button';
+import { Badge } from './ui/Badge';
+
 /**
  * ResultsPanel — T8 of the UX refactor (specs S4, S8).
  *
@@ -21,6 +25,11 @@ import type { ScoreEntry } from '../hooks/useAudit';
  *   4. Audit group — AUDITAR ATS + Translate to English (re-run CV)
  *   5. Reset — full-width secondary, only when the user wants a clean slate
  *   6. Score history timeline (only if there's history to show)
+ *
+ * PR5 polish: migrated all rm-* classes to <Card> / <Button> / <Badge>
+ * primitives + buttonVariants() helper for the inline anchors (preview /
+ * download). Semantic colors now flow from the token system so the
+ * dark mode toggle (PR6) will re-tint without touching this file.
  */
 
 type AuditScores = {
@@ -61,20 +70,19 @@ export function ResultsPanel({
   return (
     <AnimatePresence mode="popLayout">
       {status === 'success' && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          className="rm-box p-8 md:p-10 bg-[#f0fdf4] space-y-6"
+        <Card
+          variant="success"
+          size="xl"
+          className="space-y-6"
         >
           {/* 1. Headline */}
           <div className="flex items-center gap-4">
-            <div className="shrink-0 bg-white rounded-full p-3 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]">
-              <CheckCircle className="w-10 h-10 text-green-600" />
+            <div className="shrink-0 bg-card rounded-full p-3 border-2 border-border shadow-neo">
+              <CheckCircle className="w-10 h-10 text-success" aria-hidden="true" />
             </div>
             <div>
               <h3 className="text-2xl md:text-3xl font-bold font-serif">¡CV generado!</h3>
-              <p className="text-sm md:text-base text-gray-700">
+              <p className="text-sm md:text-base text-muted-foreground">
                 Tu PDF adaptado y ATS-friendly está listo para revisar.
               </p>
             </div>
@@ -82,14 +90,16 @@ export function ResultsPanel({
 
           {/* 2. Primary CTA — edit the YAML that produced this CV */}
           {hasYamlSnapshot && (
-            <button
+            <Button
               onClick={onReopenYamlEditor}
-              title="Abre el editor YAML con el contenido que generó este CV"
-              className="rm-btn w-full bg-emerald-600 text-white hover:bg-emerald-700 px-6 py-4 text-base font-bold flex items-center justify-center gap-3"
+              variant="success"
+              size="md"
+              className="w-full"
+              aria-label="Abre el editor YAML con el contenido que generó este CV"
             >
-              <Code2 className="w-5 h-5" />
+              <Code2 className="w-5 h-5" aria-hidden="true" />
               ✏️ Editar YAML directamente
-            </button>
+            </Button>
           )}
 
           {/* 3. Download group */}
@@ -98,86 +108,96 @@ export function ResultsPanel({
               href={`${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}inline=1`}
               target="_blank"
               rel="noreferrer"
-              className="rm-btn bg-white hover:bg-gray-50 flex justify-center items-center gap-2 px-4 py-3 text-sm font-bold"
+              aria-label="Previsualizar el PDF generado"
+              className={buttonVariants({ variant: 'outline', size: 'md' })}
             >
-              <Eye className="w-4 h-4" /> Preview
+              <Eye className="w-4 h-4" aria-hidden="true" /> Preview
             </a>
             <a
               href={downloadUrl}
               download="Tailored_Resume.pdf"
               target="_blank"
-              className="rm-btn bg-orange-500 text-white hover:bg-orange-600 flex justify-center items-center gap-2 px-4 py-3 text-sm font-bold"
+              aria-label="Descargar el PDF generado"
+              className={buttonVariants({ variant: 'secondary', size: 'md' })}
             >
-              <Download className="w-4 h-4" /> Descargar PDF
+              <Download className="w-4 h-4" aria-hidden="true" /> Descargar PDF
             </a>
           </div>
 
           {/* 4. Audit + translate (re-run the pipeline) */}
           <div className="grid grid-cols-2 gap-3">
-            <button
+            <Button
               onClick={onAudit}
               disabled={atsStatus === 'analyzing'}
-              className="rm-btn bg-yellow-400 text-black hover:bg-yellow-500 disabled:opacity-60 disabled:cursor-not-allowed flex justify-center items-center gap-2 px-4 py-3 text-sm font-bold"
+              variant="warning"
+              size="md"
+              aria-label="Ejecutar auditoría ATS e IA sobre el CV generado"
             >
-              <BarChart3 className="w-4 h-4" />
+              <BarChart3 className="w-4 h-4" aria-hidden="true" />
               {atsStatus === 'analyzing' ? 'Auditando…' : 'Auditar ATS & IA'}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={onTranslate}
               disabled={lastOutputLanguage === 'en'}
-              title={
+              variant="success"
+              size="md"
+              aria-label={
                 lastOutputLanguage === 'en'
-                  ? 'CV already in English'
-                  : 'This may take 30-90s'
+                  ? 'El CV ya está en inglés'
+                  : 'Traducir el CV al inglés (puede tomar 30-90 segundos)'
               }
-              className="rm-btn bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 px-4 py-3 text-sm font-bold"
             >
-              <Languages className="w-4 h-4" />
+              <Languages className="w-4 h-4" aria-hidden="true" />
               {lastOutputLanguage === 'en' ? 'Ya en inglés' : 'Traducir a inglés'}
-            </button>
+            </Button>
           </div>
 
           {/* 5. Reset */}
-          <button
+          <Button
             onClick={onReset}
-            className="rm-btn w-full bg-rose-50 hover:bg-rose-100 border-rose-600 text-rose-800 flex justify-center items-center gap-2 px-4 py-2.5 text-xs font-bold shadow-[2px_2px_0px_0px_rgba(225,29,72,1)]"
+            variant="destructive"
+            size="sm"
+            className="w-full"
+            aria-label="Reiniciar todo el proceso"
           >
-            <RotateCcw className="w-4 h-4 text-rose-600" />
+            <RotateCcw className="w-4 h-4" aria-hidden="true" />
             Nuevo / Limpiar
-          </button>
+          </Button>
 
           {/* 6. Inline re-audit badge after a forced translation pass */}
           {auditScores && translationMeta?.forced && lastOutputLanguage === 'en' && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rm-box p-3 bg-white border-2 border-emerald-600 flex flex-wrap items-center justify-center gap-3"
+              className="flex flex-wrap items-center justify-center gap-3 bg-card p-3 border-2 border-success"
+              role="group"
+              aria-label="Resultados de la re-auditoría tras la traducción"
             >
-              <span className="font-mono font-bold text-[10px] uppercase text-emerald-900 tracking-wider">
+              <span className="font-mono font-bold text-[10px] uppercase text-foreground tracking-wider">
                 Re-audit (EN)
               </span>
               <span
-                className={`text-2xl font-black font-mono ${(auditScores.ats_score ?? 0) >= 80 ? 'text-green-600' : (auditScores.ats_score ?? 0) >= 60 ? 'text-yellow-600' : 'text-red-600'}`}
+                className={`text-2xl font-black font-mono ${(auditScores.ats_score ?? 0) >= 80 ? 'text-success' : (auditScores.ats_score ?? 0) >= 60 ? 'text-warning' : 'text-destructive'}`}
               >
                 ATS: {auditScores.ats_score ?? '-'}
               </span>
-              <span className="text-gray-300">|</span>
+              <span className="text-muted-foreground">|</span>
               <span
-                className={`text-2xl font-black font-mono ${(auditScores.ai_detection_score ?? 0) <= 20 ? 'text-green-600' : (auditScores.ai_detection_score ?? 0) <= 50 ? 'text-yellow-600' : 'text-red-600'}`}
+                className={`text-2xl font-black font-mono ${(auditScores.ai_detection_score ?? 0) <= 20 ? 'text-success' : (auditScores.ai_detection_score ?? 0) <= 50 ? 'text-warning' : 'text-destructive'}`}
               >
                 IA: {auditScores.ai_detection_score ?? '-'}
               </span>
               {auditScores.match_level && (
-                <span className="rm-tag bg-black text-white text-[10px] px-2 py-0.5 font-bold">
+                <Badge variant="default" size="sm" className="text-[10px]">
                   {auditScores.match_level}
-                </span>
+                </Badge>
               )}
             </motion.div>
           )}
 
           {/* 7. Score evolution across refinement passes */}
           <ScoreHistory entries={scoreHistory} />
-        </motion.div>
+        </Card>
       )}
     </AnimatePresence>
   );
