@@ -38,7 +38,7 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
       `}</style>
 
       {/* Navbar */}
-      <nav className="w-full max-w-7xl mx-auto px-6 md:px-12 py-6 flex justify-between items-center z-20">
+      <nav className="w-full max-w-7xl mx-auto px-6 md:px-12 py-6 flex justify-between items-center z-20" aria-label="Navegación principal">
         <div 
           className="rm-box px-4 py-2 font-black text-xl bg-white flex items-center gap-2"
           style={{ fontFamily: 'Helvetica, Arial, sans-serif' }}
@@ -52,7 +52,7 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
         </a>
       </nav>
 
-      <main className="w-full max-w-7xl mx-auto px-6 md:px-12 flex flex-col items-center mt-12 md:mt-24 space-y-24">
+      <div className="w-full max-w-7xl mx-auto px-6 md:px-12 flex flex-col items-center mt-12 md:mt-24 space-y-24">
         
         {/* HERO SECTION */}
         <section className="flex flex-col items-center text-center w-full">
@@ -123,10 +123,10 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
           </div>
         </section>
 
-      </main>
+      </div>
       
       {/* Footer */}
-      <footer className="w-full border-t-2 border-black bg-white mt-32">
+      <footer className="w-full border-t-2 border-black bg-white mt-32" aria-label="Pie de página">
         <div className="w-full max-w-7xl mx-auto p-12">
           <div className="flex flex-col md:flex-row justify-between items-center gap-8">
             <div 

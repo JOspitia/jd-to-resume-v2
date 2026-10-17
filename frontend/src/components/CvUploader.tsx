@@ -83,6 +83,7 @@ export function CvUploader({
           ref={fileInputRef}
           accept="application/pdf"
           onChange={onFileChange}
+          aria-label="Subir currículum en formato PDF"
         />
         {file ? (
           <>
