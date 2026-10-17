@@ -95,7 +95,7 @@ export function ResultsPanel({
           {/* 3. Download group */}
           <div className="grid grid-cols-2 gap-3">
             <a
-              href={downloadUrl}
+              href={`${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}inline=1`}
               target="_blank"
               rel="noreferrer"
               className="rm-btn bg-white hover:bg-gray-50 flex justify-center items-center gap-2 px-4 py-3 text-sm font-bold"

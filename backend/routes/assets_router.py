@@ -28,12 +28,19 @@ def build_assets_router(storage: ResumeStorage) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["assets"])
 
     @router.get("/download/{filename}")
-    async def download_resume(filename: str):
+    async def download_resume(filename: str, inline: int = 0):
         """Serve a generated PDF. Path-traversal hardened in the adapter.
 
         Uses the storage's resolved filesystem path so ``FileResponse``
         can serve via Starlette's streaming layer (which calls ``stat``
         on the path and rejects BytesIO).
+
+        ``?inline=1`` switches the response header from
+        ``attachment`` to ``inline`` so the browser's PDF viewer
+        (target="_blank") renders the file in-tab instead of treating
+        the navigation as a download. Default (``inline=0``) keeps the
+        legacy ``attachment; filename=...`` behaviour for direct curl /
+        wget / bot fetches.
         """
         # Use the storage's own validation (regex + is_relative_to).
         try:
@@ -43,10 +50,12 @@ def build_assets_router(storage: ResumeStorage) -> APIRouter:
         except FileNotFoundError as err:
             raise HTTPException(status_code=404, detail="File not found") from err
 
+        disposition = "inline" if inline else "attachment"
         return FileResponse(
             str(fs_path),
-            filename=filename,
+            filename=filename if not inline else None,
             media_type="application/pdf",
+            headers={"content-disposition": f'{disposition}; filename="{filename}"'},
         )
 
     @router.post("/clear-cache")
