@@ -47,10 +47,74 @@ async def _persist_uploaded_photo(photo):
         return None
     content = await photo.read()
     return _save_photo(content, _PHOTOS_DIR)
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIASGIMiddleware
+from slowapi import Limiter  # noqa: F401 — re-exported for backward compat (Limiter config)
 from slowapi.util import get_remote_address
+
+
+# Manual rate-limit helper. We don't use slowapi's middleware or its
+# @limiter.limit decorators because:
+#
+#   * The ASGI middleware tries to inject rate-limit headers AFTER the
+#     handler has already started the response — with SSE endpoints
+#     (``/api/generate``) this corrupts the stream and the browser sees
+#     ``net::ERR_FAILED``.
+#   * The decorator-only approach loses its closure when FastAPI
+#     re-registers the route, so the auto-check never runs.
+#
+# Instead: every LLM-expensive endpoint calls ``await enforce_rate_limit``
+# explicitly with a unique ``scope`` label. The counter resets after
+# the configured window expires.
+_RL_HITS: dict[str, list[float]] = {}  # key -> list of monotonic timestamps
+
+
+async def enforce_rate_limit(request: Request, scope: str) -> None:
+    """Raise ``HTTPException(429)`` if the remote IP has exceeded the limit
+    in the configured window for ``scope``.
+
+    The limit comes from the env var ``RATE_LIMIT_DEFAULT`` (e.g.
+    ``"5/minute"``).
+
+    We previously raised ``slowapi.errors.RateLimitExceeded`` here, but the
+    upstream exception constructor expects a ``Limit`` object (with an
+    ``error_message`` attribute) rather than the raw string we parsed — that
+    raised ``AttributeError`` instead of 429, which the SSE-handling
+    frontend translated into a generic "Process Failed / network error".
+    ``HTTPException(429, ...)`` is what FastAPI's existing CORS and SSE
+    handlers already consume without surprises.
+    """
+    if not limiter.enabled:
+        return
+    from time import monotonic
+
+    raw = os.getenv("RATE_LIMIT_DEFAULT", "5/minute")
+    try:
+        count_str, _, window_str = raw.partition("/")
+        limit = int(count_str)
+        if window_str.startswith("minute"):
+            window = 60.0
+        elif window_str.startswith("second"):
+            window = 1.0
+        elif window_str.startswith("hour"):
+            window = 3600.0
+        else:
+            window = 60.0
+    except ValueError:
+        limit, window = 5, 60.0
+
+    ip = get_remote_address(request)
+    key = f"{scope}:{ip}"
+    now = monotonic()
+    hits = _RL_HITS.get(key, [])
+    # Drop hits outside the window.
+    hits = [t for t in hits if (now - t) < window]
+    if len(hits) >= limit:
+        _RL_HITS[key] = hits
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded for {scope!r}: {limit} requests per {window:.0f}s",
+        )
+    hits.append(now)
+    _RL_HITS[key] = hits
 
 from dotenv import load_dotenv
 from render_service import render_cv_with_rendercv
@@ -88,19 +152,37 @@ app.add_middleware(
     allow_credentials=False,
 )
 
-# Rate limiting (slowapi): protect every endpoint from runaway scripts that
-# could drain the user's LLM quota. The default ``RATE_LIMIT_DEFAULT`` is
-# conservative (5/minute per remote IP) and override-able via env. Use
-# ``RATELIMIT_ENABLED=0`` to disable entirely (e.g. local benchmarking).
+# Rate limiting: protect LLM-expensive endpoints from runaway scripts that
+# could drain the user's API quota.
+#
+# IMPORTANT: we intentionally do NOT use ``SlowAPIASGIMiddleware`` here.
+# That middleware tries to inject rate-limit response headers AFTER the
+# handler starts producing the response. With SSE endpoints
+# (``/api/generate``, ``/api/analyze-ats``, ``/api/render-from-yaml``)
+# the response has already started streaming by the time the middleware
+# tries to mutate headers — the browser sees a corrupt response
+# (``net::ERR_FAILED`` in DevTools) and the SSE connection drops. This is
+# a documented limitation of slowapi + Starlette SSE.
+#
+# We also do NOT use ``@limiter.limit(...)`` decorators on the handlers
+# themselves, because FastAPI re-registers the route after our composition
+# root wires the routers — the decorator loses its closure and the check
+# never runs.
+#
+# Instead, every LLM-expensive endpoint (and the ``/api/clear-cache`` shim
+# inside ``routes.assets_router``) calls ``await enforce_rate_limit``
+# explicitly with a unique ``scope`` label. The helper uses slowapi's
+# ``Limiter`` only as a config object (for the ``enabled`` flag and key
+# function); the real limit check is a tiny in-process dict kept in
+# ``_RL_HITS`` — no middleware, no decorator, full control of the
+# exception type (``HTTPException(429)``).
 _rl_default = os.getenv("RATE_LIMIT_DEFAULT", "5/minute")
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[_rl_default],
     enabled=os.getenv("RATELIMIT_ENABLED", "1") != "0",
 )
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIASGIMiddleware)
+app.state.limiter = limiter  # kept for backward-compat introspection in tests
 
 # --- Module-level paths (kept for backward compat with tests + scripts) ---
 # The values are owned by FilesystemStorage in the composition root below.
@@ -790,6 +872,7 @@ async def _run_internal_audit(
 
 @app.post("/api/generate")
 async def generate_resume(
+    request: Request,
     file: UploadFile,
     jd: Optional[str] = Form(None),
     target_role: Optional[str] = Form(None),
@@ -808,6 +891,9 @@ async def generate_resume(
     edit_before_generate: Optional[bool] = Form(False),
     photo: Optional[UploadFile] = File(None),
 ):
+    # Rate limit per remote IP (5/minute by default). See enforce_rate_limit
+    # comment for why we don't use slowapi's middleware/decorators.
+    await enforce_rate_limit(request, scope="generate")
     # Validate force_language early so unsupported values are rejected with HTTP 422
     # before any upload work or LLM call happens.
     if force_language is not None and force_language not in {"en"}:
@@ -862,10 +948,12 @@ async def generate_resume(
 
 @app.post("/api/analyze-ats")
 async def analyze_ats(
+    request: Request,
     file: UploadFile,
     jd: Optional[str] = Form(None),
     domain_game: Optional[str] = Form(None)
 ):
+    await enforce_rate_limit(request, scope="analyze-ats")
     # Validate domain_game (same contract as /api/generate).
     ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
     if domain_game is not None and domain_game not in ALLOWED_GAMES:
@@ -904,6 +992,7 @@ async def analyze_ats(
 
 @app.post("/api/render-from-yaml")
 async def render_from_yaml(
+    request: Request,
     yaml_content: str = Form(...),
     theme: Optional[str] = Form("sb2nov"),
     fit_single_page: Optional[bool] = Form(False),
@@ -913,6 +1002,7 @@ async def render_from_yaml(
     domain_game: Optional[str] = Form(None),
     photo: Optional[UploadFile] = File(None),
 ):
+    await enforce_rate_limit(request, scope="render-from-yaml")
     """
     Render-only endpoint: takes the YAML edited by the user, parses it, and
     renders the PDF using the same RenderCV / Playwright path that
@@ -1014,10 +1104,12 @@ async def render_from_yaml(
 
 @app.post("/api/analyze-yaml")
 async def analyze_yaml(
+    request: Request,
     yaml_content: str = Form(...),
     jd: Optional[str] = Form(None),
     domain_game: Optional[str] = Form(None),
 ):
+    await enforce_rate_limit(request, scope="analyze-yaml")
     """
     Audit-only endpoint for a user-edited YAML. No PDF render.
 
@@ -1312,9 +1404,11 @@ BROKEN YAML:
 
 @app.post("/api/repair-yaml")
 async def repair_yaml(
+    request: Request,
     yaml_content: str = Form(...),
     domain_game: Optional[str] = Form(None),
 ):
+    await enforce_rate_limit(request, scope="repair-yaml")
     """
     Repair a damaged YAML that the user edited in the YAML editor panel.
 
@@ -1488,31 +1582,6 @@ def _strip_yaml_fences(text: str) -> str:
             t = t[:-3].rstrip()
     return t
 
-
-@app.post("/api/clear-cache")
-async def clear_cache():
-    try:
-        deleted_count = 0
-        if os.path.exists(OUTPUT_DIR):
-            for fname in os.listdir(OUTPUT_DIR):
-                fpath = os.path.join(OUTPUT_DIR, fname)
-                if os.path.isfile(fpath):
-                    try:
-                        os.remove(fpath)
-                        deleted_count += 1
-                    except Exception as err:
-                        print(f"Could not remove {fpath}: {err}")
-        # Candidate photos live in a subdirectory, so the loop above (which
-        # only unlinks files) never reached them. Drop the whole directory.
-        photos_removed = _prune_photos(PHOTOS_DIR, keep=set())
-        return {
-            "status": "ok",
-            "deleted_files": deleted_count,
-            "deleted_photos": photos_removed,
-            "message": "Cache, CVs generados y fotos eliminados correctamente.",
-        }
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

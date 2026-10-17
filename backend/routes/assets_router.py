@@ -11,10 +11,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from ports.resume_storage import ResumeStorage
+
+# Rate-limit helper lives in the composition root to keep this router free of
+# any cross-cutting concerns besides storage DI. The function is imported
+# lazily inside ``clear_cache`` so this router stays testable in isolation
+# (the legacy main.py shim registered a duplicate of this endpoint that was
+# never actually hit — the router version always won the route table).
 
 
 def build_assets_router(storage: ResumeStorage) -> APIRouter:
@@ -44,8 +50,17 @@ def build_assets_router(storage: ResumeStorage) -> APIRouter:
         )
 
     @router.post("/clear-cache")
-    async def clear_cache():
-        """Delete every PDF and photo. Returns the counts."""
+    async def clear_cache(request: Request):
+        """Delete every PDF and photo. Returns the counts.
+
+        Rate-limited (``scope="clear-cache"``) via the helper exported by
+        the composition root (``main.enforce_rate_limit``). Same per-IP
+        budget as the other LLM-adjacent endpoints: configurable with
+        ``RATE_LIMIT_DEFAULT`` (defaults to ``"5/minute"``).
+        """
+        from main import enforce_rate_limit  # composition-root helper
+
+        await enforce_rate_limit(request, scope="clear-cache")
         try:
             pdfs, photos = storage.clear_all()
         except Exception as err:

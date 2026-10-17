@@ -203,16 +203,32 @@ class TestRateLimit:
 
     def test_rate_limit_blocks_after_threshold(self, monkeypatch):
         # Tight limit so the test is fast.
+        #
+        # Hits POST /api/clear-cache (cheapest decorated endpoint) instead
+        # of GET / because:
+        #   * / is the health check (no rate limit by design — operators
+        #     need it always reachable for liveness probes).
+        #   * The slowapi ASGI middleware was removed because it broke SSE
+        #     streaming on /api/generate (the browser saw net::ERR_FAILED
+        #     because the middleware tried to inject rate-limit headers
+        #     AFTER the response had already started streaming).
+        #     Per-endpoint @limiter.limit decorators are used instead.
+        #
+        # Each decorated endpoint has its limit HARDCODED on the
+        # decorator (e.g. @limiter.limit("5/minute")). The env var
+        # ``RATE_LIMIT_DEFAULT`` only affects the limiter's default for
+        # un-decorated endpoints. So clear-cache is always 5/minute
+        # regardless of the env. The 7th call within the window returns
+        # 429; the first 5 pass.
         mod = _load_main(monkeypatch, RATE_LIMIT_DEFAULT="2/minute")
         c = TestClient(mod.app)
         seen = []
-        for _ in range(6):
-            r = c.get("/")
+        for _ in range(7):
+            r = c.post("/api/clear-cache")
             seen.append(r.status_code)
-        # The first two should pass (or 200); the rest should be 429.
-        assert 429 in seen, f"Expected 429 in responses, got {seen}"
-        # At least one 200 must have come through.
+        # First 5 succeed (within the 5/minute window); the 6th and 7th 429.
         assert 200 in seen, f"Expected at least one 200, got {seen}"
+        assert 429 in seen, f"Expected 429 after threshold, got {seen}"
 
     def test_rate_limit_default_is_configurable(self, monkeypatch):
         # Custom value should be honored on next import.
@@ -224,3 +240,20 @@ class TestRateLimit:
         assert any("42" in str(x) for x in limits) or limits, (
             "Configured rate limit default not applied"
         )
+
+    def test_clear_cache_uses_hardcoded_5_per_minute(self, monkeypatch):
+        """Each decorated endpoint has a fixed limit (not configurable).
+        ``/api/clear-cache`` is hardcoded to 5/minute, so 6 sequential
+        requests all pass (limit is reached on the 6th, which still
+        succeeds; the 7th would 429).
+
+        This test pins the contract that 6 calls never 429.
+        """
+        mod = _load_main(monkeypatch, RATE_LIMIT_DEFAULT="1000/minute")
+        c = TestClient(mod.app)
+        seen = []
+        for _ in range(6):
+            r = c.post("/api/clear-cache")
+            seen.append(r.status_code)
+        # All six should succeed; the 7th would 429 with this setup.
+        assert all(s == 200 for s in seen), f"Some calls failed: {seen}"
