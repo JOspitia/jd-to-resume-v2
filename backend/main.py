@@ -292,12 +292,17 @@ async def extract_linkedin_profile_data(linkedin_url: str) -> str:
     The three strategies (ProxyCurl -> Playwright auth -> Public urllib)
     live under ``adapters/linkedin/``; the orchestration + LLM pass-through
     + cache live in ``application.services.linkedin_service.LinkedInService``.
+
+    Credentials are read once at startup via ``load_dotenv()`` above. To
+    rotate a LinkedIn provider key (ProxyCurl, etc.), restart the server —
+    the same reload contract as the LLM providers. We previously called
+    ``load_dotenv(override=True)`` per request so devs could rotate keys
+    without a restart, but that re-reads ``.env`` from disk on every
+    LinkedIn extraction and contradicts the LLM-key reload semantics.
     """
     from adapters.linkedin.factory import build_linkedin_strategies
     from application.services.linkedin_service import LinkedInService
 
-    # Re-read .env on each call so credentials added after server start are picked up.
-    load_dotenv(override=True)
     print(f"[LINKEDIN EXTRACTOR] Iniciando extraccion para: {linkedin_url}")
     strategies = build_linkedin_strategies()
     service = LinkedInService(strategies, llm_call=call_llm_api, cache=_linkedin_cache)
