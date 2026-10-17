@@ -5,7 +5,7 @@ backend.ports.resume_parser
 Port for parsing a resume PDF into plain text + structured header fields.
 
 One adapter today:
-    * PyMuPDFAdapter  (fitz.open + page.get_text() + /Link annotations)
+    * PyMuPDFAdapter  (pymupdf.open + page.get_text() + /Link annotations)
 
 Future adapter (out of scope): pdfplumber, Tika, an OCR pipeline for
 scanned PDFs.

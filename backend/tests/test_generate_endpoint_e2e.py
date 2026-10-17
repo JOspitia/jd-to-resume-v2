@@ -27,7 +27,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fitz  # PyMuPDF, used to build a real (tiny) test PDF
+import pymupdf  # PyMuPDF (formerly imported as `fitz`), used to build a real (tiny) test PDF
 import pytest
 from fastapi.testclient import TestClient
 
@@ -123,7 +123,7 @@ def valid_pdf(tmp_path: Path) -> bytes:
     """Generate a real, valid PDF using PyMuPDF. PyMuPDF will read it
     back without error, which is what the production code requires."""
     pdf_path = tmp_path / "input.pdf"
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((50, 50), "Jane Doe")
     page.insert_text((50, 80), "Backend Engineer with 5 years of experience.")

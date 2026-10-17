@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF (formerly imported as `fitz`)
 
 from ports.resume_parser import ResumeParser
 
@@ -57,7 +57,7 @@ class PyMuPDFParser:
         are surfaced as their real URLs in the extracted text. The LLM and
         the header extractor can then see them.
         """
-        doc = fitz.open(file_path)
+        doc = pymupdf.open(file_path)
         text_parts: list[str] = []
         for page in doc:
             text_parts.append(page.get_text())

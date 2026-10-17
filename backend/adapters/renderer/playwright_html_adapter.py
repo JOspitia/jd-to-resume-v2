@@ -86,10 +86,10 @@ def _check_profile_urls_not_fragmented(pdf_path: str, parsed_data: dict) -> None
     Silently no-ops on missing/invalid PDFs (the file may not yet exist
     when this is called from a test, or be corrupted mid-write).
     """
-    import fitz  # PyMuPDF
+    import pymupdf  # PyMuPDF (formerly imported as `fitz`)
 
     try:
-        doc = fitz.open(pdf_path)
+        doc = pymupdf.open(pdf_path)
     except Exception:
         # File missing or not a PDF — nothing to check.
         return

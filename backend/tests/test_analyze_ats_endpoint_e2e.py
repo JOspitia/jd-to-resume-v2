@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import fitz
+import pymupdf
 import pytest
 from fastapi.testclient import TestClient
 
@@ -59,7 +59,7 @@ class _StubLLMProvider:
 @pytest.fixture
 def valid_pdf(tmp_path: Path) -> bytes:
     pdf_path = tmp_path / "input.pdf"
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page()
     page.insert_text((50, 50), "Jane Doe")
     page.insert_text((50, 80), "Backend Engineer with 5 years of experience.")
