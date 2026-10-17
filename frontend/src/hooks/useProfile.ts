@@ -133,10 +133,36 @@ export function useProfile() {
   };
 
   /**
-   * Resets only the fields the pre-refactor `handleResetProcess` used to clear
-   * (file, JD, target role, contact URLs, domain, custom prompt and the
-   * YAML-mode flag). The layout/theme flags intentionally survive the reset,
-   * exactly as before.
+   * Resets the input fields for a new "CV run".
+   *
+   * **What this clears (per-process-input state):**
+   *   * uploaded PDF + candidate photo (both FormData artifacts)
+   *   * job-description / custom-requirements text, target role
+   *   * contact URLs (also dropped from localStorage)
+   *   * domain game, custom prompt, edit-before-generate flag
+   *
+   * **What this intentionally preserves (session-level preferences):**
+   *   * ``selectedTheme``     — the picked RenderCV theme is a visual
+   *                             preference, not per-CV.
+   *   * ``fitSinglePage``     — layout choice, not per-CV.
+   *   * ``pageBreakSection`` — ditto.
+   *
+   * **Behaviour-deprecated flags that ALSO survive reset, with rationale:**
+   *   * ``strictEditsOnly``        — surgical-edit mode. Choosing to
+   *                                  "rebuild every section" by default would
+   *                                  be surprising; we trust the user to
+   *                                  toggle it back when they want it. Same
+   *                                  semantic as the pre-refactor reset.
+   *   * ``extractLinkedinInfo``    — opt-in enrichment that re-reads the
+   *                                  LinkedIn profile on each run; default-off
+   *                                  matches the v2.5 reset behaviour.
+   *   * ``step2Mode``              — UI tab toggle ('jd' | 'custom'); not
+   *                                  a process state, just which textarea is
+   *                                  visible.
+   *
+   * Documented here because the asymmetry (some prefs survive, others
+   * don't) has historically confused reviewers expecting a wholesale
+   * reset.
    */
   const resetProfile = () => {
     setFile(null);
