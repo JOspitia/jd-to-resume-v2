@@ -124,7 +124,29 @@ export function useAudit(
       clearTimeout(timeoutId);
 
       if (!res.ok) {
-        throw new Error("No se pudo conectar con el servidor de análisis.");
+        // The backend returns 4xx/5xx with body shape
+        // ``{"detail": {"error": "...", "type": "..."}}`` (FastAPI's
+        // default for HTTPException with a dict detail) or the legacy
+        // ``{"error": "..."}``. Surface whichever is present so the
+        // user sees the actual reason instead of a generic "could
+        // not connect" message.
+        let body: { error?: string; detail?: unknown } = {};
+        try {
+          body = (await res.json()) as { error?: string; detail?: unknown };
+        } catch {
+          // Body wasn't JSON — fall through to the generic message.
+        }
+        const fromDictDetail = (
+          typeof body.detail === 'object' && body.detail !== null
+            ? (body.detail as { error?: string }).error
+            : undefined
+        );
+        const detailString =
+          typeof body.detail === 'string' ? body.detail : undefined;
+        const message =
+          body.error || fromDictDetail || detailString ||
+          `Error ${res.status} del servidor de análisis`;
+        throw new Error(message);
       }
 
       const data = await res.json();

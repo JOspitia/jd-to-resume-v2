@@ -74,9 +74,20 @@ def build_audit_router(service: AuditService) -> APIRouter:
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001 — match legacy contract
-            import traceback
-            traceback.print_exc()
-            return {"error": str(exc)}
+            # Surface the real failure as a 500 with a structured body
+            # so the frontend's `res.ok` check kicks in and the user sees
+            # an explicit error rather than the legacy 200-with-error-shape
+            # (which had the browser think the audit succeeded and try
+            # to render data.ats_score etc. against undefined values).
+            import logging
+            logging.exception("audit_pdf pipeline failed")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": str(exc),
+                    "type": exc.__class__.__name__,
+                },
+            ) from exc
         finally:
             try:
                 os.unlink(file_path)
