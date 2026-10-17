@@ -158,7 +158,7 @@ export function YamlEditorPanel({
                     type="button"
                     onClick={() => setViewMode('form')}
                     aria-pressed={viewMode === 'form'}
-                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'form' ? 'bg-black text-white' : 'bg-card text-foreground'}`}
+                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'form' ? 'bg-foreground text-background' : 'bg-card text-foreground'}`}
                   >
                     <LayoutGrid className="w-3.5 h-3.5" /> Formulario
                   </button>
@@ -166,7 +166,7 @@ export function YamlEditorPanel({
                     type="button"
                     onClick={() => setViewMode('yaml')}
                     aria-pressed={viewMode === 'yaml'}
-                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'yaml' ? 'bg-black text-white' : 'bg-card text-foreground'}`}
+                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'yaml' ? 'bg-foreground text-background' : 'bg-card text-foreground'}`}
                   >
                     <FileText className="w-3.5 h-3.5" /> Ver YAML
                   </button>

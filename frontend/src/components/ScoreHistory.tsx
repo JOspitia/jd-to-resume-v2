@@ -21,7 +21,7 @@ export function ScoreHistory({ entries }: ScoreHistoryProps) {
       animate={{ opacity: 1, y: 0 }}
       className="rm-box p-6 bg-card border-2 border-border relative w-full"
     >
-      <div className="absolute -top-4 -left-4 rm-tag bg-black text-white px-4 py-2 text-sm font-black">
+      <div className="absolute -top-4 -left-4 rm-tag bg-foreground text-background px-4 py-2 text-sm font-black">
         📈 EVOLUCIÓN DE SCORES
       </div>
       <div className="flex flex-wrap items-end gap-4 mt-2 pt-2">

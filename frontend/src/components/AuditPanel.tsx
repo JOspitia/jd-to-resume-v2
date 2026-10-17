@@ -84,7 +84,7 @@ export function AuditPanel({
                   >
                     {atsData.ats_score} %
                   </div>
-                  <span className="rm-tag bg-black text-white text-xs px-3 py-1 font-bold">
+                  <span className="rm-tag bg-foreground text-background text-xs px-3 py-1 font-bold">
                     Nivel {atsData.match_level || 'Medio'}
                   </span>
                 </div>
@@ -202,7 +202,7 @@ export function AuditPanel({
                             onChange={() => onToggleTip(tip)}
                             className="w-4 h-4 mt-1 accent-purple-700 cursor-pointer shrink-0"
                           />
-                          <span className="text-sm font-medium text-gray-900">{tip}</span>
+                          <span className="text-sm font-medium text-foreground">{tip}</span>
                         </label>
                       ))}
                     </div>
@@ -230,7 +230,7 @@ export function AuditPanel({
                             onChange={() => onToggleTip(tip)}
                             className="w-4 h-4 mt-1 accent-warning cursor-pointer shrink-0"
                           />
-                          <span className="text-sm font-medium text-gray-900">{tip}</span>
+                          <span className="text-sm font-medium text-foreground">{tip}</span>
                         </label>
                       ))}
                     </div>
@@ -258,7 +258,7 @@ export function AuditPanel({
                     className="w-5 h-5 mt-0.5 accent-warning cursor-pointer shrink-0"
                   />
                   <div>
-                    <span className="font-bold text-sm block text-gray-900">
+                    <span className="font-bold text-sm block text-foreground">
                       🔒 Modo Edición Quirúrgica(Aplicar SOLO cambios solicitados)
                     </span>
                     <span className="text-xs text-muted-foreground block mt-0.5 font-medium">

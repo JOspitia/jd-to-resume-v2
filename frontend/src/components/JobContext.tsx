@@ -89,7 +89,7 @@ export function JobContext({
               aria-selected={step2Mode === 'jd'}
               onClick={() => onStep2ModeChange('jd')}
               className={`px-2.5 py-0.5 text-xs font-bold transition-all ${
-                step2Mode === 'jd' ? 'bg-black text-white' : 'text-muted-foreground hover:bg-muted'
+                step2Mode === 'jd' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               💼 Oferta
@@ -100,7 +100,7 @@ export function JobContext({
               aria-selected={step2Mode === 'custom'}
               onClick={() => onStep2ModeChange('custom')}
               className={`px-2.5 py-0.5 text-xs font-bold transition-all ${
-                step2Mode === 'custom' ? 'bg-black text-white' : 'text-muted-foreground hover:bg-muted'
+                step2Mode === 'custom' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               📝 Requerimientos
