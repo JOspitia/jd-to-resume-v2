@@ -7,7 +7,7 @@ Tests for the new YAML editor endpoints (/api/render-from-yaml and
 
 Strategy
 --------
-The heavy dependencies of `main.py` (fitz / PyMuPDF, google.generativeai,
+The heavy dependencies of `main.py` (fitz / PyMuPDF, google.genai,
 render_service / rendercv, playwright) are mocked at the sys.modules
 level before importing main. This is necessary because the test sandbox
 does not have PyMuPDF installed and the existing import chain pulls it
@@ -37,7 +37,7 @@ import pytest
 
 # ---------------------------------------------------------------------------
 # Pre-import mocks: install fake modules into sys.modules before main.py is
-# imported. The fitz / google.generativeai / render_service / playwright
+# imported. The fitz / google.genai / render_service / playwright
 # imports are the only ones that need fakes; the rest of main.py uses
 # stdlib + our own modules (domain_games, audit_prompts, yaml_helpers,
 # language) which are already importable.
@@ -55,14 +55,28 @@ def _install_module_stub(name: str) -> types.ModuleType:
 # already-parsed text via the YAML payload.
 _install_module_stub("fitz").open = MagicMock()  # type: ignore[attr-defined]
 
-# google.generativeai: not used in the YAML endpoints but imported at
-# top of main.py. The genai.configure call is a no-op; the model class
-# is mocked so `genai.GenerativeModel` doesn't blow up if anything
-# references it lazily.
-_genai = _install_module_stub("google.generativeai")
-_genai.configure = MagicMock()
-_genai.GenerativeModel = MagicMock()
-_install_module_stub("google").generativeai = _genai  # for `import google.generativeai as genai`
+# google.genai: not used in the YAML endpoints but imported by the
+# GeminiAdapter via `from google import genai`. We install both
+# `google` and `google.genai` as fake modules so that import succeeds
+# in this hermetic test — which deliberately avoids requiring the real
+# SDK in the test sandbox.
+_google_pkg = _install_module_stub("google")
+_google_genai = _install_module_stub("google.genai")
+_google_genai.Client = MagicMock()  # genai.Client(api_key=...) is a no-op here
+_google_pkg.genai = _google_genai  # for `from google import genai`
+# Also stub google.genai.types.GenerateContentConfig because gemini.py
+# constructs one at module load. The adapter never exercises the real
+# constructor during these tests (the LLM is short-circuited with
+# AsyncMock), so this just needs to *exist* and accept arbitrary kwargs.
+_google_genai_types = _install_module_stub("google.genai.types")
+
+class _FakeGenerateContentConfig:
+    """Stub matching google.genai.types.GenerateContentConfig's ctor shape."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+_google_genai_types.GenerateContentConfig = _FakeGenerateContentConfig
 
 # render_service: render_cv_with_rendercv is the only thing the YAML
 # endpoints use from this module. We replace it with a MagicMock that

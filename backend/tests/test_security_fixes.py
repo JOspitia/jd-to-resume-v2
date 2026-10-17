@@ -8,7 +8,7 @@ Covers:
   * Rate limit is configurable via RATE_LIMIT_DEFAULT env var.
 
 The tests import ``main`` directly. All runtime dependencies (pymupdf,
-google.generativeai, playwright, rendercv) must be available — which they are
+google.genai, playwright, rendercv) must be available — which they are
 in the standard backend venv.
 """
 

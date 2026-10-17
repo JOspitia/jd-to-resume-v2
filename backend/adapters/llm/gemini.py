@@ -6,17 +6,26 @@ Adapter for Google Gemini. Internally tries ``gemini-2.0-flash`` →
 ``gemini-1.5-flash`` → ``gemini-1.5-pro`` within a single ``complete()``
 call because each model has different availability per user (the 2.0
 and 1.5 free-tier rate limits differ).
+
+Migration note (commit history)
+------------------------------
+Previously imported ``google.generativeai`` as ``genai``. That package is
+end-of-life and emits a ``FutureWarning`` on every import. This module now
+uses the new official SDK (``google-genai`` on PyPI), which exposes the
+``genai.Client`` async/sync façade. The ``complete()`` contract returned
+to ``LLMProvider`` is unchanged; only the SDK surface beneath it moved.
 """
 
 from __future__ import annotations
 
 import os
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 
 _CASCADE = ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro")
-_GENERATION_CONFIG = {"response_mime_type": "application/json"}
+_GENERATION_CONFIG = types.GenerateContentConfig(response_mime_type="application/json")
 
 
 class GeminiAdapter:
@@ -31,22 +40,26 @@ class GeminiAdapter:
                 "GEMINI_API_KEY no configurada o no válida. "
                 "Configura la env var con tu clave real."
             )
-        genai.configure(api_key=api_key)
-        self._models = [
-            genai.GenerativeModel(model_name, generation_config=_GENERATION_CONFIG)
-            for model_name in _CASCADE
-        ]
+        self._client = genai.Client(api_key=api_key)
 
     def complete(self, prompt: str, *, model: str | None = None) -> str:
         """Call Gemini and return the response text. Cascades across the
         three free-tier-friendly models; the first one to respond wins.
 
+        The ``model`` parameter is accepted to satisfy the ``LLMProvider``
+        protocol but currently ignored — the cascade is hardcoded. A
+        future revision could route ``model`` to a single targeted call.
+
         Raises ``RuntimeError`` if every model fails.
         """
         last_error: Exception | None = None
-        for m in self._models:
+        for model_name in _CASCADE:
             try:
-                res = m.generate_content(prompt)
+                res = self._client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=_GENERATION_CONFIG,
+                )
                 if res and getattr(res, "text", None):
                     return res.text
             except Exception as exc:  # pragma: no cover - network errors
