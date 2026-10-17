@@ -22,7 +22,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import fitz  # PyMuPDF
 import google.generativeai as genai
-from jinja2 import Template
 from playwright.sync_api import sync_playwright
 import tempfile
 import time
@@ -216,8 +215,9 @@ from pydantic import BaseModel, Field
 # Backward-compatible wrappers for the HTML-template helpers. The
 # implementations (template, ATS helpers, photo data URI, render function,
 # URL-fragmentation check) live in
-# ``adapters/renderer/playwright_html_adapter.py``. These wrappers preserve
-# the original function names so existing call sites keep working.
+# ``adapters/renderer/playwright_html_adapter.py``. The render function
+# keeps the same name here so existing call sites keep working; the local
+# ``_render_html_template`` alias is the adapter's implementation.
 
 from adapters.renderer.playwright_html_adapter import (
     _ats_link_label,
@@ -225,24 +225,6 @@ from adapters.renderer.playwright_html_adapter import (
     _check_profile_urls_not_fragmented,
     _render_html_template,
 )
-
-def _render_html_template(
-    parsed_data: dict,
-    labels: dict,
-    page_break_section: Optional[str],
-    photo_path: Optional[str] = None,
-) -> str:
-    """Render the Playwright HTML template with the ATS helpers registered."""
-    template = Template(HTML_TEMPLATE)
-    template.globals["ats_link"] = _ats_link_label
-    # Also expose it as a filter so the template can write `url | ats_link('linkedin')`.
-    template.environment.filters["ats_link"] = lambda url, network: _ats_link_label(url, network)
-    return template.render(
-        **parsed_data,
-        labels=labels,
-        page_break_section=page_break_section,
-        photo_uri=_photo_to_data_uri(photo_path),
-    )
 
 
 def extract_text(file_path: str) -> str:
@@ -796,8 +778,13 @@ IMPORTANT:
 
         if not rendered:
             print(f"[INFO] 📄 Rendering PDF with Playwright HTML engine (page_break_section={page_break_section})...")
-            html_content = _render_html_template(parsed_data, labels, page_break_section, photo_path)
-            
+            html_content = _render_html_template(
+                parsed_data,
+                labels,
+                page_break_section=page_break_section,
+                photo_path=photo_path,
+            )
+
             def render_pdf_sync():
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=True)
@@ -1084,7 +1071,12 @@ async def render_from_yaml(
 
     if not rendered:
         print(f"[INFO] 📄 Render-from-YAML: Playwright HTML engine (page_break_section={page_break_section})...")
-        html_content = _render_html_template(parsed_data, labels, page_break_section, photo_path)
+        html_content = _render_html_template(
+            parsed_data,
+            labels,
+            page_break_section=page_break_section,
+            photo_path=photo_path,
+        )
         def render_pdf_sync():
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
