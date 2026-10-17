@@ -3,7 +3,7 @@ import type { Profile } from './useProfile';
 import type { Generation } from './useGeneration';
 import type { Audit } from './useAudit';
 import { validateYaml } from '../lib/yamlValidator';
-import { apiUrl } from '../lib/api';
+import { apiUrl, fetchWithTimeout } from '../lib/api';
 
 /**
  * useYamlEditor — T3 of the UX refactor (specs S5, S6).
@@ -12,6 +12,38 @@ import { apiUrl } from '../lib/api';
  * visibility and the four actions the user can take on it (render, discard +
  * regenerate, audit, AI-assisted repair).
  */
+
+/**
+ * Validate the IA's repair output for the YAML editor.
+ *
+ * Returns ``{ ok: true }`` when the repaired YAML is at least 40% the
+ * length of the original (with a hard minimum of 3 meaningful lines),
+ * or ``{ ok: false, ...message }`` when the LLM produced a near-empty
+ * document that would silently wipe most of the CV.
+ *
+ * Used by both ``handleRenderFromYaml`` (post-repair auto path) and
+ * ``handleRepairYaml`` (manual repair) — both used to inline the same
+ * arithmetic and only differed in the user-facing error string.
+ */
+function validateRepairOutput(
+  repairedYaml: string,
+  originalYaml: string,
+): { ok: true } | { ok: false; message: string } {
+  const countMeaningful = (yaml: string) =>
+    yaml.split('\n').filter((l: string) => l.trim()).length;
+  const repairedLines = countMeaningful(repairedYaml);
+  const originalLines = countMeaningful(originalYaml);
+  const threshold = Math.max(3, Math.floor(originalLines * 0.4));
+  if (repairedLines < threshold) {
+    return {
+      ok: false,
+      message:
+        `La IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) — se habría perdido la mayor parte del CV. Tu texto NO se perdió.`,
+    };
+  }
+  return { ok: true };
+}
+
 
 type YamlEditorDeps = {
   profile: Pick<
@@ -156,13 +188,10 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
 
           // Degenerate-output guard: reject a near-empty document (e.g. only
           // `name:` survived) instead of silently rendering an empty CV.
-          const repairedLines = repairData.yaml.split('\n').filter((l: string) => l.trim()).length;
-          const originalLines = preRepairYaml.split('\n').filter((l: string) => l.trim()).length;
-          if (repairedLines < Math.max(3, Math.floor(originalLines * 0.4))) {
+          const repairCheck = validateRepairOutput(repairData.yaml, preRepairYaml);
+          if (!repairCheck.ok) {
             setYamlRepairing(false);
-            setYamlError(
-              `No se pudo generar el CV: la IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) y se habría perdido la mayor parte del CV. Tu texto NO se perdió.`,
-            );
+            setYamlError(`No se pudo generar el CV: ${repairCheck.message}`);
             return;
           }
 
@@ -207,15 +236,11 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     // is re-sent on every render-from-yaml pass.
     if (photo) formData.append('photo', photo);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      const res = await fetch(apiUrl('/api/render-from-yaml'), {
+      const res = await fetchWithTimeout(apiUrl('/api/render-from-yaml'), {
         method: 'POST',
         body: formData,
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`Render-from-YAML failed (${res.status}): ${errText || res.statusText}`);
@@ -264,11 +289,12 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
           console.warn('[audit-after-render] failed (silent):', auditErr);
         }
       }
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      const msg = err.name === 'AbortError'
+    } catch (err: unknown) {
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const message = err instanceof Error ? err.message : 'Error desconocido al renderizar desde YAML.';
+      const msg = isAbort
         ? 'El render desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
-        : (err.message || 'Error desconocido al renderizar desde YAML.');
+        : message;
       setYamlError(msg);
       setStatus('error');
     }
@@ -305,15 +331,11 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     if (jd) formData.append('jd', jd);
     if (domainGame) formData.append('domain_game', domainGame);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
-      const res = await fetch(apiUrl('/api/analyze-yaml'), {
+      const res = await fetchWithTimeout(apiUrl('/api/analyze-yaml'), {
         method: 'POST',
         body: formData,
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         throw new Error(`Audit-from-YAML failed (${res.status}): ${errText || res.statusText}`);
@@ -338,11 +360,12 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       // Generar CV to render with the audited YAML.
       setYamlReady(false);
       setEditBeforeGenerate(false);
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      const msg = err.name === 'AbortError'
+    } catch (err: unknown) {
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const message = err instanceof Error ? err.message : 'Error desconocido al auditar desde YAML.';
+      const msg = isAbort
         ? 'La auditoría desde YAML agotó el tiempo de espera (1 min). Por favor reintenta.'
-        : (err.message || 'Error desconocido al auditar desde YAML.');
+        : message;
       setYamlError(msg);
       setAtsStatus('error');
     }
@@ -408,13 +431,10 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
         // Degenerate-output guard: the LLM occasionally answers with a valid
         // but near-empty document (e.g. only `name:` survives). Accepting it
         // would silently wipe the CV. Require a minimum amount of substance.
-        const repairedLines = data.yaml.split('\n').filter((l: string) => l.trim()).length;
-        const originalLines = preRepairYaml.split('\n').filter((l: string) => l.trim()).length;
-        if (repairedLines < Math.max(3, Math.floor(originalLines * 0.4))) {
+        const repairCheck = validateRepairOutput(data.yaml, preRepairYaml);
+        if (!repairCheck.ok) {
           setYamlRepairing(false);
-          setYamlError(
-            `La IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) — se habría perdido la mayor parte del CV. Tu texto original NO se perdió.`,
-          );
+          setYamlError(repairCheck.message);
           return;
         }
 
@@ -434,8 +454,8 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
         noticeParts.push('Errores restantes que la IA no pudo resolver: ' + data.schema_errors.join(' · '));
       }
       setYamlRepairNotice(noticeParts.join('\n') || (data?.ok ? 'YAML válido — sin cambios.' : 'Reparación parcial.'));
-    } catch (err: any) {
-      setYamlError(err.message || 'Error al reparar el YAML.');
+    } catch (err: unknown) {
+      setYamlError(err instanceof Error ? err.message : 'Error al reparar el YAML.');
     } finally {
       setYamlRepairing(false);
     }

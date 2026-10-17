@@ -4,6 +4,7 @@ import type { Profile } from './useProfile';
 import type { Audit } from './useAudit';
 import type { YamlEditorOps } from './useYamlEditor';
 import { apiUrl } from '../lib/api';
+import type { AuditData } from '../types/audit';
 
 /**
  * useGeneration — T2 of the UX refactor (specs S1, S4, S6).
@@ -80,15 +81,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
   // `forceTranslateToEnglish` is set on click and reset in handleGenerate's finally block.
   const [forceTranslateToEnglish, setForceTranslateToEnglish] = useState<boolean>(false);
   const [lastOutputLanguage, setLastOutputLanguage] = useState<OutputLanguage>('unknown');
-  const [auditScores, setAuditScores] = useState<{
-    ats_score?: number;
-    ai_detection_score?: number;
-    match_level?: string;
-    ai_tone_verdict?: string;
-    ats_formatting_score?: number;
-    matched_keywords?: string[];
-    missing_keywords?: string[];
-  } | null>(null);
+  const [auditScores, setAuditScores] = useState<AuditData | null>(null);
   const [translationMeta, setTranslationMeta] = useState<{
     source_language?: string;
     target_language?: string;
@@ -107,7 +100,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
-    let interval: any = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (status === 'generating' || audit.atsStatus === 'analyzing') {
       interval = setInterval(() => {
         setElapsedSeconds(prev => prev + 1);
@@ -210,10 +203,18 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
       }
     }
 
+    // SSE has no body-level timeout — guard against a hung backend by
+    // aborting the fetch after 2 min. Earlier handlers (analyze-ats,
+    // render-from-yaml) already use a 60s ceiling; SSE pipelines are
+    // longer because they emit progress as the LLM streams.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
     try {
       const response = await fetch(apiUrl("/api/generate"), {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -275,9 +276,13 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
                     const srcLang = (data.translation.source_language as OutputLanguage) || 'unknown';
                     const tgtLang = (data.translation.target_language as 'en' | 'es') || 'es';
                     setLastOutputLanguage(srcLang === 'en' ? 'en' : tgtLang);
-                  } else if (forceTranslateToEnglish) {
+                  } else if (shouldTranslate) {
                     // Defensive fallback: backend didn't echo translation meta
                     // but the click that just succeeded was a translation pass.
+                    // Use the locally-resolved `shouldTranslate` flag instead of
+                    // reading the React-state `forceTranslateToEnglish` so the
+                    // closure captures the value that drove this generation,
+                    // not whatever the next render set it to.
                     setLastOutputLanguage('en');
                   } else if (lastOutputLanguage === 'unknown') {
                     // Default user base assumption: original CVs are Spanish.
@@ -317,10 +322,13 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
           }
         }
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || "An unexpected error occurred.");
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "An unexpected error occurred.");
       setStatus('error');
     } finally {
+      // The AbortController timeout is one-shot — always clear it so
+      // successful generations don't leave a dangling 120s timer.
+      clearTimeout(timeoutId);
       // Always clear the translation flag so the next generation reverts to JD-driven
       // language unless the user explicitly clicks Translate to English again.
       if (shouldTranslate) {

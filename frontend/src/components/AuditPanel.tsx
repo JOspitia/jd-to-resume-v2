@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ShieldCheck, BarChart3, AlertCircle, CheckCircle2, AlertTriangle, Sparkles, Edit3, RefreshCw } from 'lucide-react';
 
+import type { AuditData } from '../types/audit';
+
 /**
  * AuditPanel — T13 of the UX refactor (specs S4, S6).
  *
@@ -11,7 +13,7 @@ import { ShieldCheck, BarChart3, AlertCircle, CheckCircle2, AlertTriangle, Spark
 
 export type AuditPanelProps = {
   atsStatus: 'idle' | 'analyzing' | 'success' | 'error';
-  atsData: any | null;
+  atsData: AuditData | null;
   atsErrorMessage: string;
   selectedKeywords: string[];
   onToggleKeyword: (keyword: string) => void;
@@ -125,9 +127,9 @@ export function AuditPanel({
                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {atsData.matched_keywords && atsData.matched_keywords.length > 0 ? (
-                      atsData.matched_keywords.map((kw: string, i: number) => (
+                      atsData.matched_keywords.map((kw: string) => (
                         <span
-                          key={i}
+                          key={kw}
                           className="rm-tag bg-green-100 border border-green-600 text-green-900 px-3 py-1 font-bold text-sm"
                         >
                           ✓ {kw}
@@ -160,7 +162,7 @@ export function AuditPanel({
                         const isSelected = selectedKeywords.includes(kw);
                         return (
                           <button
-                            key={i}
+                            key={kw}
                             type="button"
                             onClick={() => onToggleKeyword(kw)}
                             className={`rm-tag border text-sm font-bold px-3 py-1.5 transition-all flex items-center gap-1.5 cursor-pointer ${isSelected
@@ -191,9 +193,9 @@ export function AuditPanel({
                       Marca las casillas que deseas aplicar al regenerar:
                     </p>
                     <div className="space-y-3">
-                      {atsData.ai_humanize_tips.map((tip: string, i: number) => (
+                      {atsData.ai_humanize_tips.map((tip: string) => (
                         <label
-                          key={i}
+                          key={tip}
                           className="flex items-start gap-3 cursor-pointer p-2 border border-foreground/30 hover:border-foreground/70 bg-card/70 hover:bg-accent transition-all select-none"
                         >
                           <input
@@ -219,9 +221,9 @@ export function AuditPanel({
                       Marca las casillas que deseas aplicar al regenerar:
                     </p>
                     <div className="space-y-3">
-                      {atsData.actionable_tips.map((tip: string, i: number) => (
+                      {atsData.actionable_tips.map((tip: string) => (
                         <label
-                          key={i}
+                          key={tip}
                           className="flex items-start gap-3 cursor-pointer p-2 border border-warning hover:border-warning bg-card/70 hover:bg-accent transition-all select-none"
                         >
                           <input

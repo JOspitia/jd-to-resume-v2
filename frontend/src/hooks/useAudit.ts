@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { Profile } from './useProfile';
-import { apiUrl } from '../lib/api';
+import { apiUrl, fetchWithTimeout } from '../lib/api';
+import type { AuditData } from '../types/audit';
 
 /**
  * useAudit — T4 of the UX refactor (spec S6).
@@ -39,7 +40,7 @@ export function useAudit(
   const { file, jd, domainGame } = profile;
 
   const [atsStatus, setAtsStatus] = useState<AuditStatus>('idle');
-  const [atsData, setAtsData] = useState<any | null>(null);
+  const [atsData, setAtsData] = useState<AuditData | null>(null);
   const [atsErrorMessage, setAtsErrorMessage] = useState('');
 
   // Score history — tracks ATS evolution across regeneration versions
@@ -113,16 +114,11 @@ export function useAudit(
     // "tech" game and the LLM audits the HR CV against tech keywords.
     if (domainGame) formData.append("domain_game", domainGame);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second (1 minute) timeout
-
     try {
-      const res = await fetch(apiUrl("/api/analyze-ats"), {
+      const res = await fetchWithTimeout(apiUrl("/api/analyze-ats"), {
         method: "POST",
         body: formData,
-        signal: controller.signal,
       });
-      clearTimeout(timeoutId);
 
       if (!res.ok) {
         // The backend returns 4xx/5xx with body shape
@@ -164,13 +160,14 @@ export function useAudit(
           format: data.ats_formatting_score ?? 0,
         });
       }
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        setAtsErrorMessage("La solicitud de análisis ATS agotó el tiempo de espera (1 min). Por favor reintenta.");
-      } else {
-        setAtsErrorMessage(err.message || "Ocurrió un error inesperado al analizar el ATS.");
-      }
+    } catch (err: unknown) {
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      const message = err instanceof Error ? err.message : "Ocurrió un error inesperado al analizar el ATS.";
+      setAtsErrorMessage(
+        isAbort
+          ? "La solicitud de análisis ATS agotó el tiempo de espera (1 min). Por favor reintenta."
+          : message
+      );
       setAtsStatus('error');
     }
   };
