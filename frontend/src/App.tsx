@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import LandingPage from './LandingPage';
 import ToolApp from './ToolApp';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   const [view, setView] = useState<'landing' | 'tool'>('landing');
@@ -14,13 +15,15 @@ export default function App() {
       <a href="#main-content" className="skip-link">
         Saltar al contenido principal
       </a>
-      <main id="main-content">
-        {view === 'landing' ? (
-          <LandingPage onStart={() => setView('tool')} />
-        ) : (
-          <ToolApp onBack={() => setView('landing')} />
-        )}
-      </main>
+      <ErrorBoundary>
+        <main id="main-content">
+          {view === 'landing' ? (
+            <LandingPage onStart={() => setView('tool')} />
+          ) : (
+            <ToolApp onBack={() => setView('landing')} />
+          )}
+        </main>
+      </ErrorBoundary>
     </>
   );
 }
