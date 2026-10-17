@@ -233,20 +233,6 @@ app.include_router(build_generate_router(_generation_service, _storage))
 def read_root():
     return {"status": "AI Resume Backend is running OK!"}
 
-# Backward-compatible wrappers for the HTML-template helpers. The
-# implementations (template, ATS helpers, photo data URI, render function,
-# URL-fragmentation check) live in
-# ``adapters/renderer/playwright_html_adapter.py``. The render function
-# keeps the same name here so existing call sites keep working; the local
-# ``_render_html_template`` alias is the adapter's implementation.
-
-from adapters.renderer.playwright_html_adapter import (
-    _ats_link_label,
-    _photo_to_data_uri,
-    _check_profile_urls_not_fragmented,
-    _render_html_template,
-)
-
 
 def extract_text(file_path: str) -> str:
     """Backward-compatible wrapper around the PyMuPDFParser adapter."""
