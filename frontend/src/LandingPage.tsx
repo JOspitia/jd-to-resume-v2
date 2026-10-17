@@ -18,19 +18,19 @@ const TECH_STACK = [
 
 const FEATURES = [
   {
-    title: 'AI Analysis',
+    title: 'Generación con IA',
     titleClass: 'text-primary',
-    body: 'Uses Google Gemini to perfectly map your existing skills and projects to the exact keywords algorithms are hunting for.',
+    body: 'Subís tu CV maestro y la descripción de la vacante. Gemini reescribe la estructura mapeando cada skill y proyecto a los keywords exactos del algoritmo — sin inventar métricas.',
   },
   {
-    title: 'Auto Formatting',
+    title: 'Auditoría ATS',
     titleClass: 'text-secondary',
-    body: 'Generates a flawless, strictly 1-page PDF layout combining classic ATS-friendly structure using purely headless Playwright.',
+    body: 'Después de generar, obtenés un puntaje de compatibilidad, las palabras clave que faltan, señales de detección de IA y sugerencias accionables para subir el match.',
   },
   {
-    title: 'Knowledge Base',
-    titleClass: 'text-pink-600',
-    body: 'Can hook into a personal databank of expanded experiences to smartly swap out projects that fit the job better.',
+    title: 'Personalización total',
+    titleClass: 'text-warning',
+    body: 'Editor YAML en vivo con validación de esquema y autoguardado. Soporta Tech, RR.HH. y Psicología, traducción al inglés y modo claro/oscuro — sin volver a empezar.',
   },
 ] as const;
 
@@ -107,11 +107,11 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             animate={{ opacity: 1, y: 0 }}
             className="text-5xl md:text-7xl font-black font-serif leading-[1.05] tracking-tighter max-w-4xl"
           >
-            Instantly tailor your
+            Adaptá tu CV a cada oferta
             <br />
-            resume to{' '}
+            en minutos,{' '}
             <span className="bg-primary text-primary-foreground px-3 py-1 inline-block mt-2 transform -rotate-1 rounded-sm">
-              any job description.
+              no en horas.
             </span>
           </motion.h1>
           <motion.p
@@ -120,9 +120,10 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             transition={{ delay: 0.2 }}
             className="text-lg md:text-2xl font-medium max-w-2xl text-muted-foreground mt-8 mb-12 leading-relaxed"
           >
-            Upload your master resume PDF, paste the job description, and let
-            our AI perfectly format and optimize a new ATS-friendly PDF in
-            seconds.
+            Subí tu CV maestro, pegá la descripción de la vacante y nuestra IA
+            (Gemini) genera un PDF ATS-friendly listo para enviar. Después podés
+            editar el YAML directamente, auditarlo contra el sistema ATS o
+            traducirlo al inglés — sin volver a empezar.
           </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -135,7 +136,7 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
               size="lg"
               className="px-10 py-5 text-xl"
             >
-              Open Generator <ArrowRight className="w-6 h-6" aria-hidden="true" />
+              Abrir Generador <ArrowRight className="w-6 h-6" aria-hidden="true" />
             </Button>
           </motion.div>
         </section>
@@ -149,7 +150,7 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             id="tech-stack-title"
             className="font-mono text-xs tracking-widest text-muted-foreground uppercase font-bold mb-4"
           >
-            Built With
+            Construido con
           </h3>
           <div className="marquee-container">
             <div className="marquee-content gap-6">
@@ -159,7 +160,7 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
                   variant="default"
                   size="md"
                   className="bg-card flex items-center gap-3 px-6 py-4 cursor-pointer whitespace-nowrap hover:bg-accent"
-                  title="Hover or focus to pause"
+                  title="Pasá el mouse o enfocá para pausar"
                 >
                   <img
                     src={tech.iconUrl}
@@ -183,7 +184,7 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             id="features-title"
             className="text-4xl font-serif font-black tracking-tight"
           >
-            Features
+            Capacidades
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
@@ -224,8 +225,8 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             </div>
             <div className="font-mono text-xs md:text-sm text-muted-foreground font-medium text-center md:text-right">
               © {new Date().getFullYear()} Resume Tailor AI ·
-              Edited by Johan Ospitia ·
-              Open source on GitHub.
+              Editado por Johan Ospitia ·
+              Código abierto en GitHub.
             </div>
           </div>
         </div>
