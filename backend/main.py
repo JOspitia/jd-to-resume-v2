@@ -30,7 +30,7 @@ from routes.assets_router import build_assets_router
 # exist when the function is called. Defining the function above its
 # dependencies relies on Python's late binding to work — fine at
 # runtime, but fragile if a test exercises a partial module load.
-from slowapi import Limiter  # noqa: F401 — re-exported for backward compat (Limiter config)
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 
