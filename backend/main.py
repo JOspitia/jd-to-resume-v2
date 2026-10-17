@@ -1,6 +1,7 @@
 import os
 import sys
 import io
+import logging
 from time import monotonic
 
 # Force UTF-8 stdout/stderr on Windows so print() with non-ASCII chars
@@ -12,6 +13,9 @@ if sys.platform == "win32" and os.getenv("DISABLE_STDIO_REWRAP") != "1" and "pyt
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
 from fastapi import FastAPI, HTTPException, Request
+
+
+_logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 
 # Hexagonal split: section delegates to dedicated modules.
@@ -247,7 +251,9 @@ async def extract_linkedin_profile_data(linkedin_url: str) -> str:
     from adapters.linkedin.factory import build_linkedin_strategies
     from application.services.linkedin_service import LinkedInService
 
-    print(f"[LINKEDIN EXTRACTOR] Iniciando extraccion para: {linkedin_url}")
+    _logger.info(
+        "[LINKEDIN EXTRACTOR] Iniciando extraccion para: %s", linkedin_url
+    )
     strategies = build_linkedin_strategies()
     service = LinkedInService(strategies, llm_call=call_llm_api, cache=_linkedin_cache)
     return await service.extract(linkedin_url)
