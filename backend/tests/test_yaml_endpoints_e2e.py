@@ -389,3 +389,160 @@ email: no-name@example.com
             data={"yaml_content": MINIMAL_VALID_YAML, "domain_game": "made_up"},
         )
         assert r.status_code == 422
+
+    def test_llm_returning_json_with_n_prefixed_extras_does_not_trip_drift_guard(
+        self, client, stub_llm_orchestrator
+    ):
+        """Regression test: when the LLM answers in JSON-style YAML with
+        ``n``-prefixed mirror keys (``nachievements``, ``neducation``,
+        ``nemail``, ...) alongside the real ones, the drift guard
+        previously aborted because the raw LLM string contained those
+        extra tokens. The fix compares drift against the canonical
+        schema-cleaned YAML (model_dump()), which silently drops the
+        Pydantic-allowed extras.
+
+        Without the fix: ``ok=False`` with
+        ``"la reparación agregó N palabras que no estaban en tu texto"``.
+        With the fix: ``ok=True`` and the YAML is re-serialized block-style.
+
+        Mirrors the real-world bug: user writes a YAML where one
+        field has the wrong type (``achievements`` is a string instead
+        of a list of strings); the LLM fixes the type AND adds
+        ``n``-prefixed mirror keys + a stray JSON envelope pair. The
+        user wrote real data for *every* field — the artefacts are
+        formatting noise, not invented content.
+        """
+        c, _ = client
+        # ``achievements`` is a string instead of a list of strings,
+        # which fails Pydantic's strict typing and triggers the LLM
+        # in pass 2. Every other field carries the user's real data.
+        original = (
+            "name: Jane Doe\n"
+            "phone: +1 555 0000\n"
+            "email: jane@example.com\n"
+            "portfolio: https://jane.example.com\n"
+            "linkedin: https://linkedin.com/in/jane\n"
+            "github: https://github.com/jane\n"
+            "summary: Backend engineer with 5 years of experience.\n"
+            "education:\n"
+            "  - school: Universidad Nacional\n"
+            "    degree: BSc Computer Science\n"
+            "    dates: 2018 - 2023\n"
+            "skills:\n"
+            "  - category: Backend\n"
+            "    items: [Python, FastAPI]\n"
+            "experience:\n"
+            "  - company: Acme\n"
+            "    role: Senior Engineer\n"
+            "    dates: 2023 - Present\n"
+            "    points:\n"
+            "      - Built a streaming CV pipeline\n"
+            "projects:\n"
+            "  - name: cv-tailor\n"
+            "    dates: 2024\n"
+            "    points:\n"
+            "      - Open-source tool\n"
+            "achievements: Speaker at PyCon 2024\n"  # <-- schema-invalid
+        )
+        # The stub LLM responds with: schema-valid JSON that preserves
+        # the user's data verbatim (only fixes ``achievements`` type),
+        # PLUS the artefact bug — ``n``-prefixed mirror keys + a stray
+        # ``content`` / ``json`` envelope pair.
+        stub_llm_orchestrator.response = (
+            '{"name": "Jane Doe", '
+            '"phone": "+1 555 0000", '
+            '"email": "jane@example.com", '
+            '"portfolio": "https://jane.example.com", '
+            '"linkedin": "https://linkedin.com/in/jane", '
+            '"github": "https://github.com/jane", '
+            '"summary": "Backend engineer with 5 years of experience.", '
+            '"education": [{"school": "Universidad Nacional", '
+            '"degree": "BSc Computer Science", "dates": "2018 - 2023"}], '
+            '"skills": [{"category": "Backend", '
+            '"items": ["Python", "FastAPI"]}], '
+            '"experience": [{"company": "Acme", '
+            '"role": "Senior Engineer", "dates": "2023 - Present", '
+            '"points": ["Built a streaming CV pipeline"]}], '
+            '"projects": [{"name": "cv-tailor", "dates": "2024", '
+            '"points": ["Open-source tool"]}], '
+            '"achievements": ["Speaker at PyCon 2024"], '
+            '"nachievements": ["Speaker at PyCon 2024"], '
+            '"nemail": "jane@example.com", '
+            '"nexperience": [{"company": "Acme"}], '
+            '"ngithub": "https://github.com/jane", '
+            '"nlinkedin": "https://linkedin.com/in/jane", '
+            '"content": "yaml repair", '
+            '"json": "envelope"}'
+        )
+
+        r = c.post("/api/repair-yaml", data={"yaml_content": original})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # Before the fix this was ``ok=False`` because the drift guard
+        # saw the ``n``-prefixed extras in the raw LLM string and
+        # reported them as fabricated data.
+        assert body["ok"] is True, body
+        # The canonical output is the schema-cleaned YAML (no
+        # ``n``-prefixed extras survive ``model_dump()``).
+        assert "nachievements" not in body["yaml"]
+        assert "nemail" not in body["yaml"]
+        # The real data the user wrote is preserved.
+        assert "Jane Doe" in body["yaml"]
+        assert "jane@example.com" in body["yaml"]
+        assert "PyCon 2024" in body["yaml"]
+
+    def test_drift_guard_still_aborts_on_actual_metric_fabrication(
+        self, client, stub_llm_orchestrator
+    ):
+        """Companion regression: when the LLM genuinely fabricates a
+        metric (``30%`` -> ``45%``), the drift guard must STILL abort —
+        the canonical-cleaned-YAML fix must not loosen the product
+        promise. Verifies the guard only ignores formatting artefacts,
+        never real content edits."""
+        c, _ = client
+        # Schema-invalid (education must be a list of objects, not a
+        # string) so the LLM is forced to be called in pass 2.
+        original = (
+            "name: Jane Doe\n"
+            "phone: +1 555 0000\n"
+            "email: jane@example.com\n"
+            "portfolio: https://jane.example.com\n"
+            "linkedin: https://linkedin.com/in/jane\n"
+            "github: https://github.com/jane\n"
+            "summary: Built a streaming CV pipeline in 30 days.\n"
+            "education: not-a-list\n"
+            "skills:\n"
+            "  - category: Backend\n"
+            "    items: [Python]\n"
+            "experience:\n"
+            "  - company: Acme\n"
+            "    role: SE\n"
+            "    dates: 2023 - Present\n"
+            "    points:\n"
+            "      - Reduced LLM cost by 40%\n"
+            "projects:\n"
+            "  - name: cv\n"
+            "    dates: 2024\n"
+            "    points: [Open-source]\n"
+            "achievements:\n"
+            "  - Speaker\n"
+        )
+        # The stub produces schema-valid YAML but rewrites the metrics
+        # in summary (``30 days`` -> ``45 days``) and points
+        # (``40%`` -> ``60%``). Schema passes for both, but drift
+        # detection must catch the number swap.
+        good_yaml = original.replace("education: not-a-list", "education:\n  - school: X\n    degree: BSc\n    dates: 2018 - 2023")
+        stub_llm_orchestrator.response = good_yaml.replace(
+            "30 days", "45 days",
+        ).replace("40%", "60%")
+
+        r = c.post("/api/repair-yaml", data={"yaml_content": original})
+        body = r.json()
+        assert body["ok"] is False, f"metric fabrication was not caught: {body}"
+        # The original (unmodified) YAML is returned to the user.
+        assert body["yaml"].startswith("name: Jane Doe")
+        assert "30 days" in body["yaml"]
+        assert "40%" in body["yaml"]
+        # The error names the fabricated number, or the schema-fix
+        # attempt fails (acceptable alternative — both are refusals).
+        assert ("30" in body["error"]) or ("schema" in body["error"].lower())
