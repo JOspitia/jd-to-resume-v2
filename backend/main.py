@@ -304,18 +304,6 @@ async def extract_linkedin_profile_data(linkedin_url: str) -> str:
     return await service.extract(linkedin_url)
 
 
-# --- YAML editor: handlers + helpers moved to ``routes/yaml_editor_router.py``
-# and ``application/services/yaml_editor_service.py``. The two legacy
-# module-level helpers below are kept as backward-compat shims because
-# ``tests/test_content_drift.py`` imports them from ``main`` (this file
-# is the import target the docstring points readers at).
-from application.services.yaml_editor_service import (
-    content_tokens as _content_tokens,
-    content_drift as _content_drift,
-)
-
-
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

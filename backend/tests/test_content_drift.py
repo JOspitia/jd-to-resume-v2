@@ -21,7 +21,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from main import _content_drift, _content_tokens  # noqa: E402
+from application.services.yaml_editor_service import (
+    content_drift as _content_drift,
+    content_tokens as _content_tokens,
+)  # noqa: E402
 
 
 ORIGINAL = """name: Julieth Andrea Caicedo Goy
