@@ -250,6 +250,7 @@ def build_yaml_editor_router(
         from main import enforce_rate_limit
 
         await enforce_rate_limit(request, scope="repair-yaml")
+        _validate_domain_game(domain_game)
         return await service.repair(yaml_content, domain_game)
 
     return router
