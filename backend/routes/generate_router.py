@@ -20,7 +20,9 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from application.services.generation_service import GenerationService
+from application.paths import PHOTOS_DIR
 from application.rate_limit import enforce_rate_limit
+from photo_helpers import persist_uploaded_photo
 from ports.resume_storage import ResumeStorage
 
 
@@ -66,7 +68,6 @@ def build_generate_router(
         edit_before_generate: Optional[bool] = Form(False),
         photo: Optional[UploadFile] = File(None),
     ):
-        from main import _persist_uploaded_photo  # removed in next refactor (commit B of MP-02)
         from fastapi import HTTPException
 
         # Validate request contract
@@ -79,7 +80,7 @@ def build_generate_router(
             )
 
         # Persist the optional photo first; downstream code wants the path.
-        photo_path = await _persist_uploaded_photo(photo)
+        photo_path = await persist_uploaded_photo(photo, PHOTOS_DIR)
 
         # Stream the pipeline output as SSE.
         return StreamingResponse(

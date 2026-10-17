@@ -22,6 +22,14 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from typing import TYPE_CHECKING, Optional
+
+
+if TYPE_CHECKING:
+    # UploadFile is the FastAPI request type, which we only need for
+    # type hints. Avoiding the runtime import keeps this module pure-Python
+    # so unit tests in ``tests/`` can exercise it without booting FastAPI.
+    from fastapi import UploadFile
 
 
 # 5 MB. Large enough for a phone photo of a face, small enough that a user
@@ -98,6 +106,27 @@ def save_photo(data: bytes, photos_dir: str) -> str:
     return os.path.abspath(path)
 
 
+async def persist_uploaded_photo(
+    photo: Optional["UploadFile"], photos_dir: str
+) -> Optional[str]:
+    """Read a FastAPI ``UploadFile`` and persist its bytes via ``save_photo``.
+
+    Returns the absolute filesystem path, or ``None`` if no photo was
+    uploaded. The destination directory is passed in by the caller
+    (typically the composition root's ``photos_dir`` from
+    ``application.paths``) so this module stays pure-Python and does
+    not depend on composition-root globals.
+
+    Moved here from ``main.py`` during MP-02 — keeping the helper next
+    to its ``save_photo`` sibling makes the photo pipeline easier to
+    follow and lets routers import it at module top.
+    """
+    if photo is None:
+        return None
+    content = await photo.read()
+    return save_photo(content, photos_dir)
+
+
 def prune_orphaned_photos(photos_dir: str, keep: set[str]) -> int:
     """
     Delete photos in `photos_dir` whose basename is not in `keep`.
@@ -136,6 +165,7 @@ __all__ = [
     "PHOTO_MAX_BYTES",
     "detect_image_extension",
     "save_photo",
+    "persist_uploaded_photo",
     "prune_orphaned_photos",
     "PHOTO_PLACEHOLDER_SVG",
 ]

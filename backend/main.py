@@ -47,7 +47,6 @@ from slowapi.util import get_remote_address
 
 
 from dotenv import load_dotenv
-from photo_helpers import save_photo as _save_photo
 
 load_dotenv()
 
@@ -106,23 +105,28 @@ limiter = Limiter(
 app.state.limiter = limiter  # kept for backward-compat introspection in tests
 
 # --- Module-level paths (kept for backward compat with tests + scripts) ---
-# The values are owned by FilesystemStorage in the composition root below.
-# Tests that need to drop fake PDFs into the output dir use these.
-_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-_PHOTOS_DIR = os.path.join(_OUTPUT_DIR, "photos")
+# The values now live in ``application.paths`` so routers can import them
+# at module top (completing the MP-02 circular-import cleanup). The
+# underscores in front of the re-export names preserve the historical
+# names that tests + external scripts rely on.
+from application.paths import (
+    OUTPUT_DIR as _OUTPUT_DIR,  # noqa: F401  — re-exported
+    PHOTOS_DIR as _PHOTOS_DIR,  # noqa: F401  — re-exported
+)
 
 
 async def _persist_uploaded_photo(photo):
-    """Persist the optional candidate photo. Returns absolute path or None.
+    """Backward-compatible wrapper around ``photo_helpers.persist_uploaded_photo``.
 
-    Defined here (after ``_save_photo`` and ``_PHOTOS_DIR``) so the
-    closure cannot fail at call time with ``NameError`` — this path
-    is exercised by ``tests/test_persist_uploaded_photo.py``.
+    Defined here so callers using the legacy ``from main import
+    _persist_uploaded_photo`` pattern (and the
+    ``tests/test_persist_uploaded_photo.py``) keep their no-arg
+    signature. New code should import ``persist_uploaded_photo`` from
+    ``photo_helpers`` directly and pass the photos dir explicitly.
     """
-    if photo is None:
-        return None
-    content = await photo.read()
-    return _save_photo(content, _PHOTOS_DIR)
+    from photo_helpers import persist_uploaded_photo
+
+    return await persist_uploaded_photo(photo, _PHOTOS_DIR)
 
 # --- Composition root: wire adapters into routes ---
 # This is where the hexagonal architecture becomes concrete: every use case

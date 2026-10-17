@@ -26,7 +26,9 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from playwright.sync_api import sync_playwright
 
 from application.services.yaml_editor_service import YamlEditorService
+from application.paths import PHOTOS_DIR
 from application.rate_limit import enforce_rate_limit
+from photo_helpers import persist_uploaded_photo
 from ports.resume_storage import ResumeStorage
 from domain_games import get_game
 from render_service import render_cv_with_rendercv
@@ -80,8 +82,6 @@ def build_yaml_editor_router(
         ``generate_router``'s render step; only the parsed_data
         source differs (LLM-produced dict vs user-edited YAML dict).
         """
-        from main import _persist_uploaded_photo  # removed in next refactor (commit B of MP-02)
-
         await enforce_rate_limit(request, scope="render-from-yaml")
         _validate_domain_game(domain_game)
 
@@ -95,7 +95,7 @@ def build_yaml_editor_router(
                 detail=err or "Invalid YAML",
             )
 
-        photo_path = await _persist_uploaded_photo(photo)
+        photo_path = await persist_uploaded_photo(photo, PHOTOS_DIR)
 
         # Compose labels using the same fallback chain as /api/generate
         # so the rendered PDF is consistent regardless of source.
