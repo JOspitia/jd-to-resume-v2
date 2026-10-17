@@ -107,7 +107,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
-    let interval: any = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (status === 'generating' || audit.atsStatus === 'analyzing') {
       interval = setInterval(() => {
         setElapsedSeconds(prev => prev + 1);
