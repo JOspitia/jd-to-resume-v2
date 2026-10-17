@@ -27,7 +27,7 @@ import re
 from typing import Any, Optional
 
 import yaml as _pyyaml
-from pydantic import ValidationError
+from pydantic import TypeAdapter as _TypeAdapter, ValidationError
 
 from schemas.api_models import GeminiResumeOutput
 from application.services.llm_orchestrator import LLMOrchestrator
@@ -143,6 +143,42 @@ def validate_yaml_schema(parsed: dict) -> tuple[Optional[dict], Optional[str]]:
             for err in ve.errors()
         )
     return model.model_dump(), None
+
+
+def _valid_field_subset(parsed: dict) -> dict:
+    """Return the subset of ``parsed`` whose values pass per-field type validation.
+
+    Used to build a drift baseline that only covers the candidate's
+    real facts. When the original is schema-invalid (e.g. a broken
+    ``education: not-a-list`` placeholder), the invalid fields are
+    excluded from the baseline — they're garbage the LLM was
+    explicitly asked to replace, not facts to preserve — while fields
+    the user filled correctly (e.g. ``name: Jane Doe``) still anchor
+    the drift check.
+
+    Per-field validation goes through ``TypeAdapter(field.annotation)``
+    so each top-level key is checked against its declared type
+    independently — one bad field does not exclude the others, and
+    required-field-missing-on-whole-doc doesn't mask a valid isolated
+    value.
+    """
+    safe: dict = {}
+    fields = getattr(GeminiResumeOutput, "model_fields", {})
+    for key, value in parsed.items():
+        if key not in fields:
+            # Unknown key — pydantic ignores extras by default; treat
+            # as a fact the user wrote (e.g. ``location``, ``section_labels``).
+            safe[key] = value
+            continue
+        annotation = fields[key].annotation
+        try:
+            _TypeAdapter(annotation).validate_python(value)
+        except ValidationError:
+            # Field invalid on its own (wrong type, shape mismatch) —
+            # skip; the LLM is being asked to fix it.
+            continue
+        safe[key] = value
+    return safe
 
 
 def content_tokens(text: str) -> set[str]:
@@ -272,7 +308,20 @@ class YamlEditorService:
             "You are a strict YAML repair agent. The following YAML is "
             "either syntactically broken or fails schema validation. "
             "Output ONLY the repaired YAML document — no prose, no "
-            "markdown fences.\n\n"
+            "markdown fences, no surrounding JSON envelope.\n\n"
+            "Hard rules:\n"
+            "  * Use block-style YAML (indentation + lists with ``-``), "
+            "not JSON braces.\n"
+            "  * Keep every existing key name exactly as-is. Do NOT "
+            "rename, abbreviate, prefix (``nname``, ``nemail``), or "
+            "wrap keys.\n"
+            "  * Preserve every fact from the original: names, dates, "
+            "metrics, project titles, skills. Fix structure, never "
+            "content.\n"
+            "  * Add ONLY fields required by the schema to satisfy the "
+            "validation errors. If the original has no data for a "
+            "required field, leave it as an empty list/string per the "
+            "schema — do not invent values.\n\n"
             f"Target schema:\n{_YAML_SCHEMA_DESCRIPTION}\n\n"
             f"Errors to address:\n- " + "\n- ".join(schema_errors)
             + f"\n\nYAML to repair:\n```yaml\n{broken_yaml}\n```"
@@ -301,10 +350,31 @@ class YamlEditorService:
             original_yaml = yaml_content
             repairs: list[str] = []
 
+            # The latest schema-validated dict. Drift comparison runs against
+            # ``_yaml_safe_dump_unicode(current_cleaned)`` — the canonical
+            # YAML — not the raw LLM text. Why: the LLM often answers in
+            # JSON-style YAML (still valid YAML, but with quote/brace noise
+            # tokens like ``content``, ``json``) or sprinkles ``n``-prefixed
+            # mirror keys next to the real ones (``nachievements`` next to
+            # ``achievements``) that Pydantic accepts as ``extras`` and
+            # silently drops from ``model_dump()``. Comparing drift against
+            # the raw LLM string would flag those formatting artefacts as
+            # fabricated data and abort every time; comparing against the
+            # canonical cleaned dict compares *semantic* content only.
+            current_cleaned: Optional[dict] = None
+            # Whether any pass had to call the LLM. The final drift check
+            # is skipped when no LLM was called: the only "change" then is
+            # the YAML re-normalisation (block vs JSON style), and any
+            # extras the user typed (``location``, ``section_labels``,
+            # etc.) that the schema silently drops would otherwise trip
+            # the guard on every valid input.
+            llm_called: bool = False
+
             # Pass 1 — local syntactic validation
             parsed, syntax_err = parse_yaml_safe(original_yaml)
             if syntax_err or parsed is None:
                 repairs.append(f"Local validation rejected the YAML: {syntax_err}")
+                llm_called = True
                 llm_response = await self.ask_llm_to_repair(
                     original_yaml, [syntax_err or "unknown syntax error"], domain_game,
                 )
@@ -324,7 +394,10 @@ class YamlEditorService:
                 repairs.append("LLM produced valid YAML syntax.")
                 yaml_text = llm_yaml
                 parsed = parsed2
-                drift = content_drift(original_yaml, llm_yaml)
+                # Compare against canonical YAML from the parsed dict so
+                # JSON-style answers don't trip the guard on quote/brace
+                # noise tokens.
+                drift = content_drift(original_yaml, _yaml_safe_dump_unicode(parsed2))
                 if drift:
                     return {
                         "ok": False,
@@ -342,8 +415,10 @@ class YamlEditorService:
 
             # Pass 2 — schema validation
             cleaned, schema_err = validate_yaml_schema(parsed)
+            current_cleaned = cleaned
             if schema_err or cleaned is None:
                 repairs.append(f"Local schema check rejected the YAML: {schema_err}")
+                llm_called = True
                 llm_response = await self.ask_llm_to_repair(
                     yaml_text, [schema_err or "unknown schema error"], domain_game,
                 )
@@ -374,7 +449,32 @@ class YamlEditorService:
                     }
                 repairs.append("LLM produced YAML that passes schema validation.")
                 yaml_text = llm_yaml
-                drift = content_drift(yaml_text, llm_yaml)
+                current_cleaned = cleaned2
+                # Compare the user's *valid* fields against the LLM's
+                # same fields. Both sides are filtered through the
+                # valid-field subset: the LLM gets full license to
+                # repair broken fields (``achievements: Speaker at
+                # PyCon`` -> list of strings, etc.), but the fields the
+                # user wrote correctly must come back unchanged.
+                #
+                # Extras the LLM sprinkles in (``n``-prefixed mirror
+                # keys, ``content`` / ``json`` envelope pair) are
+                # dropped by ``model_dump()`` here on the LLM side;
+                # they never enter the comparison.
+                valid_keys = (
+                    set(cleaned.keys())
+                    if cleaned is not None
+                    else set(_valid_field_subset(parsed).keys())
+                )
+                llm_subset = {k: v for k, v in cleaned2.items() if k in valid_keys}
+                if cleaned is not None:
+                    user_subset = cleaned
+                else:
+                    user_subset = _valid_field_subset(parsed)
+                drift = content_drift(
+                    _yaml_safe_dump_unicode(user_subset),
+                    _yaml_safe_dump_unicode(llm_subset),
+                )
                 if drift:
                     return {
                         "ok": False,
@@ -388,17 +488,44 @@ class YamlEditorService:
                     }
                 repairs.append("Texto verificado: sin cambios de contenido.")
 
-            # Re-serialize through yaml.safe_dump so the output is ALWAYS
-            # block-style (the LLM frequently answers with JSON-style YAML).
+            # Re-serialize through the schema-cleaned dict (when available)
+            # so the output is ALWAYS block-style and excludes LLM artefacts.
+            # Falls back to the LLM text only when there's no cleaned dict
+            # (shouldn't happen post-pass-2, but defensive).
             try:
-                normalized = _yaml_safe_dump_unicode(_pyyaml.safe_load(yaml_text))
+                if current_cleaned is not None:
+                    normalized = _yaml_safe_dump_unicode(current_cleaned)
+                else:
+                    normalized = _yaml_safe_dump_unicode(_pyyaml.safe_load(yaml_text))
                 if normalized.strip() != yaml_text.strip():
                     repairs.append("Re-formateado a YAML legible (bloques y saltos de línea).")
                 yaml_text = normalized
             except Exception as fmt_err:  # noqa: BLE001 — best-effort reformat
                 print(f"[WARN] Could not normalize repaired YAML formatting: {fmt_err}")
 
-            final_drift = content_drift(original_yaml, yaml_text)
+            # Final drift safety net. Skipped when no LLM was called: in that
+            # case the only "change" is YAML re-normalisation (block vs
+            # JSON style) plus schema-side extras-drop, and the per-pass
+            # drift check above already covered every LLM contribution.
+            # When the original was schema-invalid we use the partial
+            # valid-fields subset as baseline (both sides) so user facts
+            # still anchor the check.
+            if not llm_called:
+                final_drift = None
+            elif cleaned is not None:
+                final_drift = content_drift(
+                    _yaml_safe_dump_unicode(cleaned),
+                    yaml_text,
+                )
+            else:
+                valid_keys = set(_valid_field_subset(parsed).keys())
+                llm_subset_final = {
+                    k: v for k, v in (current_cleaned or {}).items() if k in valid_keys
+                }
+                final_drift = content_drift(
+                    _yaml_safe_dump_unicode(_valid_field_subset(parsed)),
+                    _yaml_safe_dump_unicode(llm_subset_final),
+                )
             if final_drift:
                 return {
                     "ok": False,

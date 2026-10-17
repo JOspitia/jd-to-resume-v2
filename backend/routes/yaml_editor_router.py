@@ -39,6 +39,7 @@ from render_service import render_cv_with_rendercv
 def build_yaml_editor_router(
     service: YamlEditorService,
     storage: ResumeStorage,
+    audit_service=None,
 ) -> APIRouter:
     """Build the YAML-editor router. DI of the service + renderer + storage."""
 
@@ -220,9 +221,12 @@ def build_yaml_editor_router(
 
         audit_game = get_game(domain_game)
         try:
-            from main import _run_audit_against_text
-
-            return await _run_audit_against_text(
+            if audit_service is None:
+                raise RuntimeError(
+                    "audit_service not wired into yaml_editor_router. "
+                    "Pass audit_service=... to build_yaml_editor_router()."
+                )
+            return await audit_service.audit_text(
                 resume_text=narrative,
                 jd_text=effective_jd,
                 audit_game=audit_game,

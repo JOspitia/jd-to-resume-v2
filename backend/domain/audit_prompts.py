@@ -1,17 +1,12 @@
 """
-backend.audit_prompts
-=====================
+backend.domain.audit_prompts
+==============================
 
 Builds the ATS-audit system prompt body, domain-aware per game.
 
-Used by:
-  * `/api/analyze-ats` (frontend-initiated audit on a freshly uploaded CV)
-  * `_run_internal_audit` (auto re-audit fired by `/api/generate` after a
-    forced translate-to-English flow).
-
-Both call sites used to inline the same prompt body verbatim. This module
-extracts that body so the per-game vocabulary (taxonomy + seed keywords)
-is testable in isolation, without importing main.py (which transitively
+Pure domain module — no infrastructure imports. The audit prompt body
+lives here so the per-game vocabulary (taxonomy + seed keywords) is
+testable in isolation, without importing main.py (which transitively
 pulls in fastapi, fitz, google.generativeai, etc).
 
 Public API:
