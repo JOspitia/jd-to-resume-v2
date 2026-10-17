@@ -1,6 +1,7 @@
 import os
 import sys
 import io
+from time import monotonic
 
 # Force UTF-8 stdout/stderr on Windows so print() with non-ASCII chars
 # (emojis, accented chars, etc.) does not raise UnicodeEncodeError against
@@ -67,7 +68,6 @@ async def enforce_rate_limit(request: Request, scope: str) -> None:
     """
     if not limiter.enabled:
         return
-    from time import monotonic
 
     raw = os.getenv("RATE_LIMIT_DEFAULT", "5/minute")
     try:
