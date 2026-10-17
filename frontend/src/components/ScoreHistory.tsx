@@ -19,7 +19,7 @@ export function ScoreHistory({ entries }: ScoreHistoryProps) {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rm-box p-6 bg-white border-2 border-black relative w-full"
+      className="rm-box p-6 bg-card border-2 border-border relative w-full"
     >
       <div className="absolute -top-4 -left-4 rm-tag bg-black text-white px-4 py-2 text-sm font-black">
         📈 EVOLUCIÓN DE SCORES
@@ -32,25 +32,25 @@ export function ScoreHistory({ entries }: ScoreHistoryProps) {
             <div
               key={i}
               className={`flex flex-col items-center gap-1 p-3 border-2 min-w-[90px] ${delta === null
-                ? 'border-gray-400 bg-gray-50'
+                ? 'border-gray-400 bg-muted'
                 : delta > 0
                   ? 'border-green-500 bg-green-50'
                   : delta < 0
                     ? 'border-red-400 bg-red-50'
-                    : 'border-gray-400 bg-gray-50'}`}
+                    : 'border-gray-400 bg-muted'}`}
             >
-              <span className="font-mono text-xs text-gray-500 font-bold">{entry.label}</span>
+              <span className="font-mono text-xs text-muted-foreground font-bold">{entry.label}</span>
               <span
-                className={`text-3xl font-black font-mono ${entry.ats >= 75 ? 'text-green-600' : entry.ats >= 55 ? 'text-yellow-600' : 'text-red-600'}`}
+                className={`text-3xl font-black font-mono ${entry.ats >= 75 ? 'text-green-600' : entry.ats >= 55 ? 'text-warning' : 'text-red-600'}`}
               >
                 {entry.ats} %
               </span>
               {delta !== null && (
-                <span className={`text-xs font-bold ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                <span className={`text-xs font-bold ${delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-500' : 'text-muted-foreground'}`}>
                   {delta > 0 ? `▲ +${delta}%` : delta < 0 ? `▼ ${delta}%` : '— sin cambio'}
                 </span>
               )}
-              <span className="text-xs text-gray-400 font-mono">ATS Match</span>
+              <span className="text-xs text-muted-foreground font-mono">ATS Match</span>
             </div>
           );
         })}

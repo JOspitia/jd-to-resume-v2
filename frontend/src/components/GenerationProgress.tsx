@@ -41,25 +41,25 @@ export function GenerationProgress({
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          className={`rm-box p-10 mt-8 mx-auto max-w-3xl transform rotate-1 ${status === 'generating' ? 'bg-white' : 'bg-[#fef2f2]'}`}
+          className={`rm-box p-10 mt-8 mx-auto max-w-3xl transform rotate-1 ${status === 'generating' ? 'bg-card' : 'bg-destructive/10'}`}
           role={status === 'error' ? 'alert' : 'status'}
           aria-live={status === 'error' ? 'assertive' : 'polite'}
           aria-atomic="true"
         >
           {status === 'generating' && (
             <div className="space-y-6" aria-busy="true">
-              <div className="flex justify-between items-end border-b-2 border-black pb-4">
+              <div className="flex justify-between items-end border-b-2 border-border pb-4">
                 <div>
                   <h3 className="text-2xl font-bold font-serif">{stepMessage}</h3>
-                  <div className="flex items-center gap-2 mt-1 text-sm font-mono font-bold text-blue-800">
-                    <Clock className="w-4 h-4 animate-spin text-blue-600" aria-hidden="true" />
+                  <div className="flex items-center gap-2 mt-1 text-sm font-mono font-bold text-primary">
+                    <Clock className="w-4 h-4 animate-spin text-primary" aria-hidden="true" />
                     <span>Tiempo transcurrido: {elapsedSeconds} s / 60s</span>
                   </div>
                 </div>
                 <span className="text-3xl font-black font-mono" aria-hidden="true">{progress} %</span>
               </div>
               <div
-                className="w-full border-2 border-black h-10 bg-gray-100 overflow-hidden relative"
+                className="w-full border-2 border-border h-10 bg-muted overflow-hidden relative"
                 role="progressbar"
                 aria-label="Progreso de generación del CV"
                 aria-valuemin={0}
@@ -67,7 +67,7 @@ export function GenerationProgress({
                 aria-valuenow={progress}
               >
                 <div
-                  className="bg-blue-700 h-full transition-all duration-300 ease-out"
+                  className="bg-primary h-full transition-all duration-300 ease-out"
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -79,7 +79,7 @@ export function GenerationProgress({
               <AlertCircle className="w-16 h-16 shrink-0" aria-hidden="true" />
               <div>
                 <h3 className="text-2xl font-bold font-serif mb-2">Process Failed</h3>
-                <p className="font-semibold text-lg text-black">{errorMessage}</p>
+                <p className="font-semibold text-lg text-foreground">{errorMessage}</p>
               </div>
             </div>
           )}

@@ -71,10 +71,10 @@ export function CvUploader({
         onDrop={handleDrop}
         className={`flex flex-col items-center justify-center border-2 border-dashed cursor-pointer transition-all duration-200 p-10 min-h-[220px] gap-3 ${
           dragOver
-            ? 'border-blue-700 bg-blue-50 scale-[1.01]'
+            ? 'border-primary bg-primary/15 scale-[1.01]'
             : file
-              ? 'border-emerald-600 bg-emerald-50/40'
-              : 'border-gray-400 bg-gray-50 hover:bg-white hover:border-blue-600'
+              ? 'border-success bg-success/10'
+              : 'border-gray-400 bg-muted hover:bg-accent hover:border-blue-600'
         }`}
       >
         <input
@@ -87,27 +87,27 @@ export function CvUploader({
         />
         {file ? (
           <>
-            <FileText className="w-12 h-12 text-emerald-700" strokeWidth={1.5} />
+            <FileText className="w-12 h-12 text-success" strokeWidth={1.5} />
             <p className="font-bold text-center break-words max-w-full text-lg">{file.name}</p>
-            <p className="text-emerald-700 text-sm font-mono">Click to replace</p>
+            <p className="text-success text-sm font-mono">Click to replace</p>
           </>
         ) : (
           <>
-            <UploadCloud className="w-14 h-14 text-gray-700" strokeWidth={1.5} />
+            <UploadCloud className="w-14 h-14 text-muted-foreground" strokeWidth={1.5} />
             <p className="font-bold text-center text-lg">
               {dragOver ? 'Soltá el PDF acá' : 'Arrastrá tu CV o hacé clic'}
             </p>
-            <p className="text-gray-500 font-medium text-xs font-mono">PDF · máximo 5MB</p>
+            <p className="text-muted-foreground font-medium text-xs font-mono">PDF · máximo 5MB</p>
           </>
         )}
       </div>
 
-      <label className="flex items-center gap-3 bg-white border-2 border-black p-3 font-mono font-bold cursor-pointer hover:bg-gray-50 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] select-none">
+      <label className="flex items-center gap-3 bg-card border-2 border-border p-3 font-mono font-bold cursor-pointer hover:bg-muted shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] select-none">
         <input
           type="checkbox"
           checked={extractLinkedinInfo}
           onChange={(e) => onExtractLinkedinChange(e.target.checked)}
-          className="w-4 h-4 accent-blue-700 cursor-pointer"
+          className="w-4 h-4 accent-primary cursor-pointer"
         />
         <span className="text-sm">Extraer e integrar información del perfil de LinkedIn</span>
       </label>

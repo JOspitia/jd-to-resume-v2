@@ -115,8 +115,8 @@ export function YamlEditorPanel({
   );
 
   const textareaClass = validation.valid
-    ? 'w-full font-mono text-sm p-3 border-2 border-emerald-600 min-h-[420px] resize-y bg-white'
-    : 'w-full font-mono text-sm p-3 border-2 border-rose-600 min-h-[420px] resize-y bg-rose-50/30';
+    ? 'w-full font-mono text-sm p-3 border-2 border-success min-h-[420px] resize-y bg-card'
+    : 'w-full font-mono text-sm p-3 border-2 border-destructive min-h-[420px] resize-y bg-destructive/10/30';
 
   // ---------- Render ----------
   return (
@@ -135,30 +135,30 @@ export function YamlEditorPanel({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.98 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="rm-box p-8 mt-8 bg-white w-full max-w-4xl"
+            className="rm-box p-8 mt-8 bg-card w-full max-w-4xl"
           >
             {/* Header */}
-            <div className="flex items-center justify-between mb-4 border-b-2 border-black pb-3 flex-wrap gap-2">
+            <div className="flex items-center justify-between mb-4 border-b-2 border-border pb-3 flex-wrap gap-2">
               <div className="flex items-center gap-3">
                 <h3 className="text-2xl font-bold font-serif">Editor de CV</h3>
                 {validation.valid ? (
-                  <span className="flex items-center gap-1 text-xs font-mono text-emerald-700">
+                  <span className="flex items-center gap-1 text-xs font-mono text-success">
                     <CheckCircle2 className="w-4 h-4" /> YAML válido
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 text-xs font-mono text-rose-700">
+                  <span className="flex items-center gap-1 text-xs font-mono text-destructive">
                     <AlertCircle className="w-4 h-4" /> YAML inválido
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {/* View-mode toggle */}
-                <div className="flex border-2 border-black">
+                <div className="flex border-2 border-border">
                   <button
                     type="button"
                     onClick={() => setViewMode('form')}
                     aria-pressed={viewMode === 'form'}
-                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'form' ? 'bg-black text-white' : 'bg-white text-black'}`}
+                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'form' ? 'bg-black text-white' : 'bg-card text-foreground'}`}
                   >
                     <LayoutGrid className="w-3.5 h-3.5" /> Formulario
                   </button>
@@ -166,7 +166,7 @@ export function YamlEditorPanel({
                     type="button"
                     onClick={() => setViewMode('yaml')}
                     aria-pressed={viewMode === 'yaml'}
-                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'yaml' ? 'bg-black text-white' : 'bg-white text-black'}`}
+                    className={`px-3 py-1.5 text-xs font-bold flex items-center gap-1 ${viewMode === 'yaml' ? 'bg-black text-white' : 'bg-card text-foreground'}`}
                   >
                     <FileText className="w-3.5 h-3.5" /> Ver YAML
                   </button>
@@ -175,7 +175,7 @@ export function YamlEditorPanel({
                   type="button"
                   onClick={onClose}
                   title="Cerrar el editor y volver al CV generado"
-                  className="text-sm font-mono text-gray-600 hover:text-rose-700 flex items-center gap-1"
+                  className="text-sm font-mono text-muted-foreground hover:text-destructive flex items-center gap-1"
                 >
                   <X className="w-4 h-4" /> Cerrar
                 </button>
@@ -184,14 +184,14 @@ export function YamlEditorPanel({
 
             {/* Error banner (from the parent, e.g. backend render error) */}
             {yamlError && (
-              <div className="mb-4 p-3 bg-rose-100 border-2 border-rose-700 text-rose-900 font-mono text-sm">
+              <div className="mb-4 p-3 bg-destructive/15 border-2 border-rose-700 text-destructive font-mono text-sm">
                 {yamlError}
               </div>
             )}
 
             {/* Inline validation error with line/column (yaml view) */}
             {viewMode === 'yaml' && !validation.valid && (
-              <div className="mb-3 p-3 bg-rose-50 border-2 border-rose-500 text-rose-900 font-mono text-xs">
+              <div className="mb-3 p-3 bg-destructive/10 border-2 border-rose-500 text-destructive font-mono text-xs">
                 <div className="flex items-center gap-1 font-bold mb-1">
                   <AlertCircle className="w-3.5 h-3.5" /> Error de sintaxis YAML
                   {validation.line !== undefined && (
@@ -201,7 +201,7 @@ export function YamlEditorPanel({
                     </span>
                   )}
                 </div>
-                <div className="text-rose-800">{validation.error}</div>
+                <div className="text-destructive">{validation.error}</div>
               </div>
             )}
 
@@ -231,7 +231,7 @@ export function YamlEditorPanel({
                 fixing a broken YAML so the user knows why there's a delay and
                 that nothing was lost. */}
             {yamlRepairing && status === 'generating' && (
-              <div className="mt-4 p-3 bg-purple-50 border-2 border-purple-400 text-purple-900 text-sm flex items-center gap-3">
+              <div className="mt-4 p-3 bg-accent/15 border-2 border-purple-400 text-foreground text-sm flex items-center gap-3">
                 <Sparkles className="w-4 h-4 shrink-0 animate-pulse" />
                 <span>
                   Detectamos un error de formato en tu YAML. La IA lo está
@@ -251,7 +251,7 @@ export function YamlEditorPanel({
                     ? 'El YAML tiene errores. La IA los arreglará automáticamente al hacer clic.'
                     : undefined
                 }
-                className={`rm-btn bg-blue-700 text-white px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`rm-btn bg-primary text-white px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Play className="w-4 h-4" />
                 {status === 'generating' ? 'Renderizando…' : 'Generar CV'}
@@ -260,7 +260,7 @@ export function YamlEditorPanel({
                 type="button"
                 onClick={onRegenerate}
                 disabled={status === 'generating'}
-                className={`rm-btn bg-white border-2 border-black text-black px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`rm-btn bg-card border-2 border-border text-foreground px-6 py-3 font-bold flex items-center gap-2 ${status === 'generating' ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <RefreshCw className="w-4 h-4" />
                 Descartar y regenerar YAML
@@ -269,7 +269,7 @@ export function YamlEditorPanel({
                 type="button"
                 onClick={onAudit}
                 disabled={atsStatus === 'analyzing'}
-                className={`rm-btn bg-yellow-100 border-2 border-black text-black px-6 py-3 font-bold flex items-center gap-2 ${atsStatus === 'analyzing' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`rm-btn bg-warning/15 border-2 border-border text-foreground px-6 py-3 font-bold flex items-center gap-2 ${atsStatus === 'analyzing' ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <ShieldCheck className="w-4 h-4" />
                 VALIDAR YAML (Sin generar CV)
@@ -279,7 +279,7 @@ export function YamlEditorPanel({
                 onClick={onRepair}
                 disabled={yamlRepairing}
                 title="Pide a la IA que arregle la sintaxis/estructura del YAML preservando tus datos verbatim"
-                className={`rm-btn bg-purple-100 border-2 border-purple-700 text-purple-900 px-6 py-3 font-bold flex items-center gap-2 ${yamlRepairing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`rm-btn bg-accent border-2 border-foreground/50 text-foreground px-6 py-3 font-bold flex items-center gap-2 ${yamlRepairing ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <Sparkles className="w-4 h-4" />
                 {yamlRepairing ? 'REPARANDO YAML…' : 'REPARAR YAML (IA)'}
@@ -289,7 +289,7 @@ export function YamlEditorPanel({
                   type="button"
                   onClick={onRestoreBackup}
                   title="Restaura el texto que tenías antes de la última reparación"
-                  className="rm-btn bg-white border-2 border-purple-700 text-purple-900 px-6 py-3 font-bold flex items-center gap-2"
+                  className="rm-btn bg-card border-2 border-foreground/50 text-foreground px-6 py-3 font-bold flex items-center gap-2"
                 >
                   <RotateCcw className="w-4 h-4" />
                   Deshacer reparación
@@ -298,12 +298,12 @@ export function YamlEditorPanel({
             </div>
 
             {yamlRepairNotice && (
-              <div className="mt-4 p-3 bg-purple-50 border-2 border-purple-400 text-purple-900 text-xs whitespace-pre-line font-mono">
+              <div className="mt-4 p-3 bg-accent/15 border-2 border-purple-400 text-foreground text-xs whitespace-pre-line font-mono">
                 {yamlRepairNotice}
               </div>
             )}
 
-            <p className="mt-4 text-xs font-mono text-gray-500">
+            <p className="mt-4 text-xs font-mono text-muted-foreground">
               {viewMode === 'form'
                 ? 'Estás editando el formulario. Los cambios se serializan a YAML automáticamente. Si preferís ver el YAML crudo, usá el toggle "Ver YAML" arriba.'
                 : 'Estás editando el YAML crudo. Si preferís un formulario con campos, usá el toggle "Formulario" arriba.'}
@@ -312,7 +312,7 @@ export function YamlEditorPanel({
             {/* Explicit contract for this route. The AI-tailoring path (JD /
                 "Requerimientos de modificación") is a different flow entirely;
                 here the document is the user's, and nothing rewrites it. */}
-            <div className="mt-3 p-3 bg-emerald-50 border-2 border-emerald-600 text-emerald-900 text-xs">
+            <div className="mt-3 p-3 bg-emerald-50 border-2 border-success text-success text-xs">
               <span className="font-bold">Tu texto se genera tal cual.</span>{' '}
               Al presionar "Generar CV" no se llama a la IA para reescribir nada: se
               renderiza exactamente lo que escribiste. Si el formato tiene un error,

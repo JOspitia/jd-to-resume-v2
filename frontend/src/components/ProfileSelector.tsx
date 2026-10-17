@@ -63,8 +63,8 @@ export function ProfileSelector({ domainGame, onChange }: ProfileSelectorProps) 
             whileTap={{ y: 0 }}
             className={`p-5 text-left border-2 flex flex-col gap-2 transition-all ${
               selected
-                ? 'border-blue-700 bg-blue-700 text-white shadow-[4px_4px_0px_0px_rgba(29,78,216,1)]'
-                : 'border-black bg-white text-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:bg-gray-50'
+                ? 'border-primary bg-primary text-primary-foreground shadow-neo'
+                : 'border-border bg-card text-foreground shadow-neo-sm hover:bg-accent'
             }`}
           >
             <div className="flex items-center gap-2 w-full">
@@ -75,7 +75,7 @@ export function ProfileSelector({ domainGame, onChange }: ProfileSelectorProps) 
             </div>
             <p
               className={`text-xs leading-snug ${
-                selected ? 'text-blue-50' : 'text-gray-600'
+                selected ? 'text-primary-foreground/80' : 'text-muted-foreground'
               }`}
             >
               {description}

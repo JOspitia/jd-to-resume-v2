@@ -32,9 +32,9 @@ export type JobContextProps = {
 };
 
 const inputClass =
-  "w-full border-2 border-black bg-white p-2.5 font-sans text-sm focus:outline-none focus:ring-4 focus:ring-blue-100";
+  "w-full border-2 border-border bg-card text-foreground p-2.5 font-sans text-sm focus:outline-none focus:ring-4 focus:ring-primary/20 placeholder:text-muted-foreground";
 
-const linkInputClass = inputClass + ' placeholder-gray-400';
+const linkInputClass = inputClass + ' placeholder:text-muted-foreground';
 
 export function JobContext({
   jd,
@@ -56,7 +56,7 @@ export function JobContext({
       <div className="flex flex-col gap-1.5">
         <label
           htmlFor="target-role"
-          className="font-bold font-mono text-xs uppercase tracking-wide text-gray-700 flex items-center gap-1.5"
+          className="font-bold font-mono text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-1.5"
         >
           <Briefcase className="w-3.5 h-3.5" /> Cargo objetivo
         </label>
@@ -75,12 +75,12 @@ export function JobContext({
         <div className="flex items-center justify-between">
           <label
             htmlFor="jd"
-            className="font-bold font-mono text-xs uppercase tracking-wide text-gray-700"
+            className="font-bold font-mono text-xs uppercase tracking-wide text-muted-foreground"
           >
             {step2Mode === 'jd' ? 'Oferta de trabajo' : 'Requerimientos de modificación'}
           </label>
           <div
-            className="flex gap-1 bg-gray-100 p-0.5 border border-black"
+            className="flex gap-1 bg-muted p-0.5 border border-border"
             role="tablist"
           >
             <button
@@ -89,7 +89,7 @@ export function JobContext({
               aria-selected={step2Mode === 'jd'}
               onClick={() => onStep2ModeChange('jd')}
               className={`px-2.5 py-0.5 text-xs font-bold transition-all ${
-                step2Mode === 'jd' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'
+                step2Mode === 'jd' ? 'bg-black text-white' : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               💼 Oferta
@@ -100,7 +100,7 @@ export function JobContext({
               aria-selected={step2Mode === 'custom'}
               onClick={() => onStep2ModeChange('custom')}
               className={`px-2.5 py-0.5 text-xs font-bold transition-all ${
-                step2Mode === 'custom' ? 'bg-black text-white' : 'text-gray-700 hover:bg-gray-200'
+                step2Mode === 'custom' ? 'bg-black text-white' : 'text-muted-foreground hover:bg-muted'
               }`}
             >
               📝 Requerimientos
@@ -116,16 +116,16 @@ export function JobContext({
               ? "Pega acá los requisitos o descripción de la oferta laboral..."
               : "Ejemplo: Cambiar fecha 2026-08 por 2026-09..."
           }
-          className="w-full border-2 border-black bg-white p-3 font-sans resize-y focus:outline-none focus:ring-4 focus:ring-blue-100 min-h-[160px] text-sm placeholder-gray-500"
+          className="w-full border-2 border-border bg-card text-foreground p-3 font-sans resize-y focus:outline-none focus:ring-4 focus:ring-primary/20 min-h-[160px] text-sm placeholder:text-muted-foreground"
         />
-        <p className="text-xs text-gray-500 italic">
+        <p className="text-xs text-muted-foreground italic">
           * Si no contás con una oferta específica, cambiá a "Requerimientos" o dejá vacío para optimización general ATS.
         </p>
       </div>
 
       {/* Profile links — single row */}
-      <div className="border-t-2 border-gray-200 pt-3">
-        <div className="text-xs font-mono text-gray-500 uppercase tracking-wide mb-2">
+      <div className="border-t-2 border-border pt-3">
+        <div className="text-xs font-mono text-muted-foreground uppercase tracking-wide mb-2">
           Links (opcional)
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">

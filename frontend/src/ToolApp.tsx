@@ -90,7 +90,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   };
 
   return (
-    <div className="min-h-screen text-black flex flex-col items-center pt-10 pb-44 px-4 md:px-8 selection:bg-blue-600 selection:text-white relative">
+    <div className="min-h-screen text-foreground flex flex-col items-center pt-10 pb-44 px-4 md:px-8 selection:bg-primary selection:text-primary-foreground relative">
       {/* Top bar — back + reset, compact */}
       <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
         <Button
@@ -124,13 +124,13 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
         animate={{ opacity: 1, y: 0 }}
         className="text-center w-full max-w-5xl mt-4 mb-8 z-10"
       >
-        <h1 className="text-2xl md:text-3xl font-extrabold font-serif tracking-tight text-black">
+        <h1 className="text-2xl md:text-3xl font-extrabold font-serif tracking-tight text-foreground">
           Perfect Your Resume.{' '}
           <span className="text-blue-700 underline decoration-4 underline-offset-4 decoration-orange-500">
             Beat the ATS.
           </span>
         </h1>
-        <p className="text-sm md:text-base text-gray-700 mt-2">
+        <p className="text-sm md:text-base text-muted-foreground mt-2">
           Subí tu CV, elegí el perfil, pegá la vacante — generamos un PDF
           adaptado en minutos.
         </p>

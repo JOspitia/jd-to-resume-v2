@@ -28,7 +28,7 @@ export type YamlFormEditorProps = {
 function Field({ label, children, span = 1 }: { label: string; children: React.ReactNode; span?: 1 | 2 }) {
   return (
     <label className={`flex flex-col gap-1 ${span === 2 ? 'sm:col-span-2' : ''}`}>
-      <span className="text-[10px] font-mono uppercase tracking-wide text-gray-600">{label}</span>
+      <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground">{label}</span>
       {children}
     </label>
   );
@@ -51,7 +51,7 @@ function TextInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-full border border-gray-400 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className="w-full border border-gray-400 bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
     />
   );
 }
@@ -76,7 +76,7 @@ function TextAreaInput({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       rows={rows}
-      className="w-full border border-gray-400 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+      className="w-full border border-gray-400 bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y"
     />
   );
 }
@@ -86,7 +86,7 @@ function AddButton({ onClick, label }: { onClick: () => void; label: string }) {
     <button
       type="button"
       onClick={onClick}
-      className="rm-btn bg-white border-2 border-black text-black text-xs px-3 py-1.5 font-bold flex items-center gap-1"
+      className="rm-btn bg-card border-2 border-border text-foreground text-xs px-3 py-1.5 font-bold flex items-center gap-1"
     >
       <Plus className="w-3.5 h-3.5" /> {label}
     </button>
@@ -99,7 +99,7 @@ function RemoveButton({ onClick, label = 'Quitar' }: { onClick: () => void; labe
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="rm-btn bg-rose-50 border-2 border-rose-700 text-rose-800 text-xs px-2 py-1 font-bold flex items-center gap-1"
+      className="rm-btn bg-destructive/10 border-2 border-rose-700 text-destructive text-xs px-2 py-1 font-bold flex items-center gap-1"
     >
       <Trash2 className="w-3.5 h-3.5" /> {label}
     </button>
@@ -108,7 +108,7 @@ function RemoveButton({ onClick, label = 'Quitar' }: { onClick: () => void; labe
 
 function SectionCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <section className="rm-box p-4 bg-white">
+    <section className="rm-box p-4 bg-card">
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-sm font-bold font-serif uppercase tracking-wide">{title}</h4>
         {action}
@@ -186,15 +186,15 @@ function SummarySection({ value, onChange }: { value: string; onChange: (v: stri
         <button
           type="button"
           onClick={handleFix}
-          className="rm-btn bg-white border border-blue-700 text-blue-800 text-[10px] px-2 py-0.5 font-mono font-bold flex items-center gap-1 hover:bg-blue-50"
+          className="rm-btn bg-card border border-primary text-primary text-[10px] px-2 py-0.5 font-mono font-bold flex items-center gap-1 hover:bg-primary/15"
         >
           <Wand2 className="w-3 h-3" /> Auto-formatear
         </button>
-        <span className="text-[10px] text-gray-500 italic">
+        <span className="text-[10px] text-muted-foreground italic">
           Separa un bloque pegado en párrafos (2 oraciones por párrafo)
         </span>
       </div>
-      <p className="text-[10px] text-gray-500 mt-1">Soporta varias líneas. Se serializa como bloque literal (|) en YAML.</p>
+      <p className="text-[10px] text-muted-foreground mt-1">Soporta varias líneas. Se serializa como bloque literal (|) en YAML.</p>
     </SectionCard>
   );
 }
@@ -221,11 +221,11 @@ function EducationSection({
       action={<AddButton onClick={add} label="Agregar educación" />}
     >
       {data.length === 0 ? (
-        <p className="text-xs text-gray-500 italic">Sin entradas. Click &ldquo;Agregar educación&rdquo; para empezar.</p>
+        <p className="text-xs text-muted-foreground italic">Sin entradas. Click &ldquo;Agregar educación&rdquo; para empezar.</p>
       ) : (
         <div className="space-y-3">
           {data.map((e, i) => (
-            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-gray-50">
+            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-muted">
               <div className="grid sm:grid-cols-2 gap-2">
                 <Field label="Institución">
                   <TextInput value={e.school} onChange={(v) => update(i, { school: v })} />
@@ -282,11 +282,11 @@ function SkillsSection({
       action={<AddButton onClick={add} label="Agregar categoría" />}
     >
       {data.length === 0 ? (
-        <p className="text-xs text-gray-500 italic">Sin categorías. Click &ldquo;Agregar categoría&rdquo; para empezar.</p>
+        <p className="text-xs text-muted-foreground italic">Sin categorías. Click &ldquo;Agregar categoría&rdquo; para empezar.</p>
       ) : (
         <div className="space-y-3">
           {data.map((s, i) => (
-            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-gray-50">
+            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-muted">
               <Field label="Nombre de la categoría">
                 <TextInput
                   value={s.category}
@@ -358,11 +358,11 @@ function BulletTextarea({
         <button
           type="button"
           onClick={handleFix}
-          className="rm-btn bg-white border border-blue-700 text-blue-800 text-[10px] px-2 py-0.5 font-mono font-bold flex items-center gap-1 hover:bg-blue-50"
+          className="rm-btn bg-card border border-primary text-primary text-[10px] px-2 py-0.5 font-mono font-bold flex items-center gap-1 hover:bg-primary/15"
         >
           <Wand2 className="w-3 h-3" /> Auto-separar bullets
         </button>
-        <span className="text-[10px] text-gray-500 italic">
+        <span className="text-[10px] text-muted-foreground italic">
           Separa un bloque pegado en bullets por párrafo u oración
         </span>
       </div>
@@ -393,11 +393,11 @@ function ExperienceSection({
       action={<AddButton onClick={add} label="Agregar experiencia" />}
     >
       {data.length === 0 ? (
-        <p className="text-xs text-gray-500 italic">Sin experiencias. Click &ldquo;Agregar experiencia&rdquo; para empezar.</p>
+        <p className="text-xs text-muted-foreground italic">Sin experiencias. Click &ldquo;Agregar experiencia&rdquo; para empezar.</p>
       ) : (
         <div className="space-y-3">
           {data.map((x, i) => (
-            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-gray-50">
+            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-muted">
               <div className="grid sm:grid-cols-2 gap-2">
                 <Field label="Empresa">
                   <TextInput value={x.company} onChange={(v) => update(i, { company: v })} />
@@ -453,11 +453,11 @@ function ProjectsSection({
       action={<AddButton onClick={add} label="Agregar proyecto" />}
     >
       {data.length === 0 ? (
-        <p className="text-xs text-gray-500 italic">Sin proyectos. (Opcional)</p>
+        <p className="text-xs text-muted-foreground italic">Sin proyectos. (Opcional)</p>
       ) : (
         <div className="space-y-3">
           {data.map((p, i) => (
-            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-gray-50">
+            <div key={i} className="border border-gray-300 p-3 space-y-2 bg-muted">
               <div className="grid sm:grid-cols-2 gap-2">
                 <Field label="Nombre">
                   <TextInput value={p.name} onChange={(v) => update(i, { name: v })} />
@@ -506,7 +506,7 @@ function AchievementsSection({
       }
     >
       {data.length === 0 ? (
-        <p className="text-xs text-gray-500 italic">Sin logros. (Opcional)</p>
+        <p className="text-xs text-muted-foreground italic">Sin logros. (Opcional)</p>
       ) : (
         <div className="space-y-2">
           {data.map((a, i) => (
@@ -515,7 +515,7 @@ function AchievementsSection({
                 value={a}
                 onChange={(e) => onChange(data.map((x, idx) => (idx === i ? e.target.value : x)))}
                 rows={2}
-                className="flex-1 border border-gray-400 bg-white px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
+                className="flex-1 border border-gray-400 bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y"
               />
               <RemoveButton onClick={() => onChange(data.filter((_, idx) => idx !== i))} />
             </div>

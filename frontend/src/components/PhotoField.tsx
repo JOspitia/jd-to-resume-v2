@@ -34,7 +34,7 @@ export function PhotoField({
     <div className="flex flex-col gap-1.5">
       <label
         htmlFor="candidate-photo"
-        className="font-bold font-mono text-xs uppercase tracking-wide text-gray-700 flex items-center gap-1.5"
+        className="font-bold font-mono text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-1.5"
       >
         <UserCircle2 className="w-3.5 h-3.5" /> Foto (opcional)
       </label>
@@ -45,17 +45,17 @@ export function PhotoField({
         type="file"
         accept="image/png,image/jpeg,image/gif,image/webp"
         onChange={onChange}
-        className="block w-full text-xs font-mono file:mr-3 file:border-2 file:border-black file:bg-gray-100 file:px-3 file:py-1.5 file:font-bold hover:file:bg-gray-200 cursor-pointer"
+        className="block w-full text-xs font-mono text-foreground file:mr-3 file:border-2 file:border-border file:bg-accent file:text-foreground file:px-3 file:py-1.5 file:font-bold hover:file:bg-muted cursor-pointer"
       />
 
       {preview && (
-        <div className="flex items-center gap-3 mt-1 p-2 border-2 border-black bg-gray-50">
+        <div className="flex items-center gap-3 mt-1 p-2 border-2 border-border bg-muted">
           <img
             src={preview}
             alt="Vista previa de la foto"
-            className="w-14 h-14 rounded-full object-cover border-2 border-black shrink-0"
+            className="w-14 h-14 rounded-full object-cover border-2 border-border shrink-0"
           />
-          <span className="text-xs font-mono text-gray-700 flex-1">
+          <span className="text-xs font-mono text-muted-foreground flex-1">
             Se mostrará en el encabezado del CV.
           </span>
           <button
@@ -63,7 +63,7 @@ export function PhotoField({
             onClick={onClear}
             title="Quitar la foto"
             aria-label="Quitar la foto"
-            className="p-1.5 border-2 border-black bg-white hover:bg-rose-100 text-rose-700 shrink-0"
+            className="p-1.5 border-2 border-border bg-card hover:bg-destructive/15 text-destructive shrink-0"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -77,7 +77,7 @@ export function PhotoField({
       )}
 
       {!preview && (
-        <p className="text-[11px] text-gray-500 italic">
+        <p className="text-[11px] text-muted-foreground italic">
           PNG, JPG, GIF o WebP. Hasta 5&nbsp;MB. Dejala vacía si preferís un CV
           sin fotografía.
         </p>

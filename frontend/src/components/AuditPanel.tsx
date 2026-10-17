@@ -43,16 +43,16 @@ export function AuditPanel({
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          className="rm-box p-8 md:p-10 bg-white border-4 border-black relative"
+          className="rm-box p-8 md:p-10 bg-card border-4 border-border relative"
         >
-          <div className="absolute -top-4 -left-4 rm-tag bg-yellow-400 text-black px-4 py-2 text-lg font-black flex items-center gap-2">
+          <div className="absolute -top-4 -left-4 rm-tag bg-warning text-foreground px-4 py-2 text-lg font-black flex items-center gap-2">
             <ShieldCheck className="w-5 h-5" /> AUDITORÍA ATS &amp; TONO HUMANO(CompuTrabajo Style)
           </div>
 
           {atsStatus === 'analyzing' && (
             <div className="py-12 flex flex-col items-center justify-center space-y-4">
               <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.5, ease: 'linear' }}>
-                <BarChart3 className="w-16 h-16 text-blue-700" />
+                <BarChart3 className="w-16 h-16 text-primary" />
               </motion.div>
               <p className="text-xl font-bold font-serif">
                 Analizando palabras clave, coincidencia ATS y nivel de redacción por IA...
@@ -75,12 +75,12 @@ export function AuditPanel({
               {/* Scores Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* ATS Match Score */}
-                <div className="rm-box p-6 bg-blue-50 text-center flex flex-col items-center justify-center">
+                <div className="rm-box p-6 bg-primary/15 text-center flex flex-col items-center justify-center">
                   <span className="font-mono font-bold text-xs uppercase text-blue-900 tracking-wider mb-2">
                     Match ATS(CompuTrabajo)
                   </span>
                   <div
-                    className={`text-6xl font-black font-mono my-2 ${atsData.ats_score >= 80 ? 'text-green-600' : atsData.ats_score >= 60 ? 'text-yellow-600' : 'text-red-600'}`}
+                    className={`text-6xl font-black font-mono my-2 ${atsData.ats_score >= 80 ? 'text-green-600' : atsData.ats_score >= 60 ? 'text-warning' : 'text-red-600'}`}
                   >
                     {atsData.ats_score} %
                   </div>
@@ -90,12 +90,12 @@ export function AuditPanel({
                 </div>
 
                 {/* AI Tone / Human Risk Score */}
-                <div className="rm-box p-6 bg-purple-50 text-center flex flex-col items-center justify-center">
-                  <span className="font-mono font-bold text-xs uppercase text-purple-900 tracking-wider mb-2">
+                <div className="rm-box p-6 bg-accent/15 text-center flex flex-col items-center justify-center">
+                  <span className="font-mono font-bold text-xs uppercase text-foreground tracking-wider mb-2">
                     Detección de Tono IA
                   </span>
                   <div
-                    className={`text-6xl font-black font-mono my-2 ${atsData.ai_detection_score <= 20 ? 'text-green-600' : atsData.ai_detection_score <= 50 ? 'text-yellow-600' : 'text-red-600'}`}
+                    className={`text-6xl font-black font-mono my-2 ${atsData.ai_detection_score <= 20 ? 'text-green-600' : atsData.ai_detection_score <= 50 ? 'text-warning' : 'text-red-600'}`}
                   >
                     {atsData.ai_detection_score} %
                   </div>
@@ -119,7 +119,7 @@ export function AuditPanel({
               {/* Keywords Comparison */}
               <div className="grid md:grid-cols-2 gap-8">
                 {/* Matched Keywords */}
-                <div className="rm-box p-6 bg-white">
+                <div className="rm-box p-6 bg-card">
                   <h4 className="font-bold text-lg font-serif mb-4 flex items-center gap-2 text-green-700">
                     <CheckCircle2 className="w-5 h-5" /> Palabras Clave Detectadas({atsData.matched_keywords?.length || 0})
                   </h4>
@@ -134,13 +134,13 @@ export function AuditPanel({
                         </span>
                       ))
                     ) : (
-                      <p className="text-gray-500 text-sm">No se detectaron palabras clave coincidentes.</p>
+                      <p className="text-muted-foreground text-sm">No se detectaron palabras clave coincidentes.</p>
                     )}
                   </div>
                 </div>
 
                 {/* Missing Keywords (Interactive Selection) */}
-                <div className="rm-box p-6 bg-white">
+                <div className="rm-box p-6 bg-card">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="font-bold text-lg font-serif flex items-center gap-2 text-orange-700">
                       <AlertTriangle className="w-5 h-5" /> Palabras Clave Faltantes({atsData.missing_keywords?.length || 0})
@@ -151,7 +151,7 @@ export function AuditPanel({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-600 font-medium mb-4">
+                  <p className="text-xs text-muted-foreground font-medium mb-4">
                     💡 Haz clic en las palabras clave que realmente poseas para marcarlas e integrarlas automáticamente al regenerar:
                   </p>
                   <div className="flex flex-wrap gap-2">
@@ -164,7 +164,7 @@ export function AuditPanel({
                             type="button"
                             onClick={() => onToggleKeyword(kw)}
                             className={`rm-tag border text-sm font-bold px-3 py-1.5 transition-all flex items-center gap-1.5 cursor-pointer ${isSelected
-                              ? 'bg-orange-500 border-black text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] -translate-y-0.5'
+                              ? 'bg-orange-500 border-border text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] -translate-y-0.5'
                               : 'bg-orange-50 border-orange-400 text-orange-950 hover:bg-orange-100'}`}
                           >
                             <span>{isSelected ? '✓' : '+'}</span>
@@ -173,7 +173,7 @@ export function AuditPanel({
                         );
                       })
                     ) : (
-                      <p className="text-gray-500 text-sm">¡Excelente! No faltan palabras clave principales.</p>
+                      <p className="text-muted-foreground text-sm">¡Excelente! No faltan palabras clave principales.</p>
                     )}
                   </div>
                 </div>
@@ -183,9 +183,9 @@ export function AuditPanel({
               <div className="grid md:grid-cols-2 gap-8">
                 {/* AI Humanization Feedback */}
                 {atsData.ai_humanize_tips && atsData.ai_humanize_tips.length > 0 && (
-                  <div className="rm-box p-6 bg-purple-50">
-                    <h4 className="font-bold text-lg font-serif mb-2 flex items-center gap-2 text-purple-900">
-                      <Sparkles className="w-5 h-5 text-purple-700" /> Consejos para Humanizar el Tono
+                  <div className="rm-box p-6 bg-accent/15">
+                    <h4 className="font-bold text-lg font-serif mb-2 flex items-center gap-2 text-foreground">
+                      <Sparkles className="w-5 h-5 text-foreground" /> Consejos para Humanizar el Tono
                     </h4>
                     <p className="text-xs text-purple-800 font-medium mb-4">
                       Marca las casillas que deseas aplicar al regenerar:
@@ -194,7 +194,7 @@ export function AuditPanel({
                       {atsData.ai_humanize_tips.map((tip: string, i: number) => (
                         <label
                           key={i}
-                          className="flex items-start gap-3 cursor-pointer p-2 border border-purple-200 hover:border-purple-600 bg-white/70 hover:bg-white transition-all select-none"
+                          className="flex items-start gap-3 cursor-pointer p-2 border border-foreground/30 hover:border-foreground/70 bg-card/70 hover:bg-accent transition-all select-none"
                         >
                           <input
                             type="checkbox"
@@ -211,7 +211,7 @@ export function AuditPanel({
 
                 {/* Actionable ATS Tips */}
                 {atsData.actionable_tips && atsData.actionable_tips.length > 0 && (
-                  <div className="rm-box p-6 bg-yellow-50">
+                  <div className="rm-box p-6 bg-warning/15">
                     <h4 className="font-bold text-lg font-serif mb-2 flex items-center gap-2 text-yellow-900">
                       <BarChart3 className="w-5 h-5 text-yellow-800" /> Recomendaciones para Subir de Rango
                     </h4>
@@ -222,13 +222,13 @@ export function AuditPanel({
                       {atsData.actionable_tips.map((tip: string, i: number) => (
                         <label
                           key={i}
-                          className="flex items-start gap-3 cursor-pointer p-2 border border-yellow-300 hover:border-yellow-600 bg-white/70 hover:bg-white transition-all select-none"
+                          className="flex items-start gap-3 cursor-pointer p-2 border border-warning hover:border-warning bg-card/70 hover:bg-accent transition-all select-none"
                         >
                           <input
                             type="checkbox"
                             checked={selectedTips.includes(tip)}
                             onChange={() => onToggleTip(tip)}
-                            className="w-4 h-4 mt-1 accent-yellow-600 cursor-pointer shrink-0"
+                            className="w-4 h-4 mt-1 accent-warning cursor-pointer shrink-0"
                           />
                           <span className="text-sm font-medium text-gray-900">{tip}</span>
                         </label>
@@ -239,29 +239,29 @@ export function AuditPanel({
               </div>
 
               {/* Refinement Area: selections + optional extra instructions + regeneration button */}
-              <div className="rm-box p-6 md:p-8 bg-blue-50 border-2 border-black space-y-4">
+              <div className="rm-box p-6 md:p-8 bg-primary/15 border-2 border-border space-y-4">
                 <h4 className="font-bold text-xl font-serif flex items-center gap-2 text-blue-900">
-                  <Edit3 className="w-6 h-6 text-blue-700" /> Ajustar &amp; Regenerar CV con Mejoras Seleccionadas
+                  <Edit3 className="w-6 h-6 text-primary" /> Ajustar &amp; Regenerar CV con Mejoras Seleccionadas
                 </h4>
-                <p className="text-sm text-gray-700 font-medium">
+                <p className="text-sm text-muted-foreground font-medium">
                   Has seleccionado <span className="font-bold text-orange-700">{selectedKeywords.length} palabra(s) clave</span> y{' '}
                   <span className="font-bold text-purple-800">{selectedTips.length} consejo(s)</span>. Las indicaciones
                   adicionales se escriben en «Opciones Avanzadas → Instrucciones adicionales para la IA».
                 </p>
 
                 {/* Strict Surgical Edit Toggle */}
-                <label className="flex items-start gap-3 bg-white border-2 border-black p-4 cursor-pointer hover:bg-yellow-50 transition-all select-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
+                <label className="flex items-start gap-3 bg-card border-2 border-border p-4 cursor-pointer hover:bg-warning/15 transition-all select-none shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
                   <input
                     type="checkbox"
                     checked={strictEditsOnly}
                     onChange={(e) => onStrictEditsOnlyChange(e.target.checked)}
-                    className="w-5 h-5 mt-0.5 accent-yellow-600 cursor-pointer shrink-0"
+                    className="w-5 h-5 mt-0.5 accent-warning cursor-pointer shrink-0"
                   />
                   <div>
                     <span className="font-bold text-sm block text-gray-900">
                       🔒 Modo Edición Quirúrgica(Aplicar SOLO cambios solicitados)
                     </span>
-                    <span className="text-xs text-gray-600 block mt-0.5 font-medium">
+                    <span className="text-xs text-muted-foreground block mt-0.5 font-medium">
                       Activa esta casilla para corregir o cambiar datos puntuales(ej.cambiar fecha de la UNIR a "2026-08 -
                       Actualidad") garantizando que la IA conserve el resto del CV 100 % idéntico sin reescribir ni alterar
                       nada más.
@@ -273,7 +273,7 @@ export function AuditPanel({
                   <button
                     onClick={onRegenerateWithFeedback}
                     disabled={status === 'generating'}
-                    className="rm-btn bg-purple-700 text-white hover:bg-purple-800 disabled:opacity-50 px-8 py-4 text-lg font-bold flex items-center gap-3"
+                    className="rm-btn bg-accent-foreground text-white hover:bg-purple-800 disabled:opacity-50 px-8 py-4 text-lg font-bold flex items-center gap-3"
                   >
                     <RefreshCw className={`w-5 h-5 ${status === 'generating' ? 'animate-spin' : ''}`} />
                     {status === 'generating' ? 'REGENERANDO CV...' : '🔄 REGENERAR CV CON MEJORAS SELECCIONADAS'}
