@@ -40,10 +40,13 @@ backend/test_output.*
 rendercv/
 rendercv_output/
 
-# Images
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.ico
+# Images — only the root, so future fixtures and frontend assets stay tracked
+/*.jpg
+/*.jpeg
+/*.png
+/*.gif
+/*.ico
+# Allow frontend public assets to be committed even when they share an
+# extension with the patterns above.
+/!frontend/public/**
 

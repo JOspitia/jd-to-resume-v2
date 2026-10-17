@@ -1,0 +1,1 @@
+"""Resume PDF parsers. The only adapter today is ``PyMuPDFParser``."""

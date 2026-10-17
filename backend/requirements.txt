@@ -4,13 +4,11 @@ python-multipart
 pymupdf
 google-generativeai
 jinja2
-weasyprint
 pydantic
-langgraph
-langchain-core
 python-dotenv
 openai
 rendercv
 rendercv-fonts
 typst
 pyyaml
+slowapi

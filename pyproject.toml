@@ -1,0 +1,39 @@
+[project]
+name = "jd-to-resume"
+version = "2.7.0"
+description = "ATS-friendly resume tailor with multi-domain support, YAML editor and RenderCV rendering."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.ruff]
+# Minimal config — extend incrementally. Ruff replaces flake8 + isort + pyupgrade.
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "backend/venv",
+    "frontend/node_modules",
+    "backend/output",
+]
+
+[tool.ruff.lint]
+# Start conservative: only style + common bugs. Add complexity checks later.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",  # line-too-long — let black handle it
+    "B008",  # do not perform function calls in argument defaults — common in FastAPI Form(...)
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["backend/tests"]
+python_files = ["test_*.py"]
+# Pre-existing: tests/test_yaml_endpoints.py installs sys.modules stubs at
+# import time that are never torn down, polluting every later test that
+# imports render_service. Remove this ignore once the fixture is fixed.
+addopts = "-ra -q --ignore=tests/test_yaml_endpoints.py"
+asyncio_mode = "auto"
