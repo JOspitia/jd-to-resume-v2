@@ -20,6 +20,7 @@ import { ResultsPanel } from './components/ResultsPanel';
 import { YamlEditorPanel } from './components/YamlEditorPanel';
 import { AuditPanel } from './components/AuditPanel';
 import { PhotoField } from './components/PhotoField';
+import { Button } from './components/ui/Button';
 
 /**
  * ToolApp — T2 of the UX refactor (specs S1-S12).
@@ -91,19 +92,24 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     <div className="min-h-screen text-black flex flex-col items-center pt-10 pb-44 px-4 md:px-8 selection:bg-blue-600 selection:text-white relative">
       {/* Top bar — back + reset, compact */}
       <div className="absolute top-4 left-4 flex items-center gap-2 z-20">
-        <button
+        <Button
           onClick={onBack}
-          className="rm-btn bg-white hover:bg-gray-100 text-black px-3 py-1.5 flex items-center gap-1.5 text-sm"
+          variant="outline"
+          size="sm"
+          aria-label="Volver a la landing page"
         >
           <ArrowLeft className="w-4 h-4" /> Volver
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={handleResetProcess}
+          variant="destructive"
+          size="sm"
+          className="text-xs font-bold"
+          aria-label="Reiniciar el proceso completo"
           title="Limpiar campos y borrar la caché de CVs para iniciar de nuevo"
-          className="rm-btn bg-rose-100 hover:bg-rose-200 border-rose-600 text-rose-900 px-3 py-1.5 flex items-center gap-1.5 text-xs font-bold shadow-[2px_2px_0px_0px_rgba(225,29,72,1)]"
         >
-          <RotateCcw className="w-3.5 h-3.5 text-rose-700" /> Nuevo
-        </button>
+          <RotateCcw className="w-3.5 h-3.5" /> Nuevo
+        </Button>
       </div>
 
       {/* Compact header (was a 7xl hero, now 2xl-3xl) — spec S1 */}

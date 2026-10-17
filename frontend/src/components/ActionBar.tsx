@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion';
 import { Play, Clock } from 'lucide-react';
 
+import { Button } from './ui/Button';
+
 /**
  * ActionBar — T7 of the UX refactor (specs S7, S8).
  *
@@ -28,11 +30,13 @@ export function ActionBar({ status, elapsedSeconds, hasFile, onGenerate }: Actio
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 px-4 pb-4">
       <div className="max-w-3xl mx-auto">
-        <button
+        <Button
           onClick={() => onGenerate()}
           disabled={disabled}
+          variant="primary"
+          size="lg"
           aria-label="Generar CV adaptado"
-          className="rm-btn w-full bg-blue-700 hover:bg-blue-800 text-white disabled:opacity-60 disabled:cursor-not-allowed px-8 py-5 text-lg md:text-xl flex items-center justify-center gap-3 font-extrabold tracking-tight shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]"
+          className="w-full px-8 py-5 text-lg md:text-xl justify-center font-extrabold tracking-tight"
         >
           {generating ? (
             <motion.div
@@ -49,7 +53,7 @@ export function ActionBar({ status, elapsedSeconds, hasFile, onGenerate }: Actio
             : hasFile
               ? 'Generar CV'
               : 'Subí un CV para empezar'}
-        </button>
+        </Button>
       </div>
     </div>
   );

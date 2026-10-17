@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { ArrowRight, Code, Sparkles } from 'lucide-react';
+import { Button } from './components/ui/Button';
 
 export default function LandingPage({ onStart }: { onStart: () => void }) {
   const techStack = [
@@ -76,9 +77,9 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
           >
-            <button onClick={onStart} className="rm-btn bg-orange-500 hover:bg-orange-600 text-white px-10 py-5 flex items-center gap-3 text-xl transition-transform hover:-translate-y-1">
+            <Button onClick={onStart} variant="secondary" size="lg" className="px-10 py-5 text-xl">
               OPEN GENERATOR <ArrowRight className="w-6 h-6" />
-            </button>
+            </Button>
           </motion.div>
         </section>
 
