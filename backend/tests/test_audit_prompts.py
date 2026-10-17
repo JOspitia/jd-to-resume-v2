@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from domain_games import GAMES, get_game  # noqa: E402
-from audit_prompts import build_audit_prompt  # noqa: E402
+from domain.audit_prompts import build_audit_prompt  # noqa: E402
 
 
 RESUME_TEXT = "Sample resume text used in tests."
