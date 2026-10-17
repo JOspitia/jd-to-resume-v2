@@ -429,12 +429,12 @@ async def generation_pipeline(
         # This enables iterative refinement instead of regenerating from scratch
         effective_file_path = file_path
         if base_resume_filename:
-            candidate_path = os.path.join(OUTPUT_DIR, base_resume_filename)
+            candidate_path = os.path.join(_OUTPUT_DIR, base_resume_filename)
             if os.path.exists(candidate_path):
                 effective_file_path = candidate_path
                 print(f"[INFO] ✅ Using previously generated resume as base: {candidate_path}")
             else:
-                print(f"[WARN] ⚠️ base_resume_filename '{base_resume_filename}' not found in OUTPUT_DIR, falling back to original upload.")
+                print(f"[WARN] ⚠️ base_resume_filename '{base_resume_filename}' not found in {_OUTPUT_DIR}, falling back to original upload.")
                 print(f"[WARN]    Expected path: {candidate_path}")
 
         # Language-detection guardrail (REQ-3): if the user asked for English but the
@@ -774,8 +774,8 @@ IMPORTANT:
         yield f"data: {json.dumps({'step': 'Formatting Professional PDF', 'progress': 90})}\n\n"
         
         output_filename = f"tailored_resume_{int(time.time())}.pdf"
-        output_path = os.path.join(OUTPUT_DIR, output_filename)
-        
+        output_path = os.path.join(_OUTPUT_DIR, output_filename)
+
         use_rendercv = theme and theme != "classic_html"
         rendered = False
         if use_rendercv:
@@ -1062,7 +1062,7 @@ async def render_from_yaml(
     # Render PDF. Reuses the same RenderCV / Playwright path as
     # /api/generate. We intentionally do NOT call any LLM here.
     output_filename = f"tailored_resume_{int(time.time())}.pdf"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    output_path = os.path.join(_OUTPUT_DIR, output_filename)
 
     use_rendercv = theme and theme != "classic_html"
     rendered = False
