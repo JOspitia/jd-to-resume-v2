@@ -10,28 +10,12 @@ if sys.platform == "win32" and os.getenv("DISABLE_STDIO_REWRAP") != "1" and "pyt
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
-import json
-import asyncio
-import base64
-from html import escape
-from pathlib import Path
-from typing import Optional
-from fastapi import FastAPI, UploadFile, Form, File, BackgroundTasks, HTTPException, Request
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import fitz  # PyMuPDF
-import google.generativeai as genai
-from playwright.sync_api import sync_playwright
-import tempfile
-import time
-import re
 
 # Hexagonal split: section delegates to dedicated modules.
-from schemas.api_models import GeminiResumeOutput  # noqa: F401 — re-exported for backward compat
-from application.services.translation_service import build_language_override as _build_language_override
-from adapters.storage.filesystem_storage import FilesystemStorage  # noqa: F401 — exposed for tests
-from routes.assets_router import build_assets_router  # noqa: F401 — composition root uses it
+from adapters.storage.filesystem_storage import FilesystemStorage
+from routes.assets_router import build_assets_router
 
 
 # Backward-compatible wrapper for the photo-upload helper. The real
@@ -116,15 +100,7 @@ async def enforce_rate_limit(request: Request, scope: str) -> None:
     _RL_HITS[key] = hits
 
 from dotenv import load_dotenv
-from render_service import render_cv_with_rendercv
-from language import detect_language
-from photo_helpers import save_photo as _save_photo, prune_orphaned_photos as _prune_photos
-from domain_games import get_game
-from yaml_helpers import (
-    serialize_resume_data_as_text as _serialize_resume_data_as_text,
-    yaml_safe_dump_unicode as _yaml_safe_dump_unicode,
-)
-import yaml as _pyyaml
+from photo_helpers import save_photo as _save_photo
 
 load_dotenv()
 
@@ -236,9 +212,6 @@ app.include_router(build_generate_router(_generation_service, _storage))
 @app.get("/")
 def read_root():
     return {"status": "AI Resume Backend is running OK!"}
-
-# Define schemas for Gemini response
-from pydantic import BaseModel, Field
 
 # Backward-compatible wrappers for the HTML-template helpers. The
 # implementations (template, ATS helpers, photo data URI, render function,
