@@ -13,6 +13,38 @@ import { apiUrl, fetchWithTimeout } from '../lib/api';
  * regenerate, audit, AI-assisted repair).
  */
 
+/**
+ * Validate the IA's repair output for the YAML editor.
+ *
+ * Returns ``{ ok: true }`` when the repaired YAML is at least 40% the
+ * length of the original (with a hard minimum of 3 meaningful lines),
+ * or ``{ ok: false, ...message }`` when the LLM produced a near-empty
+ * document that would silently wipe most of the CV.
+ *
+ * Used by both ``handleRenderFromYaml`` (post-repair auto path) and
+ * ``handleRepairYaml`` (manual repair) — both used to inline the same
+ * arithmetic and only differed in the user-facing error string.
+ */
+function validateRepairOutput(
+  repairedYaml: string,
+  originalYaml: string,
+): { ok: true } | { ok: false; message: string } {
+  const countMeaningful = (yaml: string) =>
+    yaml.split('\n').filter((l: string) => l.trim()).length;
+  const repairedLines = countMeaningful(repairedYaml);
+  const originalLines = countMeaningful(originalYaml);
+  const threshold = Math.max(3, Math.floor(originalLines * 0.4));
+  if (repairedLines < threshold) {
+    return {
+      ok: false,
+      message:
+        `La IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) — se habría perdido la mayor parte del CV. Tu texto NO se perdió.`,
+    };
+  }
+  return { ok: true };
+}
+
+
 type YamlEditorDeps = {
   profile: Pick<
     Profile,
@@ -156,13 +188,10 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
 
           // Degenerate-output guard: reject a near-empty document (e.g. only
           // `name:` survived) instead of silently rendering an empty CV.
-          const repairedLines = repairData.yaml.split('\n').filter((l: string) => l.trim()).length;
-          const originalLines = preRepairYaml.split('\n').filter((l: string) => l.trim()).length;
-          if (repairedLines < Math.max(3, Math.floor(originalLines * 0.4))) {
+          const repairCheck = validateRepairOutput(repairData.yaml, preRepairYaml);
+          if (!repairCheck.ok) {
             setYamlRepairing(false);
-            setYamlError(
-              `No se pudo generar el CV: la IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) y se habría perdido la mayor parte del CV. Tu texto NO se perdió.`,
-            );
+            setYamlError(`No se pudo generar el CV: ${repairCheck.message}`);
             return;
           }
 
@@ -402,13 +431,10 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
         // Degenerate-output guard: the LLM occasionally answers with a valid
         // but near-empty document (e.g. only `name:` survives). Accepting it
         // would silently wipe the CV. Require a minimum amount of substance.
-        const repairedLines = data.yaml.split('\n').filter((l: string) => l.trim()).length;
-        const originalLines = preRepairYaml.split('\n').filter((l: string) => l.trim()).length;
-        if (repairedLines < Math.max(3, Math.floor(originalLines * 0.4))) {
+        const repairCheck = validateRepairOutput(data.yaml, preRepairYaml);
+        if (!repairCheck.ok) {
           setYamlRepairing(false);
-          setYamlError(
-            `La IA devolvió un YAML demasiado corto (${repairedLines} líneas vs ${originalLines} originales) — se habría perdido la mayor parte del CV. Tu texto original NO se perdió.`,
-          );
+          setYamlError(repairCheck.message);
           return;
         }
 
