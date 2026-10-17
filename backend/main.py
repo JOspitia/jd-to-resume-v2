@@ -24,12 +24,12 @@ from routes.assets_router import build_assets_router
 # Kept here so the existing ``generate_resume`` endpoint signature
 # (`_persist_uploaded_photo(photo)`) still resolves without a sweeping
 # refactor of every endpoint.
-async def _persist_uploaded_photo(photo):
-    """Persist the optional candidate photo. Returns absolute path or None."""
-    if photo is None:
-        return None
-    content = await photo.read()
-    return _save_photo(content, _PHOTOS_DIR)
+#
+# Defined further down (after ``_save_photo`` is imported and
+# ``_PHOTOS_DIR`` is set) so the closure captures names that already
+# exist when the function is called. Defining the function above its
+# dependencies relies on Python's late binding to work — fine at
+# runtime, but fragile if a test exercises a partial module load.
 from slowapi import Limiter  # noqa: F401 — re-exported for backward compat (Limiter config)
 from slowapi.util import get_remote_address
 
@@ -163,6 +163,19 @@ app.state.limiter = limiter  # kept for backward-compat introspection in tests
 # Tests that need to drop fake PDFs into the output dir use these.
 _OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 _PHOTOS_DIR = os.path.join(_OUTPUT_DIR, "photos")
+
+
+async def _persist_uploaded_photo(photo):
+    """Persist the optional candidate photo. Returns absolute path or None.
+
+    Defined here (after ``_save_photo`` and ``_PHOTOS_DIR``) so the
+    closure cannot fail at call time with ``NameError`` — this path
+    is exercised by ``tests/test_persist_uploaded_photo.py``.
+    """
+    if photo is None:
+        return None
+    content = await photo.read()
+    return _save_photo(content, _PHOTOS_DIR)
 
 # --- Composition root: wire adapters into routes ---
 # This is where the hexagonal architecture becomes concrete: every use case
