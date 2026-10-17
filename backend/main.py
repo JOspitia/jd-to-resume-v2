@@ -32,87 +32,19 @@ from routes.assets_router import build_assets_router
 # dependencies relies on Python's late binding to work — fine at
 # runtime, but fragile if a test exercises a partial module load.
 from slowapi import Limiter
+
+# Rate-limit implementation lives in ``application.rate_limit`` so routers
+# can import it at module top (no circular import). The function and the
+# in-process counter are re-exported below for backwards compatibility —
+# ``from main import enforce_rate_limit`` and ``from main import _RL_HITS``
+# keep working for callers that pre-date the split.
+from application.rate_limit import (
+    enforce_rate_limit,
+    _RL_HITS,  # noqa: F401  — re-exported for tests + introspection
+)
+
 from slowapi.util import get_remote_address
 
-
-# Manual rate-limit helper. We don't use slowapi's middleware or its
-# @limiter.limit decorators because:
-#
-#   * The ASGI middleware tries to inject rate-limit headers AFTER the
-#     handler has already started the response — with SSE endpoints
-#     (``/api/generate``) this corrupts the stream and the browser sees
-#     ``net::ERR_FAILED``.
-#   * The decorator-only approach loses its closure when FastAPI
-#     re-registers the route, so the auto-check never runs.
-#
-# Instead: every LLM-expensive endpoint calls ``await enforce_rate_limit``
-# explicitly with a unique ``scope`` label. The counter resets after
-# the configured window expires.
-_RL_HITS: dict[str, list[float]] = {}  # key -> list of monotonic timestamps
-
-
-async def enforce_rate_limit(request: Request, scope: str) -> None:
-    """Raise ``HTTPException(429)`` if the remote IP has exceeded the limit
-    in the configured window for ``scope``.
-
-    The limit comes from the env var ``RATE_LIMIT_DEFAULT`` (e.g.
-    ``"5/minute"``).
-
-    We previously raised ``slowapi.errors.RateLimitExceeded`` here, but the
-    upstream exception constructor expects a ``Limit`` object (with an
-    ``error_message`` attribute) rather than the raw string we parsed — that
-    raised ``AttributeError`` instead of 429, which the SSE-handling
-    frontend translated into a generic "Process Failed / network error".
-    ``HTTPException(429, ...)`` is what FastAPI's existing CORS and SSE
-    handlers already consume without surprises.
-    """
-    if not limiter.enabled:
-        return
-
-    raw = os.getenv("RATE_LIMIT_DEFAULT", "5/minute")
-    try:
-        count_str, _, window_str = raw.partition("/")
-        limit = int(count_str)
-        if window_str.startswith("minute"):
-            window = 60.0
-        elif window_str.startswith("second"):
-            window = 1.0
-        elif window_str.startswith("hour"):
-            window = 3600.0
-        else:
-            window = 60.0
-    except ValueError:
-        limit, window = 5, 60.0
-
-    ip = get_remote_address(request)
-    key = f"{scope}:{ip}"
-    now = monotonic()
-    hits = _RL_HITS.get(key, [])
-    # Drop hits outside the window.
-    hits = [t for t in hits if (now - t) < window]
-    if len(hits) >= limit:
-        # Persist the at-limit snapshot so concurrent requests see the
-        # same window. Drop the key entirely if the filter emptied the
-        # list, so the dict doesn't accumulate dead ``scope:ip`` entries
-        # on a long-running server with many distinct callers.
-        if hits:
-            _RL_HITS[key] = hits
-        else:
-            _RL_HITS.pop(key, None)
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded for {scope!r}: {limit} requests per {window:.0f}s",
-        )
-    hits.append(now)
-    # Mirror the 429-path's cleanup: only persist the key when its list is
-    # non-empty. In the happy path ``hits`` is always non-empty after the
-    # append above, but applying the symmetry keeps the two branches
-    # equivalent and protects future refactors that might skip the append
-    # (e.g. when no counter is incremented).
-    if hits:
-        _RL_HITS[key] = hits
-    else:
-        _RL_HITS.pop(key, None)
 
 from dotenv import load_dotenv
 from photo_helpers import save_photo as _save_photo

@@ -67,7 +67,7 @@ def build_assets_router(storage: ResumeStorage) -> APIRouter:
         budget as the other LLM-adjacent endpoints: configurable with
         ``RATE_LIMIT_DEFAULT`` (defaults to ``"5/minute"``).
         """
-        from main import enforce_rate_limit  # composition-root helper
+        from application.rate_limit import enforce_rate_limit
 
         await enforce_rate_limit(request, scope="clear-cache")
         try:

@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from application.services.generation_service import GenerationService
+from application.rate_limit import enforce_rate_limit
 from ports.resume_storage import ResumeStorage
 
 
@@ -65,7 +66,7 @@ def build_generate_router(
         edit_before_generate: Optional[bool] = Form(False),
         photo: Optional[UploadFile] = File(None),
     ):
-        from main import enforce_rate_limit, _persist_uploaded_photo
+        from main import _persist_uploaded_photo  # removed in next refactor (commit B of MP-02)
         from fastapi import HTTPException
 
         # Validate request contract

@@ -26,6 +26,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from playwright.sync_api import sync_playwright
 
 from application.services.yaml_editor_service import YamlEditorService
+from application.rate_limit import enforce_rate_limit
 from ports.resume_storage import ResumeStorage
 from domain_games import get_game
 from render_service import render_cv_with_rendercv
@@ -79,7 +80,7 @@ def build_yaml_editor_router(
         ``generate_router``'s render step; only the parsed_data
         source differs (LLM-produced dict vs user-edited YAML dict).
         """
-        from main import enforce_rate_limit, _persist_uploaded_photo
+        from main import _persist_uploaded_photo  # removed in next refactor (commit B of MP-02)
 
         await enforce_rate_limit(request, scope="render-from-yaml")
         _validate_domain_game(domain_game)
@@ -190,8 +191,6 @@ def build_yaml_editor_router(
         domain_game: Optional[str] = Form(None),
     ):
         """Audit-only endpoint for a user-edited YAML. No PDF render."""
-        from main import enforce_rate_limit
-
         await enforce_rate_limit(request, scope="analyze-yaml")
         _validate_domain_game(domain_game)
 
@@ -251,8 +250,6 @@ def build_yaml_editor_router(
         service handles drift guards, schema validation, and the
         two-pass fail-safe return envelope.
         """
-        from main import enforce_rate_limit
-
         await enforce_rate_limit(request, scope="repair-yaml")
         _validate_domain_game(domain_game)
         return await service.repair(yaml_content, domain_game)

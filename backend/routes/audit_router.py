@@ -39,7 +39,7 @@ def build_audit_router(service: AuditService) -> APIRouter:
         jd: Optional[str] = Form(None),
         domain_game: Optional[str] = Form(None),
     ):
-        from main import enforce_rate_limit
+        from application.rate_limit import enforce_rate_limit
 
         # Validate request contract
         await enforce_rate_limit(request, scope="analyze-ats")
