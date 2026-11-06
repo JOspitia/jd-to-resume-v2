@@ -67,6 +67,131 @@ def clean_date_str(date_val: str, is_end_date: bool = False) -> str:
         
     return "present" if is_end_date else "2020"
 
+
+# ---------------------------------------------------------------------------
+# Date range parsing
+# ---------------------------------------------------------------------------
+#
+# A range separator is a dash surrounded by whitespace (or an en/em dash, a
+# pipe, or "to"/"hasta"). It must NOT match the hyphen inside a `YYYY-MM`
+# date: splitting "2018-08 - 2021-05" on every hyphen produced
+# ["2018", "08 ", "2021", "05"], so the end date was lost and later replaced
+# by the "2020" placeholder. Whenever the start year was greater than 2020
+# RenderCV rejected the whole CV ("start_date cannot be after end_date") and
+# the render silently fell back to the slower Playwright HTML renderer, which
+# also ignored the theme the user had picked.
+_RANGE_SEPARATOR = re.compile(
+    r"\s+[-–—]{1,2}\s+|\s*\|\s*|\s+(?:to|hasta)\s+", re.IGNORECASE
+)
+_YEAR_OR_YEAR_MONTH = re.compile(r"(?:19|20)\d{2}(?:-(?:0[1-9]|1[0-2]))?")
+_PRESENT_WORDS = (
+    "presente",
+    "present",
+    "actualidad",
+    "actual",
+    "actualmente",
+    "hoy",
+    "now",
+    "current",
+)
+
+
+def split_date_range(dates_str: str) -> tuple[str, str]:
+    """Split a free-form date range into ``(start, end)``.
+
+    Handles the shapes the LLM actually emits::
+
+        "2018-08 - 2021-05"    ->  ("2018-08", "2021-05")
+        "2021 - hoy"           ->  ("2021", "hoy")
+        "Sept 2019 - Feb 2021" ->  ("Sept 2019", "Feb 2021")
+        "2018"                 ->  ("2018", "")
+        "2018-2021"            ->  ("2018", "2021")
+    """
+    text = (dates_str or "").strip()
+    if not text:
+        return "", ""
+
+    parts = [part.strip() for part in _RANGE_SEPARATOR.split(text) if part.strip()]
+    if len(parts) >= 2:
+        return parts[0], parts[-1]
+
+    # No whitespace-delimited separator ("2018-2021"): split between the two
+    # date tokens instead of on every hyphen.
+    tokens = list(_YEAR_OR_YEAR_MONTH.finditer(text))
+    if len(tokens) >= 2:
+        return (
+            text[tokens[0].start() : tokens[0].end()],
+            text[tokens[-1].start() : tokens[-1].end()],
+        )
+
+    return (parts[0] if parts else text), ""
+
+
+def clean_date_optional(date_val: str) -> Optional[str]:
+    """Parse a date into RenderCV's format, or ``None`` when there is none.
+
+    Unlike :func:`clean_date_str` this never substitutes a placeholder year:
+    a fabricated "2020" would show up in the finished PDF as if the candidate
+    had started in 2020.
+    """
+    if not date_val or not date_val.strip():
+        return None
+    cleaned = date_val.strip().lower()
+
+    if cleaned in _PRESENT_WORDS:
+        return "present"
+
+    match_ym = re.search(r"\b(19\d\d|20\d\d)-(0[1-9]|1[0-2])\b", cleaned)
+    if match_ym:
+        return match_ym.group(0)
+
+    year_match = re.search(r"\b(19\d\d|20\d\d)\b", cleaned)
+    if year_match:
+        year = year_match.group(1)
+        for m_name, m_num in SPANISH_MONTHS.items():
+            if re.search(r"\b" + m_name + r"\b", cleaned):
+                return f"{year}-{m_num}"
+        return year
+
+    return None
+
+
+def _date_year(date_str: Optional[str]) -> Optional[int]:
+    """Extract the year from a parsed date, or ``None`` when unknown."""
+    match = re.search(r"(?:19|20)\d{2}", date_str or "")
+    return int(match.group(0)) if match else None
+
+
+def resolve_date_pair(
+    start_raw: str,
+    end_raw: str,
+    *,
+    default_end: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Clean a date pair and guarantee RenderCV will accept it.
+
+    RenderCV rejects the *entire* CV when ``start_date`` is after
+    ``end_date``. Instead of emitting an invalid pair (which silently pushed
+    every render onto the slower Playwright fallback), an inconsistent range
+    drops the end date — RenderCV accepts an entry without ``end_date``.
+
+    Both fields are optional in RenderCV, so a date that cannot be parsed is
+    omitted rather than replaced with a made-up year.
+    """
+    start = clean_date_optional(start_raw)
+    if start is None:
+        # No start date at all: omit the end date too, otherwise the entry
+        # renders a bare "present" with no context to anchor it.
+        return None, None
+
+    end = clean_date_optional(end_raw) if end_raw else default_end
+
+    start_year = _date_year(start)
+    end_year = _date_year(end)
+    if start_year and end_year and start_year > end_year:
+        return start, None
+    return start, end
+
 def convert_llm_json_to_rendercv_dict(
     parsed_data: Dict[str, Any],
     theme: str = "sb2nov",
@@ -147,16 +272,21 @@ def convert_llm_json_to_rendercv_dict(
             if not isinstance(item, dict):
                 continue
             dates_str = item.get("dates", "")
-            start_d = dates_str.split("-")[0].strip() if "-" in dates_str else dates_str
-            end_d = dates_str.split("-")[-1].strip() if "-" in dates_str else "present"
-            
+            start_d, end_d = split_date_range(dates_str)
+
+            start_date, end_date = resolve_date_pair(
+                start_d, end_d, default_end="present"
+            )
+
             entry = {
                 "company": item.get("company", "").strip() or "Company",
                 "position": item.get("role", "").strip() or "Role",
-                "start_date": clean_date_str(start_d, is_end_date=False),
-                "end_date": clean_date_str(end_d, is_end_date=True),
                 "highlights": item.get("points", [])
             }
+            if start_date:
+                entry["start_date"] = start_date
+            if end_date:
+                entry["end_date"] = end_date
             exp_entries.append(entry)
         if exp_entries:
             sections[labels["experience"]] = exp_entries
@@ -172,15 +302,20 @@ def convert_llm_json_to_rendercv_dict(
             if item.get("gpa"):
                 degree += f" (GPA: {item.get('gpa')})"
             dates_str = item.get("dates", "")
-            start_d = dates_str.split("-")[0].strip() if "-" in dates_str else dates_str
-            end_d = dates_str.split("-")[-1].strip() if "-" in dates_str else "2022"
-            
+            start_d, end_d = split_date_range(dates_str)
+
+            # A degree with no end date is normal (still studying), and
+            # RenderCV renders the entry without one.
+            start_date, end_date = resolve_date_pair(start_d, end_d)
+
             entry = {
                 "institution": item.get("school", "").strip() or "University",
                 "area": degree or "Degree",
-                "start_date": clean_date_str(start_d, is_end_date=False),
-                "end_date": clean_date_str(end_d, is_end_date=False),
             }
+            if start_date:
+                entry["start_date"] = start_date
+            if end_date:
+                entry["end_date"] = end_date
             edu_entries.append(entry)
         if edu_entries:
             sections[labels["education"]] = edu_entries
@@ -225,9 +360,11 @@ def convert_llm_json_to_rendercv_dict(
 
             entry = {
                 "name": item.get("name", "").strip() or "Project",
-                "date": clean_date_str(date_raw, is_end_date=False),
                 "highlights": highlights
             }
+            project_date = clean_date_optional(date_raw)
+            if project_date:
+                entry["date"] = project_date
             proj_entries.append(entry)
         if proj_entries:
             sections[labels["projects"]] = proj_entries
