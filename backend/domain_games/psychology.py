@@ -103,6 +103,11 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
      * Project 3 (Stakeholder/Method Opening): 'En alianza con el área de Compensación y Beneficios, rediseñé el flujo de informes psicológicos para reducir el tiempo de entrega de 7 a 2 días...'
      * Project 4 (Metric/Outcome Opening): 'Logré una adherencia del 78% a las 8 sesiones del programa de intervención breve, con mejora media de 4.2 puntos en el BDI-II pre-post...'
    - NO REPEATED WORDS OR PHRASES: Ensure zero phrase overlap or repeated opening verbs between projects to achieve high human perplexity and burstiness.
+21. NO REFERENCES SECTION (no_references_section):
+   - NEVER create a 'Referencias', 'References', 'Personas de Contacto' or equivalent section, and NEVER write 'Referencias disponibles a solicitud' or 'References available upon request'.
+   - Recruiters already know the candidate has references. Listing names, roles, phone numbers and emails wastes the single page the CV should spend on achievements, exposes third-party contact data, and adds ATS parsing noise.
+   - If the Base Resume already contains a references section, DROP it from the output.
+   - References are handed over separately, on request, at the interview stage.
 """
 
 
