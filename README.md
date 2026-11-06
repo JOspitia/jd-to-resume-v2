@@ -110,6 +110,37 @@ curl -X POST http://localhost:8000/api/generate \
 
 ---
 
+## Cambiar solo el diseño (sin que la IA reescriba el texto)
+
+Cada vez que el pipeline corre, la IA reescribe el CV: cambiar la plantilla y volver a generar te devolvía **otro texto**, no el mismo CV con otra piel.
+
+Por eso la tarjeta de resultado tiene su propio botón **"🎨 Cambiar diseño (sin tocar el texto)"**. Abre un panel con la plantilla y el color, y al aplicar:
+
+- se vuelve a renderizar **el mismo YAML** que produjo el PDF que ya tenés,
+- **no se llama al LLM** (el endpoint `/api/render-from-yaml` parsea el YAML y lo pasa directo al renderer),
+- el preview y el link de descarga apuntan al nuevo PDF,
+- el diseño elegido queda como selección global, así una regeneración posterior usa el mismo estilo.
+
+### Qué cambia y qué no
+
+| | Texto | Maquetación |
+|---|---|---|
+| Cambiar el **color** | Idéntico, palabra por palabra | Solo la tinta |
+| Cambiar la **plantilla** | Las mismas palabras; cada plantilla formatea fechas y enlaces con su propio estilo (inherente a la plantilla, no a la IA) | Cambia por completo, como es lógico |
+
+**Medido sobre el flujo real de la UI:** el PDF generado por la IA y el rediseñado dan **1906 caracteres de texto extraído idénticos byte a byte** (258 palabras), 0 imágenes y el mismo rango horizontal (una sola columna). Solo cambian los colores: `#000000` → `#1b3a5c` (nombre y títulos) + `#49617d` (enlaces).
+
+### API
+
+```bash
+curl -X POST http://localhost:8000/api/render-from-yaml \
+  -F "yaml_content=$(cat cv.yaml)" -F "theme=sb2nov" -F "accent=navy"
+```
+
+Sin `yaml_content` no hay nada que renderizar; el endpoint nunca llama al LLM.
+
+---
+
 ## Features
 
 ### 1. Tres motores LLM en cadena
@@ -257,6 +288,16 @@ jd-to-resume/
 │   │   ├── ToolApp.tsx          # UI principal: upload, ATS, refinamiento, score history
 │   │   ├── index.css            # shadcn vars + neo-brutalist .rm-box / .rm-btn
 │   │   ├── App.css
+│   │   ├── components/
+│   │   │   ├── AdvancedOptions.tsx  # Plantilla + color de acento + opciones extra
+│   │   │   ├── RedesignPanel.tsx    # Cambiar plantilla/color sin tocar el texto
+│   │   │   └── ResultsPanel.tsx     # Tarjeta de resultado (preview, descarga, rediseño…)
+│   │   ├── hooks/
+│   │   │   ├── useRedesign.ts       # Re-renderiza el YAML actual, sin LLM
+│   │   │   └── useGeneration.ts     # Pipeline SSE + FormData
+│   │   ├── lib/
+│   │   │   ├── designOptions.ts     # Catálogo de plantillas y paletas (compartido)
+│   │   │   └── renderFromYaml.ts    # POST a /api/render-from-yaml (compartido)
 │   │   └── lib/utils.ts         # cn() utility (estilo shadcn)
 │   ├── components.json          # shadcn/ui new-york, baseColor: zinc
 │   ├── vite.config.ts           # @vitejs/plugin-react + alias @/

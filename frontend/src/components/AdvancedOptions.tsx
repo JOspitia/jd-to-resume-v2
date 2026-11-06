@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, SlidersHorizontal, Palette, LayoutTemplate,
   FileCheck2, PenLine, MessageSquare, Droplet } from 'lucide-react';
-import { apiUrl } from '../lib/api';
+import { THEMES, useDesignOptions } from '../lib/designOptions';
 
 /**
  * AdvancedOptions — T3 of the UX refactor (specs S3, S4).
@@ -23,28 +23,6 @@ import { apiUrl } from '../lib/api';
  */
 
 const STORAGE_KEY = 'jd-to-resume.advanced-options';
-
-const THEMES = [
-  { id: 'sb2nov', name: 'SB2Nov', badge: 'ATS / Silicon Valley', desc: 'Limpio y estructurado para Tech' },
-  { id: 'classic', name: 'Classic', badge: 'Sobrio', desc: 'Tradicional, elegante y universal' },
-  { id: 'moderncv', name: 'ModernCV', badge: 'Visual', desc: 'Detalles a color y tipografía moderna' },
-  { id: 'classic_html', name: 'Classic HTML', badge: 'Playwright', desc: 'Renderizado web tradicional' },
-];
-
-/**
- * Fallback palette list, used while `/api/design-options` is loading (or if
- * it fails). The backend stays the source of truth — the swatch hex it
- * returns is the exact colour the PDF will use.
- */
-const FALLBACK_PALETTES = [
-  { id: 'none', label: 'Sin color', hex: '#000000', description: 'Negro y blanco, el más seguro para ATS' },
-  { id: 'navy', label: 'Azul marino', hex: '#1B3A5C', description: 'Color de acento en nombre y títulos' },
-  { id: 'teal', label: 'Verde azulado', hex: '#0F5C57', description: 'Color de acento en nombre y títulos' },
-  { id: 'forest', label: 'Verde bosque', hex: '#23543B', description: 'Color de acento en nombre y títulos' },
-  { id: 'burgundy', label: 'Granate', hex: '#6E2639', description: 'Color de acento en nombre y títulos' },
-  { id: 'plum', label: 'Ciruela', hex: '#5B2D63', description: 'Color de acento en nombre y títulos' },
-  { id: 'slate', label: 'Gris pizarra', hex: '#3D4A5C', description: 'Color de acento en nombre y títulos' },
-];
 
 export type AdvancedOptionsProps = {
   selectedTheme: string;
@@ -94,26 +72,9 @@ export function AdvancedOptions({
   });
 
   // Palette catalogue comes from the backend so the swatch shows the exact
-  // colour the renderer will apply. The static list is the fallback while
-  // the request is in flight (or if it fails).
-  const [palettes, setPalettes] = useState(FALLBACK_PALETTES);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(apiUrl('/api/design-options'))
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status))))
-      .then((data) => {
-        if (!cancelled && Array.isArray(data?.palettes) && data.palettes.length > 0) {
-          setPalettes(data.palettes);
-        }
-      })
-      .catch(() => {
-        // Keep the fallback list — the accent still works with it.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // colour the renderer will apply. The hook renders the static fallback
+  // immediately and swaps in the backend catalogue once it arrives.
+  const { palettes } = useDesignOptions();
 
   const toggleOpen = () => {
     const next = !open;
@@ -151,7 +112,7 @@ export function AdvancedOptions({
                   {t.badge}
                 </span>
                 <div className="text-xs font-serif font-bold text-foreground">{t.name}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{t.desc}</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{t.description}</div>
               </button>
             );
           })}

@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  CheckCircle, Eye, Download, BarChart3, Languages, RotateCcw, Code2,
+  CheckCircle, Eye, Download, BarChart3, Languages, RotateCcw, Code2, Palette,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { ScoreHistory } from './ScoreHistory';
 import type { ScoreEntry } from '../hooks/useAudit';
 
@@ -22,7 +23,7 @@ import { Badge } from './ui/Badge';
  *   2. Primary CTA — "Editar YAML directamente" (iteration loop) when a
  *      YAML snapshot is available
  *   3. Download group — PREVIEW + DOWNLOAD PDF (paired actions)
- *   4. Audit group — AUDITAR ATS + Translate to English (re-run CV)
+ *   4. Design group — "Cambiar diseño" (re-render, no LLM) + audit/translate
  *   5. Reset — full-width secondary, only when the user wants a clean slate
  *   6. Score history timeline (only if there's history to show)
  *
@@ -48,6 +49,9 @@ export type ResultsPanelProps = {
   translationMeta: { source_language?: string; target_language?: string; forced?: boolean } | null;
   scoreHistory: ScoreEntry[];
   onReopenYamlEditor: () => void;
+  onOpenRedesign: () => void;
+  /** The redesign panel, rendered under the download group when open. */
+  redesignPanel?: ReactNode;
   onAudit: () => void;
   onTranslate: () => void;
   onReset: () => void;
@@ -63,6 +67,8 @@ export function ResultsPanel({
   translationMeta,
   scoreHistory,
   onReopenYamlEditor,
+  onOpenRedesign,
+  redesignPanel,
   onAudit,
   onTranslate,
   onReset,
@@ -124,7 +130,23 @@ export function ResultsPanel({
             </a>
           </div>
 
-          {/* 4. Audit + translate (re-run the pipeline) */}
+          {/* 4. Change the design without touching the text */}
+          {hasYamlSnapshot && (
+            <Button
+              onClick={onOpenRedesign}
+              variant="primary"
+              size="md"
+              className="w-full"
+              aria-label="Cambiar la plantilla o el color del CV sin modificar el texto"
+            >
+              <Palette className="w-4 h-4" aria-hidden="true" />
+              🎨 Cambiar diseño (sin tocar el texto)
+            </Button>
+          )}
+
+          {redesignPanel}
+
+          {/* 5. Audit + translate (re-run the pipeline) */}
           <div className="grid grid-cols-2 gap-3">
             <Button
               onClick={onAudit}
@@ -152,7 +174,7 @@ export function ResultsPanel({
             </Button>
           </div>
 
-          {/* 5. Reset */}
+          {/* 6. Reset */}
           <Button
             onClick={onReset}
             variant="destructive"
@@ -164,7 +186,7 @@ export function ResultsPanel({
             Nuevo / Limpiar
           </Button>
 
-          {/* 6. Inline re-audit badge after a forced translation pass */}
+          {/* 7. Inline re-audit badge after a forced translation pass */}
           {auditScores && translationMeta?.forced && lastOutputLanguage === 'en' && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -195,7 +217,7 @@ export function ResultsPanel({
             </motion.div>
           )}
 
-          {/* 7. Score evolution across refinement passes */}
+          {/* 8. Score evolution across refinement passes */}
           <ScoreHistory entries={scoreHistory} />
         </Card>
       )}

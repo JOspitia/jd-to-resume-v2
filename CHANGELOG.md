@@ -28,6 +28,30 @@ tomaron) y un trail de commits para auditoría.
   negrita + cuerpo mayor + línea, el layout sigue en una sola columna y
   el PDF sigue siendo vectorial con capa de texto real.
 
+### Feature — Cambiar solo el diseño (sin que la IA reescriba)
+
+El pipeline siempre reescribe el CV con el LLM, así que cambiar la
+plantilla obligaba a regenerar y devolvía **otro texto**, no el mismo CV
+con otra piel.
+
+- **Nuevo botón "🎨 Cambiar diseño (sin tocar el texto)"** en la tarjeta
+  de resultado, con su propio panel (plantilla + color).
+- **Nuevo hook `useRedesign`**: re-renderiza el YAML guardado del PDF
+  actual vía `/api/render-from-yaml`, que **no llama al LLM**. Actualiza
+  el preview y el link de descarga, y deja el diseño elegido como
+  selección global.
+- **Nuevo helper `src/lib/renderFromYaml.ts`**: una sola fuente de
+  verdad para el POST a `/api/render-from-yaml`, ahora compartido entre
+  el editor YAML y el rediseño (antes estaba duplicado).
+- **Nuevo módulo `src/lib/designOptions.ts`**: el catálogo de
+  plantillas y paletas se pide una sola vez y se comparte entre el picker
+  de "Opciones avanzadas" y el panel de rediseño.
+
+Medido sobre el flujo real de la UI: el PDF de la IA y el rediseñado dan
+**1906 caracteres de texto extraído idénticos byte a byte** (258
+palabras), 0 imágenes y el mismo rango horizontal. Solo cambian los
+colores.
+
 ### Bugs
 
 - **BUG-04**: `RenderCVAdapter.render()` llamaba `render_cv_with_rendercv(fit=...)`,
@@ -48,6 +72,9 @@ tomaron) y un trail de commits para auditoría.
   la capa de texto que lee el ATS no cambia, solo la tinta.
 - Todos los tonos pasan WCAG AA (≥4.5:1) contra blanco; los acentos
   están entre 7.8:1 y 11.6:1.
+- El flujo de rediseño verificado end-to-end en el navegador (abrir
+  panel → elegir color → aplicar), comprobando que el texto del PDF
+  resultante es idéntico al original y que el picker global se sincroniza.
 
 ### Trail de commits
 
@@ -56,6 +83,7 @@ tomaron) y un trail de commits para auditoría.
 - `fix(build): unblock pytest, the production build and the playwright dependency`
 - `feat(prompts): forbid a references section in the generated CV`
 - `feat(design): add ATS-safe accent palettes for the rendered CV`
+- `feat(redesign): re-render the same CV with another design, without the LLM`
 
 ---
 
