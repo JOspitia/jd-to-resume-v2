@@ -82,7 +82,7 @@ export function AuditPanel({
                     Match ATS(CompuTrabajo)
                   </span>
                   <div
-                    className={`text-6xl font-black font-mono my-2 ${atsData.ats_score >= 80 ? 'text-green-600' : atsData.ats_score >= 60 ? 'text-warning' : 'text-red-600'}`}
+                    className={`text-6xl font-black font-mono my-2 ${(atsData.ats_score ?? 0) >= 80 ? 'text-green-600' : (atsData.ats_score ?? 0) >= 60 ? 'text-warning' : 'text-red-600'}`}
                   >
                     {atsData.ats_score} %
                   </div>
@@ -97,7 +97,7 @@ export function AuditPanel({
                     Detección de Tono IA
                   </span>
                   <div
-                    className={`text-6xl font-black font-mono my-2 ${atsData.ai_detection_score <= 20 ? 'text-green-600' : atsData.ai_detection_score <= 50 ? 'text-warning' : 'text-red-600'}`}
+                    className={`text-6xl font-black font-mono my-2 ${(atsData.ai_detection_score ?? 0) <= 20 ? 'text-green-600' : (atsData.ai_detection_score ?? 0) <= 50 ? 'text-warning' : 'text-red-600'}`}
                   >
                     {atsData.ai_detection_score} %
                   </div>
@@ -158,7 +158,7 @@ export function AuditPanel({
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {atsData.missing_keywords && atsData.missing_keywords.length > 0 ? (
-                      atsData.missing_keywords.map((kw: string, i: number) => {
+                      atsData.missing_keywords.map((kw: string) => {
                         const isSelected = selectedKeywords.includes(kw);
                         return (
                           <button
