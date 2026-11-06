@@ -102,6 +102,7 @@ class GenerationService:
         domain_game: Optional[str] = None,
         edit_before_generate: bool = False,
         photo_path: Optional[str] = None,
+        accent: Optional[str] = "none",
     ) -> AsyncIterator[str]:
         """Yield SSE-formatted strings. See module docstring for the flow."""
         async for event in self._pipeline(
@@ -122,6 +123,7 @@ class GenerationService:
             domain_game=domain_game,
             edit_before_generate=edit_before_generate,
             photo_path=photo_path,
+            accent=accent,
         ):
             yield event
 
@@ -147,6 +149,7 @@ class GenerationService:
         domain_game: Optional[str],
         edit_before_generate: bool,
         photo_path: Optional[str],
+        accent: Optional[str],
     ) -> AsyncIterator[str]:
         """The full pipeline. Yields SSE-formatted strings.
 
@@ -562,7 +565,7 @@ IMPORTANT:
                     print(
                         f"[INFO] 🎨 Rendering PDF with RenderCV theme '{theme}' "
                         f"(fit_single_page={fit_single_page}, page_break_section={page_break_section}, "
-                        f"photo={bool(photo_path)})..."
+                        f"photo={bool(photo_path)}, accent={accent})..."
                     )
                     await asyncio.to_thread(
                         render_cv_with_rendercv,
@@ -572,6 +575,7 @@ IMPORTANT:
                         fit_single_page,
                         page_break_section,
                         photo_path,
+                        accent or "none",
                     )
                     rendered = True
                 except Exception as r_err:
@@ -583,13 +587,14 @@ IMPORTANT:
             if not rendered:
                 print(
                     f"[INFO] 📄 Rendering PDF with Playwright HTML engine "
-                    f"(page_break_section={page_break_section})..."
+                    f"(page_break_section={page_break_section}, accent={accent})..."
                 )
                 html_content = _render_html_template(
                     parsed_data,
                     labels,
                     page_break_section=page_break_section,
                     photo_path=photo_path,
+                    accent=accent or "none",
                 )
 
                 def render_pdf_sync():

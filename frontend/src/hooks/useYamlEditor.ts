@@ -51,6 +51,7 @@ type YamlEditorDeps = {
     | 'jd'
     | 'domainGame'
     | 'selectedTheme'
+    | 'accentColor'
     | 'fitSinglePage'
     | 'pageBreakSection'
     | 'customPrompt'
@@ -76,6 +77,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     jd,
     domainGame,
     selectedTheme,
+    accentColor,
     fitSinglePage,
     pageBreakSection,
     customPrompt,
@@ -225,6 +227,9 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     const formData = new FormData();
     formData.append('yaml_content', renderableYaml);
     formData.append('theme', selectedTheme);
+    // Accent colour — re-sent on every render-from-yaml pass, same as the
+    // theme: it is a presentation choice, not part of the YAML document.
+    formData.append('accent', accentColor || 'none');
     formData.append('fit_single_page', fitSinglePage ? 'true' : 'false');
     if (pageBreakSection && pageBreakSection !== 'none') {
       formData.append('page_break_section', pageBreakSection);

@@ -24,6 +24,7 @@ from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from design_palettes import accent_css_variables
 from ports.pdf_renderer import PDFRenderer
 
 
@@ -133,8 +134,15 @@ def _render_html_template(
     *,
     page_break_section: Optional[str] = None,
     photo_path: Optional[str] = None,
+    accent: Optional[str] = None,
 ) -> str:
-    """Render the Jinja2 template with the parsed Resume dict + helpers."""
+    """Render the Jinja2 template with the parsed Resume dict + helpers.
+
+    ``accent`` names a palette from ``design_palettes``. The accent is
+    injected as CSS custom properties, so the same colour that RenderCV
+    themes use also reaches the hand-written HTML fallback. Without an
+    accent every property resolves to black and the HTML is unchanged.
+    """
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),
         autoescape=select_autoescape(["html"]),
@@ -147,6 +155,7 @@ def _render_html_template(
         labels=labels,
         page_break_section=page_break_section,
         photo_uri=_photo_to_data_uri(photo_path),
+        accent=accent_css_variables(accent),
     )
 
 
@@ -165,6 +174,7 @@ class PlaywrightHTMLAdapter:
         page_break_section: Optional[str] = None,
         photo_path: Optional[str] = None,
         labels: Optional[dict] = None,
+        accent: Optional[str] = None,
     ) -> None:
         """Render the template and print the HTML to ``output_path`` as PDF.
 
@@ -172,6 +182,7 @@ class PlaywrightHTMLAdapter:
         ``skills``, ``experience``, ``projects``, ``achievements``.
         ``fit_single_page`` is currently a hint (the CSS already targets
         a single page; tightening margins is a future enhancement).
+        ``accent`` names a palette from ``design_palettes``.
         """
         if labels is None:
             labels = {
@@ -187,6 +198,7 @@ class PlaywrightHTMLAdapter:
             labels,
             page_break_section=page_break_section,
             photo_path=photo_path,
+            accent=accent,
         )
 
         from playwright.sync_api import sync_playwright

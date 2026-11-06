@@ -11,6 +11,8 @@ from rendercv.schema.rendercv_model_builder import build_rendercv_dictionary_and
 from rendercv.renderer.typst import generate_typst
 from rendercv.renderer.pdf_png import generate_pdf
 
+from design_palettes import get_palette_colors
+
 def sanitize_phone(phone_str: str) -> Optional[str]:
     """Sanitize phone number for RenderCV pydantic validation or return None if invalid."""
     if not phone_str or not phone_str.strip():
@@ -197,6 +199,7 @@ def convert_llm_json_to_rendercv_dict(
     theme: str = "sb2nov",
     fit_single_page: bool = False,
     photo_path: Optional[str] = None,
+    accent: str = "none",
 ) -> Dict[str, Any]:
     """
     Transforms the LLM output structure into RenderCV valid schema.
@@ -206,6 +209,12 @@ def convert_llm_json_to_rendercv_dict(
     section spacing so a long CV is pushed back onto a single page.
 
     When `photo_path` is set, embeds the candidate photo in the header.
+
+    When `accent` names a palette (see `design_palettes`), the design gets
+    an explicit `colors` block so the name, the section titles and the
+    links are tinted. The palette only recolours the text; the layout, the
+    single column and the selectable text layer are untouched, so the ATS
+    parse is identical to the black & white version.
     """
     name = parsed_data.get("name", "Candidate").strip() or "Candidate"
     email = parsed_data.get("email", "").strip()
@@ -400,6 +409,14 @@ def convert_llm_json_to_rendercv_dict(
         }
     }
 
+    # Accent colour. An explicit `colors` block overrides whatever the
+    # theme ships with (sb2nov hardcodes black), so the accent wins. The
+    # palette keeps the body copy black and never puts a background behind
+    # the text — see `design_palettes` for the ATS/print-safety rules.
+    palette_colors = get_palette_colors(accent)
+    if palette_colors:
+        design_config["colors"] = palette_colors
+
     # If fit_single_page requested, tighten vertical margins and line spacing
     if fit_single_page:
         design_config["page"] = {
@@ -426,7 +443,8 @@ def render_cv_with_rendercv(
     theme: str = "sb2nov", 
     fit_single_page: bool = False,
     page_break_section: Optional[str] = None,
-    photo_path: Optional[str] = None
+    photo_path: Optional[str] = None,
+    accent: str = "none"
 ) -> str:
     """
     Renders CV to PDF using RenderCV Python API.
@@ -440,7 +458,8 @@ def render_cv_with_rendercv(
         parsed_data, 
         theme=theme, 
         fit_single_page=fit_single_page,
-        photo_path=photo_path
+        photo_path=photo_path,
+        accent=accent,
     )
     json_str = json.dumps(rendercv_dict, ensure_ascii=False)
     

@@ -185,6 +185,8 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           <AdvancedOptions
             selectedTheme={profile.selectedTheme}
             onThemeChange={profile.setSelectedTheme}
+            accentColor={profile.accentColor}
+            onAccentColorChange={profile.setAccentColor}
             fitSinglePage={profile.fitSinglePage}
             onFitSinglePageChange={profile.setFitSinglePage}
             pageBreakSection={profile.pageBreakSection}

@@ -32,6 +32,7 @@ type GenerationDeps = {
     | 'customPrompt'
     | 'strictEditsOnly'
     | 'selectedTheme'
+    | 'accentColor'
     | 'fitSinglePage'
     | 'pageBreakSection'
     | 'editBeforeGenerate'
@@ -63,6 +64,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     customPrompt,
     strictEditsOnly,
     selectedTheme,
+    accentColor,
     fitSinglePage,
     pageBreakSection,
     editBeforeGenerate,
@@ -170,6 +172,9 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     formData.append("extract_linkedin_info", shouldExtractLinkedin ? "true" : "false");
     formData.append("strict_edits_only", strictEditsOnly ? "true" : "false");
     formData.append("theme", selectedTheme);
+    // Accent colour. The backend only tints the name / section titles /
+    // links, so the layout and the ATS text layer are unaffected.
+    formData.append("accent", accentColor || "none");
     formData.append("fit_single_page", fitSinglePage ? "true" : "false");
     // Multi-domain selection (feat/multi-domain-tailoring).
     // The backend uses this to compose the prompt body via domain_games.get_game().

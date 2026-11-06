@@ -138,6 +138,11 @@ async def _persist_uploaded_photo(photo):
 _storage = FilesystemStorage(_OUTPUT_DIR, _PHOTOS_DIR)
 app.include_router(build_assets_router(_storage))
 
+# /api/design-options: the themes + accent palettes the UI offers. Read-only
+# catalogue, no DI required.
+from routes.design_router import build_design_router
+app.include_router(build_design_router())
+
 # Single LLM orchestrator shared across all LLM-backed services. Building it
 # is expensive (loads openai / google.generativeai SDKs) so we do it once at
 # module-init and pass the instance to every service that needs LLM.

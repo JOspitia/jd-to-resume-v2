@@ -38,6 +38,12 @@ export function useProfile() {
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [strictEditsOnly, setStrictEditsOnly] = useState<boolean>(false);
   const [selectedTheme, setSelectedTheme] = useState<string>('sb2nov');
+  // === Accent colour for the rendered CV ===
+  // An id from the backend catalogue (`/api/design-options`): "none" keeps
+  // the black & white output, the others tint the name, the section titles
+  // and the links. The colour never changes the layout, so the ATS parse
+  // is identical whichever value is picked.
+  const [accentColor, setAccentColor] = useState<string>('none');
   const [fitSinglePage, setFitSinglePage] = useState<boolean>(true);
   const [pageBreakSection, setPageBreakSection] = useState<string>('none');
 
@@ -144,6 +150,7 @@ export function useProfile() {
    * **What this intentionally preserves (session-level preferences):**
    *   * ``selectedTheme``     — the picked RenderCV theme is a visual
    *                             preference, not per-CV.
+   *   * ``accentColor``       — the picked accent colour, same reason.
    *   * ``fitSinglePage``     — layout choice, not per-CV.
    *   * ``pageBreakSection`` — ditto.
    *
@@ -218,6 +225,8 @@ export function useProfile() {
     setStrictEditsOnly,
     selectedTheme,
     setSelectedTheme,
+    accentColor,
+    setAccentColor,
     fitSinglePage,
     setFitSinglePage,
     pageBreakSection,

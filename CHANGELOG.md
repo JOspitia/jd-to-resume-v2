@@ -4,6 +4,61 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-06 — Sesión "Color de acento + fixes de render"
+
+**Tipo:** feature + bug-fix.
+
+### Feature — Color de acento
+
+- **Nuevo módulo `backend/design_palettes.py`**: seis paletas (azul
+  marino, verde azulado, verde bosque, granate, ciruela, gris pizarra)
+  más `none`. Es la fuente de verdad: tabla de colores, cálculo de
+  contraste WCAG y variables CSS para el template HTML de Playwright.
+- **Nuevo parámetro `accent`** en `/api/generate` y
+  `/api/render-from-yaml`. Inyecta un bloque `design.colors` que
+  RenderCV aplica sobre el color del texto. Valor desconocido → HTTP
+  422.
+- **Nuevo endpoint `GET /api/design-options`**: catálogo de plantillas
+  y paletas. El frontend lo consume para pintar los swatches con el hex
+  exacto que va a salir en el PDF, en vez de duplicar la tabla.
+- **Selector "Color de acento"** en `AdvancedOptions.tsx`, justo debajo
+  de "Plantilla" (misma decisión de diseño, mismo bloque visual).
+- **Reglas ATS aplicadas**: el cuerpo del texto sigue negro, el color
+  nunca va como fondo detrás del texto, los títulos de sección conservan
+  negrita + cuerpo mayor + línea, el layout sigue en una sola columna y
+  el PDF sigue siendo vectorial con capa de texto real.
+
+### Bugs
+
+- **BUG-04**: `RenderCVAdapter.render()` llamaba `render_cv_with_rendercv(fit=...)`,
+  pero la función espera `fit_single_page`. Era un `TypeError` latente
+  que mandaba cualquier render por el adaptador al fallback de
+  Playwright. Además el adapter ignoraba el `accent`.
+- **BUG-05**: `PlaywrightHTMLAdapter` y la plantilla `classic.html.j2`
+  tenían los colores `#000` hardcodeados, así que el acento no llegaba
+  al fallback HTML. Ahora el template consume variables CSS
+  (`--accent-body`, `--accent-strong`, `--accent-muted`, `--accent-rule`).
+
+### Verificación
+
+- **321 tests en verde** (252 previos + 69 nuevos en
+  `backend/tests/test_design_palettes.py`).
+- Renderizando **el mismo YAML** con y sin acento, el texto extraído del
+  PDF es **idéntico carácter por carácter** (1867 chars en ambos casos):
+  la capa de texto que lee el ATS no cambia, solo la tinta.
+- Todos los tonos pasan WCAG AA (≥4.5:1) contra blanco; los acentos
+  están entre 7.8:1 y 11.6:1.
+
+### Trail de commits
+
+- `fix(frontend): buffer SSE chunks so the final event is never dropped`
+- `fix(backend): parse date ranges correctly and never emit an inverted pair`
+- `fix(build): unblock pytest, the production build and the playwright dependency`
+- `feat(prompts): forbid a references section in the generated CV`
+- `feat(design): add ATS-safe accent palettes for the rendered CV`
+
+---
+
 ## 2026-10-17 — Sesión "Code review + rebrand"
 
 **Tipo:** refactor + bug-fix + feature.
