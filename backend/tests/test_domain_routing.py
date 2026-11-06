@@ -338,3 +338,29 @@ def test_end_to_end_compose_tech_matches_legacy_shape():
     ]
     for spot in legacy_spots:
         assert spot in composed, f"legacy spot missing from composed tech prompt: {spot!r}"
+
+
+# ---------------------------------------------------------------------------
+# Rule 21 — no references section
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology"])
+def test_prompt_forbids_a_references_section(game_name):
+    """Every game must tell the model not to emit a references section.
+
+    Recruiters ask for references once the candidate is in play; listing them
+    in the CV wastes the single page, exposes third-party contact data and
+    adds ATS parsing noise. The rule also drops a references section that the
+    base resume happened to carry.
+    """
+    g = get_game(game_name)
+    body = g.strict_rules_block
+
+    assert "no_references_section" in body
+    assert "Referencias disponibles a solicitud" in body
+    assert "References available upon request" in body
+    # It must also instruct the model to drop one inherited from the base CV.
+    assert "DROP it from the output" in body
+    # The rule is numbered after the existing 20 rules.
+    assert "21." in body

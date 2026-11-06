@@ -38,16 +38,22 @@ class RenderCVAdapter:
         page_break_section: Optional[str] = None,
         photo_path: Optional[str] = None,
         labels: Optional[dict] = None,
+        accent: Optional[str] = None,
     ) -> None:
         """Render via RenderCV. ``labels`` is ignored (RenderCV handles
-        section titles internally via its design schema)."""
+        section titles internally via its design schema).
+
+        ``accent`` names a palette from ``design_palettes``; ``"none"`` or
+        ``None`` keeps the theme's own (black & white) colours.
+        """
         render_cv_with_rendercv(
             parsed_data,
             output_path,
             theme=theme,
-            fit=fit_single_page,
+            fit_single_page=fit_single_page,
             page_break_section=page_break_section,
             photo_path=photo_path,
+            accent=accent or "none",
         )
 
 

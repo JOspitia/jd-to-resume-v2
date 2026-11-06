@@ -28,6 +28,7 @@ from playwright.sync_api import sync_playwright
 from application.services.yaml_editor_service import YamlEditorService
 from application.paths import PHOTOS_DIR
 from application.rate_limit import enforce_rate_limit
+from design_palettes import PALETTE_IDS, is_valid_palette_id
 from photo_helpers import persist_uploaded_photo
 from ports.resume_storage import ResumeStorage
 from domain_games import get_game
@@ -73,6 +74,7 @@ def build_yaml_editor_router(
         jd: Optional[str] = Form(None),
         custom_instructions: Optional[str] = Form(None),
         domain_game: Optional[str] = Form(None),
+        accent: Optional[str] = Form("none"),
         photo: Optional[UploadFile] = File(None),
     ):
         """Render-only endpoint: parse the user-edited YAML, render PDF.
@@ -84,6 +86,14 @@ def build_yaml_editor_router(
         """
         await enforce_rate_limit(request, scope="render-from-yaml")
         _validate_domain_game(domain_game)
+        if accent and not is_valid_palette_id(accent):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "accent must be one of "
+                    f"{sorted(PALETTE_IDS)} or omitted, got {accent!r}"
+                ),
+            )
 
         # Parse the YAML (reuses the service's pure helper).
         from application.services.yaml_editor_service import parse_yaml_safe
@@ -125,7 +135,7 @@ def build_yaml_editor_router(
                     f"[INFO] Render-from-YAML: RenderCV theme '{theme}' "
                     f"(fit_single_page={fit_single_page}, "
                     f"page_break_section={page_break_section}, "
-                    f"photo={bool(photo_path)})..."
+                    f"photo={bool(photo_path)}, accent={accent})..."
                 )
                 await asyncio.to_thread(
                     render_cv_with_rendercv,
@@ -135,6 +145,7 @@ def build_yaml_editor_router(
                     fit_single_page or False,
                     page_break_section,
                     photo_path,
+                    accent or "none",
                 )
                 rendered = True
             except Exception as r_err:  # noqa: BLE001
@@ -151,13 +162,14 @@ def build_yaml_editor_router(
 
             print(
                 f"[INFO] Render-from-YAML: Playwright HTML engine "
-                f"(page_break_section={page_break_section})..."
+                f"(page_break_section={page_break_section}, accent={accent})..."
             )
             html_content = _render_html_template(
                 parsed,
                 labels,
                 page_break_section=page_break_section,
                 photo_path=photo_path,
+                accent=accent or "none",
             )
 
             def render_pdf_sync():

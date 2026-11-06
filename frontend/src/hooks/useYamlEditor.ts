@@ -4,6 +4,7 @@ import type { Generation } from './useGeneration';
 import type { Audit } from './useAudit';
 import { validateYaml } from '../lib/yamlValidator';
 import { apiUrl, fetchWithTimeout } from '../lib/api';
+import { renderFromYaml } from '../lib/renderFromYaml';
 
 /**
  * useYamlEditor — T3 of the UX refactor (specs S5, S6).
@@ -51,6 +52,7 @@ type YamlEditorDeps = {
     | 'jd'
     | 'domainGame'
     | 'selectedTheme'
+    | 'accentColor'
     | 'fitSinglePage'
     | 'pageBreakSection'
     | 'customPrompt'
@@ -76,6 +78,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     jd,
     domainGame,
     selectedTheme,
+    accentColor,
     fitSinglePage,
     pageBreakSection,
     customPrompt,
@@ -222,36 +225,19 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
     setProgress(0);
     setStepMessage('Renderizando CV desde YAML...');
 
-    const formData = new FormData();
-    formData.append('yaml_content', renderableYaml);
-    formData.append('theme', selectedTheme);
-    formData.append('fit_single_page', fitSinglePage ? 'true' : 'false');
-    if (pageBreakSection && pageBreakSection !== 'none') {
-      formData.append('page_break_section', pageBreakSection);
-    }
-    if (jd) formData.append('jd', jd);
-    if (customPrompt) formData.append('custom_instructions', customPrompt);
-    if (domainGame) formData.append('domain_game', domainGame);
-    // The photo is a presentation choice, not part of the YAML document, so it
-    // is re-sent on every render-from-yaml pass.
-    if (photo) formData.append('photo', photo);
-
     try {
-      const res = await fetchWithTimeout(apiUrl('/api/render-from-yaml'), {
-        method: 'POST',
-        body: formData,
+      const { downloadUrl: renderedUrl, filename } = await renderFromYaml({
+        yaml: renderableYaml,
+        theme: selectedTheme,
+        accent: accentColor,
+        fitSinglePage,
+        pageBreakSection,
+        jd,
+        customPrompt,
+        domainGame,
+        photo,
       });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`Render-from-YAML failed (${res.status}): ${errText || res.statusText}`);
-      }
-      const data = await res.json();
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      const downloadPath: string = data.download_url;
-      const filename: string = data.filename || downloadPath.split('/').pop() || '';
-      setDownloadUrl(apiUrl(downloadPath));
+      setDownloadUrl(renderedUrl);
       setGeneratedPdfFilename(filename);
       setStatus('success');
       setStepMessage('CV renderizado');
@@ -276,7 +262,7 @@ export function useYamlEditor({ profile, generation, audit }: YamlEditorDeps) {
       // visible. Matches the original WIP-yaml spec T9.
       if (autoValidateATS) {
         try {
-          const auditResp = await fetch(apiUrl(downloadPath));
+          const auditResp = await fetch(renderedUrl);
           if (!auditResp.ok) {
             throw new Error(`audit fetch failed: ${auditResp.status}`);
           }

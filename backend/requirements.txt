@@ -12,3 +12,7 @@ rendercv-fonts
 typst
 pyyaml
 slowapi
+# Needed by the Playwright HTML renderer (the fallback used when RenderCV
+# rejects the YAML) and by the LinkedIn browser adapter. The browser binaries
+# are a separate step: `playwright install chromium`.
+playwright

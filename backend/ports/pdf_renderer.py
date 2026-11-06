@@ -37,6 +37,7 @@ class PDFRenderer(Protocol):
         fit_single_page: bool = False,
         page_break_section: Optional[str] = None,
         photo_path: Optional[str] = None,
+        accent: Optional[str] = None,
     ) -> None:
         """Render ``parsed_data`` to the file at ``output_path``.
 
@@ -53,6 +54,9 @@ class PDFRenderer(Protocol):
 
         ``photo_path`` is the absolute filesystem path to an optional
         candidate photo; ``None`` skips the photo entirely.
+
+        ``accent`` names a palette from ``design_palettes`` (``"none"`` or
+        ``None`` keeps the black & white output).
 
         Raises on render failure. Callers should catch and fall back to a
         different adapter (the fallback policy lives in the application

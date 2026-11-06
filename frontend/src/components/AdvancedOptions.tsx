@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, SlidersHorizontal, Palette, LayoutTemplate,
-  FileCheck2, PenLine, MessageSquare } from 'lucide-react';
+  FileCheck2, PenLine, MessageSquare, Droplet } from 'lucide-react';
+import { THEMES, useDesignOptions } from '../lib/designOptions';
 
 /**
  * AdvancedOptions — T3 of the UX refactor (specs S3, S4).
@@ -23,16 +24,11 @@ import { ChevronDown, SlidersHorizontal, Palette, LayoutTemplate,
 
 const STORAGE_KEY = 'jd-to-resume.advanced-options';
 
-const THEMES = [
-  { id: 'sb2nov', name: 'SB2Nov', badge: 'ATS / Silicon Valley', desc: 'Limpio y estructurado para Tech' },
-  { id: 'classic', name: 'Classic', badge: 'Sobrio', desc: 'Tradicional, elegante y universal' },
-  { id: 'moderncv', name: 'ModernCV', badge: 'Visual', desc: 'Detalles a color y tipografía moderna' },
-  { id: 'classic_html', name: 'Classic HTML', badge: 'Playwright', desc: 'Renderizado web tradicional' },
-];
-
 export type AdvancedOptionsProps = {
   selectedTheme: string;
   onThemeChange: (theme: string) => void;
+  accentColor: string;
+  onAccentColorChange: (accent: string) => void;
   fitSinglePage: boolean;
   onFitSinglePageChange: (checked: boolean) => void;
   pageBreakSection: string;
@@ -50,6 +46,8 @@ export type AdvancedOptionsProps = {
 export function AdvancedOptions({
   selectedTheme,
   onThemeChange,
+  accentColor,
+  onAccentColorChange,
   fitSinglePage,
   onFitSinglePageChange,
   pageBreakSection,
@@ -72,6 +70,11 @@ export function AdvancedOptions({
       return true;
     }
   });
+
+  // Palette catalogue comes from the backend so the swatch shows the exact
+  // colour the renderer will apply. The hook renders the static fallback
+  // immediately and swaps in the backend catalogue once it arrives.
+  const { palettes } = useDesignOptions();
 
   const toggleOpen = () => {
     const next = !open;
@@ -109,11 +112,54 @@ export function AdvancedOptions({
                   {t.badge}
                 </span>
                 <div className="text-xs font-serif font-bold text-foreground">{t.name}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{t.desc}</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{t.description}</div>
               </button>
             );
           })}
         </div>
+      </fieldset>
+
+      {/* Accent colour — sits right under the template picker because the two
+          are one decision ("how does my CV look"). Only the name, the section
+          titles and the links are tinted: the body copy stays black, the layout
+          stays single-column and the text layer of the PDF stays selectable, so
+          the ATS reads the same document as the black & white version. */}
+      <fieldset>
+        <legend className="font-bold font-mono text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
+          <Droplet className="w-3.5 h-3.5" /> Color de acento
+        </legend>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {palettes.map((p) => {
+            const selected = accentColor === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onAccentColorChange(p.id)}
+                aria-pressed={selected}
+                aria-label={`Color de acento: ${p.label}`}
+                className={`p-2.5 text-left border-2 transition-all ${
+                  selected
+                    ? 'border-primary bg-primary/15 font-bold shadow-neo-sm text-foreground'
+                    : 'border-border bg-card hover:bg-accent text-foreground'
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="block w-full h-6 border-2 border-border mb-1.5"
+                  style={{ backgroundColor: p.hex }}
+                />
+                <div className="text-xs font-serif font-bold text-foreground">{p.label}</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{p.description}</div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-2 leading-tight">
+          Solo tiñe tu nombre, los títulos de sección y los enlaces. El texto
+          sigue siendo negro y el CV mantiene una sola columna, así que los
+          filtros ATS lo leen exactamente igual.
+        </p>
       </fieldset>
 
       {/* Collapsible: page break + auto ATS + edit YAML + strict + custom prompt */}

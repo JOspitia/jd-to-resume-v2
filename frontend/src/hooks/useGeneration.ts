@@ -32,6 +32,7 @@ type GenerationDeps = {
     | 'customPrompt'
     | 'strictEditsOnly'
     | 'selectedTheme'
+    | 'accentColor'
     | 'fitSinglePage'
     | 'pageBreakSection'
     | 'editBeforeGenerate'
@@ -63,6 +64,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     customPrompt,
     strictEditsOnly,
     selectedTheme,
+    accentColor,
     fitSinglePage,
     pageBreakSection,
     editBeforeGenerate,
@@ -170,6 +172,9 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     formData.append("extract_linkedin_info", shouldExtractLinkedin ? "true" : "false");
     formData.append("strict_edits_only", strictEditsOnly ? "true" : "false");
     formData.append("theme", selectedTheme);
+    // Accent colour. The backend only tints the name / section titles /
+    // links, so the layout and the ATS text layer are unaffected.
+    formData.append("accent", accentColor || "none");
     formData.append("fit_single_page", fitSinglePage ? "true" : "false");
     // Multi-domain selection (feat/multi-domain-tailoring).
     // The backend uses this to compose the prompt body via domain_games.get_game().
@@ -223,103 +228,132 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
+      // A single SSE event can be split across network chunks. The incomplete
+      // tail stays in `buffer` until its terminating newline arrives; without
+      // this the JSON parse fails mid-event, the error is swallowed by the
+      // catch below, and the event is silently dropped — which strands the UI
+      // on the last progress step it did receive (e.g. stuck at 90%).
+      let buffer = '';
+
+      /**
+       * Handle one `data: {...}` SSE line.
+       * Returns true when the stream must stop (error or YAML-ready).
+       */
+      const handleSseLine = (rawLine: string): boolean => {
+        const line = rawLine.trim();
+        if (!line.startsWith('data: ')) return false;
+        try {
+          const dataStr = line.replace('data: ', '').trim();
+          if (!dataStr) return false;
+          const data = JSON.parse(dataStr);
+
+          if (data.error) {
+            setErrorMessage(data.error);
+            setStatus('error');
+            return true;
+          }
+
+          if (data.step) setStepMessage(data.step);
+          if (data.progress) setProgress(data.progress);
+
+          // === YAML editor (feat/yaml-editor) ===
+          // The backend emitted a `yaml_ready` event: the LLM has
+          // produced parsed_data and the user wants to edit the
+          // YAML before rendering. Stash the YAML and open the
+          // editor panel (rendered in T7).
+          if (data.yaml_ready && typeof data.yaml === 'string') {
+            yamlOpsRef.current?.open(data.yaml);
+            setStatus('idle');
+            setProgress(100);
+            setStepMessage(data.step || 'YAML listo para revisión');
+            return true;
+          }
+
+          if (data.download_url) {
+            const fullUrl = apiUrl(data.download_url);
+            setDownloadUrl(fullUrl);
+            // Extract and store just the filename for future refinement passes
+            const filename = data.download_url.split('/').pop() || null;
+            setGeneratedPdfFilename(filename);
+            setStatus('success');
+
+            // Translation meta + audit scores arrive on the same SSE event
+            // when force_language='en' triggered the translation path (REQ-4).
+            if (data.translation) {
+              setTranslationMeta(data.translation);
+              const srcLang = (data.translation.source_language as OutputLanguage) || 'unknown';
+              const tgtLang = (data.translation.target_language as 'en' | 'es') || 'es';
+              setLastOutputLanguage(srcLang === 'en' ? 'en' : tgtLang);
+            } else if (shouldTranslate) {
+              // Defensive fallback: backend didn't echo translation meta
+              // but the click that just succeeded was a translation pass.
+              // Use the locally-resolved `shouldTranslate` flag instead of
+              // reading the React-state `forceTranslateToEnglish` so the
+              // closure captures the value that drove this generation,
+              // not whatever the next render set it to.
+              setLastOutputLanguage('en');
+            } else if (lastOutputLanguage === 'unknown') {
+              // Default user base assumption: original CVs are Spanish.
+              setLastOutputLanguage('es');
+            }
+
+            if (data.audit_scores) {
+              setAuditScores(data.audit_scores);
+              audit.setAtsData(data.audit_scores);
+              audit.setAtsStatus('success');
+              audit.recordScore({
+                ats: data.audit_scores.ats_score ?? 0,
+                ai: data.audit_scores.ai_detection_score ?? 0,
+                format: data.audit_scores.ats_formatting_score ?? 95,
+                forced: data.translation?.forced,
+              });
+            }
+
+            // Snapshot the YAML that produced this PDF so the user can
+            // re-open the editor after a non-edit-before-generate pass.
+            // The backend emits `data.yaml` on the Finished event for
+            // the direct path; the edit_before_generate path returns
+            // earlier with its own yaml_ready event and snapshots there.
+            if (typeof data.yaml === 'string' && data.yaml) {
+              setLastGeneratedYaml(data.yaml);
+            }
+
+            // Auto re-audit: always re-audit on refinement passes; on first gen only if checkbox enabled
+            if (autoValidateATS || baseResumeFilename) {
+              audit.handleValidateATS();
+            }
+          }
+        } catch (e) {
+          console.error("Error parsing SSE:", e, rawLine);
+        }
+        return false;
+      };
 
       if (reader) {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
+          // `stream: true` keeps multi-byte characters (the YAML payload is
+          // full of accents) intact across chunk boundaries.
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          // The last element is an incomplete line — keep it for the next chunk.
+          buffer = lines.pop() ?? '';
 
-          for (let line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const dataStr = line.replace('data: ', '').trim();
-                if (!dataStr) continue;
-                const data = JSON.parse(dataStr);
-
-                if (data.error) {
-                  setErrorMessage(data.error);
-                  setStatus('error');
-                  return;
-                }
-
-                if (data.step) setStepMessage(data.step);
-                if (data.progress) setProgress(data.progress);
-
-                // === YAML editor (feat/yaml-editor) ===
-                // The backend emitted a `yaml_ready` event: the LLM has
-                // produced parsed_data and the user wants to edit the
-                // YAML before rendering. Stash the YAML and open the
-                // editor panel (rendered in T7).
-                if (data.yaml_ready && typeof data.yaml === 'string') {
-                  yamlOpsRef.current?.open(data.yaml);
-                  setStatus('idle');
-                  setProgress(100);
-                  setStepMessage(data.step || 'YAML listo para revisión');
-                  return;
-                }
-
-                if (data.download_url) {
-                  const fullUrl = apiUrl(data.download_url);
-                  setDownloadUrl(fullUrl);
-                  // Extract and store just the filename for future refinement passes
-                  const filename = data.download_url.split('/').pop() || null;
-                  setGeneratedPdfFilename(filename);
-                  setStatus('success');
-
-                  // Translation meta + audit scores arrive on the same SSE event
-                  // when force_language='en' triggered the translation path (REQ-4).
-                  if (data.translation) {
-                    setTranslationMeta(data.translation);
-                    const srcLang = (data.translation.source_language as OutputLanguage) || 'unknown';
-                    const tgtLang = (data.translation.target_language as 'en' | 'es') || 'es';
-                    setLastOutputLanguage(srcLang === 'en' ? 'en' : tgtLang);
-                  } else if (shouldTranslate) {
-                    // Defensive fallback: backend didn't echo translation meta
-                    // but the click that just succeeded was a translation pass.
-                    // Use the locally-resolved `shouldTranslate` flag instead of
-                    // reading the React-state `forceTranslateToEnglish` so the
-                    // closure captures the value that drove this generation,
-                    // not whatever the next render set it to.
-                    setLastOutputLanguage('en');
-                  } else if (lastOutputLanguage === 'unknown') {
-                    // Default user base assumption: original CVs are Spanish.
-                    setLastOutputLanguage('es');
-                  }
-
-                  if (data.audit_scores) {
-                    setAuditScores(data.audit_scores);
-                    audit.setAtsData(data.audit_scores);
-                    audit.setAtsStatus('success');
-                    audit.recordScore({
-                      ats: data.audit_scores.ats_score ?? 0,
-                      ai: data.audit_scores.ai_detection_score ?? 0,
-                      format: data.audit_scores.ats_formatting_score ?? 95,
-                      forced: data.translation?.forced,
-                    });
-                  }
-
-                  // Snapshot the YAML that produced this PDF so the user can
-                  // re-open the editor after a non-edit-before-generate pass.
-                  // The backend emits `data.yaml` on the Finished event for
-                  // the direct path; the edit_before_generate path returns
-                  // earlier with its own yaml_ready event and snapshots there.
-                  if (typeof data.yaml === 'string' && data.yaml) {
-                    setLastGeneratedYaml(data.yaml);
-                  }
-
-                  // Auto re-audit: always re-audit on refinement passes; on first gen only if checkbox enabled
-                  if (autoValidateATS || baseResumeFilename) {
-                    audit.handleValidateATS();
-                  }
-                }
-              } catch (e) {
-                console.error("Error parsing SSE:", e, line);
-              }
+          for (const line of lines) {
+            if (handleSseLine(line)) {
+              await reader.cancel().catch(() => undefined);
+              return;
             }
           }
+        }
+
+        // The stream ended: flush the decoder's pending bytes and any trailing
+        // line that never received its newline (truncated stream).
+        buffer += decoder.decode();
+        for (const line of buffer.split('\n')) {
+          if (handleSseLine(line)) break;
         }
       }
     } catch (err: unknown) {

@@ -74,6 +74,73 @@ Permite revisar y editar el resultado del LLM (en formato YAML) **antes** de ren
 
 ---
 
+## Color de acento (v2.8+)
+
+El CV ya no tiene que ser blanco y negro puro. Junto al selector de **Plantilla** hay un selector de **Color de acento** con seis paletas (azul marino, verde azulado, verde bosque, granate, ciruela y gris pizarra) más la opción *Sin color*, que conserva el output histórico.
+
+El color tiñe **tu nombre, los títulos de sección y los enlaces**. Nada más.
+
+### Por qué no rompe los filtros ATS
+
+| Regla | Cómo se cumple |
+|---|---|
+| El cuerpo del texto sigue negro | La paleta solo toca `name`, `section_titles`, `links`, `headline` y los tonos secundarios. `body` es siempre `rgb(0,0,0)`. |
+| Ningún fondo detrás del texto | RenderCV aplica el color como `fill:` del **texto**; la línea bajo el título es un `box` aparte. No hay bloques sombreados que traguen la capa de texto. |
+| Nada depende solo del color | Los títulos de sección siguen en negrita, con cuerpo mayor (1.4em) y su línea. Impreso en B/N el CV mantiene la misma jerarquía visual. |
+| Una sola columna | El color no toca la maquetación: mismo `theme`, mismos márgenes, mismos espaciados. |
+| Texto seleccionable | El PDF sigue siendo vectorial con capa de texto real (0 imágenes). |
+| Contraste legible | Cada tono pasa **WCAG AA (≥4.5:1)** contra blanco. Lo garantiza `backend/tests/test_design_palettes.py`. |
+
+Verificación real: renderizando **el mismo YAML** con y sin acento, el texto extraído del PDF es **idéntico carácter por carácter** (1867 chars en ambos casos) — solo cambia la tinta.
+
+### API
+
+```bash
+# Catálogo de plantillas + paletas (fuente de verdad del frontend)
+curl http://localhost:8000/api/design-options
+
+# Generar con acento
+curl -X POST http://localhost:8000/api/generate \
+  -F "file=@cv.pdf" -F "jd=..." -F "theme=sb2nov" -F "accent=navy"
+```
+
+- `accent` acepta `none` (default) o cualquiera de `navy`, `teal`, `forest`, `burgundy`, `plum`, `slate`. Un valor desconocido devuelve **HTTP 422**.
+- `POST /api/render-from-yaml` acepta el mismo parámetro, así que el editor YAML también produce el CV coloreado.
+- Las paletas viven en `backend/design_palettes.py`: un solo lugar con la tabla de colores, el cálculo de contraste y las variables CSS que consume el template HTML de Playwright.
+
+---
+
+## Cambiar solo el diseño (sin que la IA reescriba el texto)
+
+Cada vez que el pipeline corre, la IA reescribe el CV: cambiar la plantilla y volver a generar te devolvía **otro texto**, no el mismo CV con otra piel.
+
+Por eso la tarjeta de resultado tiene su propio botón **"🎨 Cambiar diseño (sin tocar el texto)"**. Abre un panel con la plantilla y el color, y al aplicar:
+
+- se vuelve a renderizar **el mismo YAML** que produjo el PDF que ya tenés,
+- **no se llama al LLM** (el endpoint `/api/render-from-yaml` parsea el YAML y lo pasa directo al renderer),
+- el preview y el link de descarga apuntan al nuevo PDF,
+- el diseño elegido queda como selección global, así una regeneración posterior usa el mismo estilo.
+
+### Qué cambia y qué no
+
+| | Texto | Maquetación |
+|---|---|---|
+| Cambiar el **color** | Idéntico, palabra por palabra | Solo la tinta |
+| Cambiar la **plantilla** | Las mismas palabras; cada plantilla formatea fechas y enlaces con su propio estilo (inherente a la plantilla, no a la IA) | Cambia por completo, como es lógico |
+
+**Medido sobre el flujo real de la UI:** el PDF generado por la IA y el rediseñado dan **1906 caracteres de texto extraído idénticos byte a byte** (258 palabras), 0 imágenes y el mismo rango horizontal (una sola columna). Solo cambian los colores: `#000000` → `#1b3a5c` (nombre y títulos) + `#49617d` (enlaces).
+
+### API
+
+```bash
+curl -X POST http://localhost:8000/api/render-from-yaml \
+  -F "yaml_content=$(cat cv.yaml)" -F "theme=sb2nov" -F "accent=navy"
+```
+
+Sin `yaml_content` no hay nada que renderizar; el endpoint nunca llama al LLM.
+
+---
+
 ## Features
 
 ### 1. Tres motores LLM en cadena
@@ -88,6 +155,7 @@ Permite revisar y editar el resultado del LLM (en formato YAML) **antes** de ren
 - **Anti-orfanos.** `allow_page_break: false` en entries, espaciados estrictos (`space_between_items: 0.1em`, `space_above: 0.1em`) y `orphans/widows: 3` en CSS del fallback HTML.
 - **Modo 1-página.** `fit_single_page=true` reduce márgenes a `0.45 in` y `line_spacing` a `0.45em`.
 - **Salto de página manual.** `page_break_section` inyecta `#pagebreak()` en el `.typst` antes de la sección indicada.
+- **Color de acento (v2.8+).** El parámetro `accent` añade un bloque `design.colors` con una de las seis paletas: tiñe nombre, títulos de sección y enlaces, deja el cuerpo en negro y no toca la maquetación (una sola columna, texto seleccionable, sin fondos detrás del texto). Ver [Color de acento](#color-de-acento-v28).
 
 ### 3. Adaptación sin alucinación
 - Prompt estricto: solo usa empresas, cargos, fechas y proyectos del CV base + LinkedIn extraído. Prohibido inventar (lista explícita en el system prompt).
@@ -190,11 +258,12 @@ Resumen de lo que pasa cuando presionas **Generar**:
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/` | Health check (`{"status": "AI Resume Backend is running OK!"}`). |
-| `POST` | `/api/generate` | Pipeline completo. Acepta `multipart/form-data`: `file` (PDF), `jd`, `target_role`, `github_url`, `linkedin_url`, `custom_instructions`, `base_resume_filename`, `theme` (`sb2nov` \| `classic` \| `moderncv` \| `classic_html`), `fit_single_page`, `page_break_section`, `extract_linkedin_info`, `domain_game` (`tech` \| `hr_recruiting` \| `psychology`, default `tech`), `edit_before_generate` (default `false`). Responde **SSE** con eventos `data: {...}\n\n`. Si `edit_before_generate=true`, emite `{"step": "YAML Ready for Review", "yaml": "...", "yaml_ready": true}` y termina sin renderizar PDF. |
-| `POST` | `/api/render-from-yaml` | Renderiza desde YAML ya parseado. Acepta `yaml_content` (required), `theme`, `fit_single_page`, `page_break_section`, `jd`, `custom_instructions`, `domain_game`. Reusa el path RenderCV/Playwright. Sin llamada LLM. Devuelve `{"download_url": "/api/download/<filename>", "filename": "..."}`. |
+| `POST` | `/api/generate` | Pipeline completo. Acepta `multipart/form-data`: `file` (PDF), `jd`, `target_role`, `github_url`, `linkedin_url`, `custom_instructions`, `base_resume_filename`, `theme` (`sb2nov` \| `classic` \| `moderncv` \| `classic_html`), `accent` (`none` \| `navy` \| `teal` \| `forest` \| `burgundy` \| `plum` \| `slate`, default `none`), `fit_single_page`, `page_break_section`, `extract_linkedin_info`, `domain_game` (`tech` \| `hr_recruiting` \| `psychology`, default `tech`), `edit_before_generate` (default `false`). Responde **SSE** con eventos `data: {...}\n\n`. Si `edit_before_generate=true`, emite `{"step": "YAML Ready for Review", "yaml": "...", "yaml_ready": true}` y termina sin renderizar PDF. |
+| `POST` | `/api/render-from-yaml` | Renderiza desde YAML ya parseado. Acepta `yaml_content` (required), `theme`, `accent`, `fit_single_page`, `page_break_section`, `jd`, `custom_instructions`, `domain_game`. Reusa el path RenderCV/Playwright. Sin llamada LLM. Devuelve `{"download_url": "/api/download/<filename>", "filename": "..."}`. |
 | `POST` | `/api/analyze-yaml` | Audita desde YAML sin renderizar. Acepta `yaml_content` (required), `jd`, `domain_game`. Serializa el YAML a narrativa y corre el mismo audit LLM que `/api/analyze-ats`. Sin PDF. |
 | `POST` | `/api/analyze-ats` | Audita sin generar. Acepta `file` (PDF) + `jd` + `domain_game`. Devuelve JSON: `ats_score`, `match_level`, `matched_keywords`, `missing_keywords`, `ai_detection_score`, `ai_tone_verdict`, `ai_humanize_tips`, `ats_formatting_score`, `actionable_tips`. |
 | `GET` | `/api/download/{filename}` | Sirve el PDF desde `backend/output/`. |
+| `GET` | `/api/design-options` | Catálogo de plantillas y paletas de acento (`themes`, `palettes`, `default_theme`, `default_palette`). Es la fuente de verdad del frontend: los swatches muestran el hex exacto que va a salir en el PDF. |
 | `POST` | `/api/clear-cache` | Borra todos los PDFs de `output/`. Devuelve `{deleted_files: N}`. |
 
 ---
@@ -206,6 +275,7 @@ jd-to-resume/
 ├── backend/
 │   ├── main.py                  # FastAPI: endpoints, LinkedIn extractor, pipeline SSE, HTML fallback
 │   ├── render_service.py        # Adaptador LLM-JSON → RenderCV dict + Typst + PDF
+│   ├── design_palettes.py       # Paletas de acento + contraste WCAG + variables CSS
 │   ├── requirements.txt         # 15 deps (ver sección)
 │   ├── .env                     # Config local (gitignored)
 │   └── output/                  # PDFs generados por timestamp
@@ -218,6 +288,16 @@ jd-to-resume/
 │   │   ├── ToolApp.tsx          # UI principal: upload, ATS, refinamiento, score history
 │   │   ├── index.css            # shadcn vars + neo-brutalist .rm-box / .rm-btn
 │   │   ├── App.css
+│   │   ├── components/
+│   │   │   ├── AdvancedOptions.tsx  # Plantilla + color de acento + opciones extra
+│   │   │   ├── RedesignPanel.tsx    # Cambiar plantilla/color sin tocar el texto
+│   │   │   └── ResultsPanel.tsx     # Tarjeta de resultado (preview, descarga, rediseño…)
+│   │   ├── hooks/
+│   │   │   ├── useRedesign.ts       # Re-renderiza el YAML actual, sin LLM
+│   │   │   └── useGeneration.ts     # Pipeline SSE + FormData
+│   │   ├── lib/
+│   │   │   ├── designOptions.ts     # Catálogo de plantillas y paletas (compartido)
+│   │   │   └── renderFromYaml.ts    # POST a /api/render-from-yaml (compartido)
 │   │   └── lib/utils.ts         # cn() utility (estilo shadcn)
 │   ├── components.json          # shadcn/ui new-york, baseColor: zinc
 │   ├── vite.config.ts           # @vitejs/plugin-react + alias @/

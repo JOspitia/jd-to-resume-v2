@@ -22,6 +22,7 @@ from fastapi.responses import StreamingResponse
 from application.services.generation_service import GenerationService
 from application.paths import PHOTOS_DIR
 from application.rate_limit import enforce_rate_limit
+from design_palettes import PALETTE_IDS, is_valid_palette_id
 from photo_helpers import persist_uploaded_photo
 from ports.resume_storage import ResumeStorage
 
@@ -66,6 +67,7 @@ def build_generate_router(
         force_language: Optional[str] = Form(None),
         domain_game: Optional[str] = Form(None),
         edit_before_generate: Optional[bool] = Form(False),
+        accent: Optional[str] = Form("none"),
         photo: Optional[UploadFile] = File(None),
     ):
         from fastapi import HTTPException
@@ -77,6 +79,14 @@ def build_generate_router(
             raise HTTPException(
                 status_code=422,
                 detail=f"force_language must be 'en' or omitted, got {force_language!r}",
+            )
+        if accent and not is_valid_palette_id(accent):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "accent must be one of "
+                    f"{sorted(PALETTE_IDS)} or omitted, got {accent!r}"
+                ),
             )
 
         # Persist the optional photo first; downstream code wants the path.
@@ -102,6 +112,7 @@ def build_generate_router(
                 domain_game=domain_game,
                 edit_before_generate=edit_before_generate or False,
                 photo_path=photo_path,
+                accent=accent or "none",
             ),
             media_type="text/event-stream",
         )

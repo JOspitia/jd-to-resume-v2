@@ -2,11 +2,23 @@
 <html>
 <head>
 <style>
+  /* Accent colour. Injected by the backend from `design_palettes`; without
+     an accent every variable is black, so the default output is unchanged.
+     Only the name, the section titles and the links are tinted — the body
+     copy stays black, and nothing gets a background fill behind the text,
+     so the extracted text layer (what the ATS reads) is identical to the
+     black & white version. */
+  :root {
+    --accent-body: {{ accent.body|default('#000000') }};
+    --accent-strong: {{ accent.accent|default('#000000') }};
+    --accent-muted: {{ accent.muted|default('#000000') }};
+    --accent-rule: {{ accent.rule|default('#000000') }};
+  }
   @page { size: letter; margin: 0.4in; }
-  body { font-family: 'Times New Roman', Garamond, serif; font-size: 10.5pt; line-height: 1.25; margin: 0; color: #000; }
-  h1 { font-size: 24pt; font-weight: bold; text-align: center; margin: 0 0 5px 0; text-transform: uppercase; }
+  body { font-family: 'Times New Roman', Garamond, serif; font-size: 10.5pt; line-height: 1.25; margin: 0; color: var(--accent-body); }
+  h1 { font-size: 24pt; font-weight: bold; text-align: center; margin: 0 0 5px 0; text-transform: uppercase; color: var(--accent-strong); }
   .contact-info { text-align: center; font-size: 10.5pt; margin-bottom: 8px; }
-  .contact-info a { color: #000; text-decoration: none; }
+  .contact-info a { color: var(--accent-muted); text-decoration: none; }
 
   /* Profile URLs live on their own full-width line.
      Keeping them on the same line as location/phone/email means a photo
@@ -26,7 +38,7 @@
     gap: 0 6pt; font-size: 10.5pt; margin-bottom: 8px;
   }
   .profile-links a {
-    color: #000; text-decoration: none; white-space: nowrap;
+    color: var(--accent-muted); text-decoration: none; white-space: nowrap;
   }
   /* Explicit "|" between URLs. Drawn with ::after so it cannot affect layout —
      the flex gap already handles spacing — while still landing in the extracted
@@ -38,11 +50,11 @@
   .header-row { display: flex; align-items: center; justify-content: center; gap: 14pt; }
   .header-row .photo {
     width: 3.2cm; height: 3.2cm; border-radius: 50%; object-fit: cover;
-    border: 1pt solid #000; flex: 0 0 auto;
+    border: 1pt solid var(--accent-rule); flex: 0 0 auto;
   }
   .header-row .header-text { flex: 1 1 auto; }
 
-  h2 { font-size: 12pt; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid black; padding-bottom: 2px; margin-top: 12px; margin-bottom: 6px; color: #000; page-break-after: avoid; break-after: avoid; }
+  h2 { font-size: 12pt; font-weight: bold; text-transform: uppercase; border-bottom: 1px solid var(--accent-rule); padding-bottom: 2px; margin-top: 12px; margin-bottom: 6px; color: var(--accent-strong); page-break-after: avoid; break-after: avoid; }
 
   p { margin: 0 0 4px 0; }
   ul { margin: 0 0 8px 0; padding-left: 20px; }
@@ -159,8 +171,8 @@
         <div class="flex-container">
           <div>
             <span class="item-title">{{ proj.name }}</span>
-            {% if proj.url %} | <a href="{{ proj.url }}" style="color:#000;text-decoration:none;font-size:9.5pt;">{{ proj.url }}</a>{% endif %}
-            {% if proj.github_url and proj.github_url != proj.url %} | <a href="{{ proj.github_url }}" style="color:#000;text-decoration:none;font-size:9.5pt;">{{ proj.github_url }}</a>{% endif %}
+            {% if proj.url %} | <a href="{{ proj.url }}" style="color:var(--accent-muted);text-decoration:none;font-size:9.5pt;">{{ proj.url }}</a>{% endif %}
+            {% if proj.github_url and proj.github_url != proj.url %} | <a href="{{ proj.github_url }}" style="color:var(--accent-muted);text-decoration:none;font-size:9.5pt;">{{ proj.github_url }}</a>{% endif %}
           </div>
           <div class="item-right">{{ proj.dates }}</div>
         </div>

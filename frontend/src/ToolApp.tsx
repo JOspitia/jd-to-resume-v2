@@ -6,6 +6,7 @@ import { useProfile } from './hooks/useProfile';
 import { useAudit } from './hooks/useAudit';
 import { useGeneration } from './hooks/useGeneration';
 import { useYamlEditor } from './hooks/useYamlEditor';
+import { useRedesign } from './hooks/useRedesign';
 import type { Generation } from './hooks/useGeneration';
 import type { YamlEditorOps } from './hooks/useYamlEditor';
 import { apiUrl } from './lib/api';
@@ -18,6 +19,7 @@ import { AdvancedOptions } from './components/AdvancedOptions';
 import { ActionBar } from './components/ActionBar';
 import { GenerationProgress } from './components/GenerationProgress';
 import { ResultsPanel } from './components/ResultsPanel';
+import { RedesignPanel } from './components/RedesignPanel';
 import { YamlEditorPanel } from './components/YamlEditorPanel';
 import { AuditPanel } from './components/AuditPanel';
 import { PhotoField } from './components/PhotoField';
@@ -72,6 +74,9 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   generationRef.current = generation;
   const yamlEditor = useYamlEditor({ profile, generation, audit });
   yamlOpsRef.current = yamlEditor.ops;
+  // "Change the design, keep the text" — re-renders the current YAML without
+  // calling the LLM.
+  const redesign = useRedesign({ profile, generation });
 
   /**
    * Resets the frontend state across every hook, then purges the backend
@@ -83,12 +88,13 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     generation.resetGeneration();
     audit.resetAudit();
     yamlEditor.resetYamlEditor();
+    redesign.closePanel();
     try {
       await fetch(apiUrl('/api/clear-cache'), { method: 'POST' });
     } catch (e) {
       console.error('No se pudo limpiar la caché del backend:', e);
     }
-  }, [profile, generation, audit, yamlEditor]);
+  }, [profile, generation, audit, yamlEditor, redesign]);
 
   return (
     <div className="min-h-screen text-foreground flex flex-col items-center pt-10 pb-44 px-4 md:px-8 selection:bg-primary selection:text-primary-foreground relative">
@@ -185,6 +191,8 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           <AdvancedOptions
             selectedTheme={profile.selectedTheme}
             onThemeChange={profile.setSelectedTheme}
+            accentColor={profile.accentColor}
+            onAccentColorChange={profile.setAccentColor}
             fitSinglePage={profile.fitSinglePage}
             onFitSinglePageChange={profile.setFitSinglePage}
             pageBreakSection={profile.pageBreakSection}
@@ -220,6 +228,21 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           translationMeta={generation.translationMeta}
           scoreHistory={audit.scoreHistory}
           onReopenYamlEditor={yamlEditor.handleReopenYamlEditor}
+          onOpenRedesign={redesign.openPanel}
+          redesignPanel={
+            redesign.open ? (
+              <RedesignPanel
+                theme={redesign.theme}
+                accent={redesign.accent}
+                onThemeChange={redesign.setTheme}
+                onAccentChange={redesign.setAccent}
+                onApply={redesign.apply}
+                onCancel={redesign.closePanel}
+                applying={redesign.status === 'applying'}
+                errorMessage={redesign.errorMessage}
+              />
+            ) : null
+          }
           onAudit={() => audit.handleValidateATS()}
           onTranslate={() => {
             generation.setForceTranslateToEnglish(true);
