@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# Keep the frontend build context small.
+#
+# node_modules is the big one: it is ~200 MB on disk and would be sent to
+# the daemon on every build. The image installs the exact locked
+# dependencies itself with `npm ci`, so the host copy is never needed.
+# ---------------------------------------------------------------------------
+
+# --- Dependencies (reinstalled inside the image with `npm ci`) ------------
+node_modules/
+
+# --- Build output (rebuilt inside the image) -------------------------------
+dist/
+dist-ssr/
+.vite/
+
+# --- Local state -----------------------------------------------------------
+.git/
+.gitignore
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# --- Secrets ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Container files themselves --------------------------------------------
+Dockerfile
+.dockerignore
