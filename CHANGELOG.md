@@ -4,6 +4,104 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-09 — Sesión "Docker de punta a punta"
+
+**Tipo:** feature (infraestructura).
+
+### Feature — Stack 100 % Docker
+
+Antes el backend solo se levantaba con un contenedor creado a mano
+(`docker start jd-to-resume-backend`, imagen de 2,75 GB que reinstalaba
+Chromium en cada arranque) y el frontend corría en el host con
+`npm run dev`. No había `Dockerfile` ni `docker-compose.yml` en el repo, así
+que el arranque no era reproducible.
+
+- **`backend/Dockerfile`** — multi-stage. La etapa de build crea un venv,
+  instala `requirements.txt` + `requirements-dev.txt` y descarga el
+  navegador con `playwright install chromium --only-shell`; la etapa final
+  copia solo el venv, los binarios del navegador y el código, e instala las
+  librerías de sistema (`playwright install-deps`, `fonts-freefont-ttf`,
+  `fonts-dejavu-core`). Sin compiladores, sin caché de pip, sin listas de
+  `apt` en la imagen final. Corre como usuario no-root (`appuser`,
+  uid 10001) y trae `HEALTHCHECK` contra el endpoint raíz.
+- **`frontend/Dockerfile`** — multi-stage: `node:24-alpine` compila el
+  bundle con `npm ci` + `npm run build` (que corre `tsc -b`, así que un
+  error de tipos rompe el build) y `nginx:1.27-alpine` sirve el resultado.
+- **`frontend/nginx.conf`** — sirve la SPA y hace de proxy inverso de
+  `/api` hacia `backend:8000`. Como todo queda en el mismo origen, el
+  bundle de producción usa URLs relativas (sin CORS, sin recompilar por
+  entorno) y el `download_url` relativo que devuelve el backend
+  (`/api/download/<archivo>.pdf`) resuelve sin cambios. `proxy_buffering
+  off` + `chunked_transfer_encoding on` preservan el streaming SSE de
+  `/api/generate`, y `try_files` resuelve el fallback de la SPA.
+- **`backend/.dockerignore` y `frontend/.dockerignore`** — fuera del
+  contexto de build quedan `.env` (y cualquier `.env.*`), `node_modules/`
+  (~200 MB), `dist/`, `__pycache__/`, `.pytest_cache/`, `output/`,
+  `rendercv_output/`, `*.pdf` y `*.log`. Nada de eso llega al daemon ni se
+  hornea en una capa.
+- **`compose.yaml`** — orchestra ambos servicios: `env_file:
+  ./backend/.env` inyecta las credenciales **en tiempo de ejecución**
+  (nunca en la imagen), el volumen `jd-to-resume-output` persiste los PDFs
+  y las fotos fuera del contenedor, y `depends_on: condition:
+  service_healthy` evita la ventana de error al arrancar. El backend
+  publica el 8000 y el frontend el 5173, igual que antes.
+- **`backend/requirements-dev.txt`** — `pytest` y `pytest-asyncio`
+  fuera de las dependencias de runtime, para poder correr la suite dentro
+  del contenedor (`docker compose exec backend pytest`).
+- **`backend/.env.example`** — plantilla sin secretos; documenta las
+  variables que el README ya describía.
+- **`.gitignore`** — se añadió la excepción `!requirements-dev.txt`: el
+  patrón global `*.txt` lo estaba ignorando y el archivo no habría
+  llegado al repo.
+
+### Optimización de tamaño de imagen
+
+El primer build dio una imagen de backend de **2,76 GB**. Dos hallazgos
+medidos con `docker history` la bajaron a **2,03 GB (-27 %)**:
+
+- **Chromium headless shell en vez del Chromium completo.**
+  `playwright install chromium` descarga *dos* navegadores: el Chromium
+  completo (~403 MB) y el `chromium_headless_shell` (~273 MB). Contrary
+  a lo que sugiere `chromium.executable_path`, Playwright 1.64 lanza el
+  **headless shell** para `launch(headless=True)` sin `channel=`. Como
+  los cuatro `launch()` del backend son headless y ninguno pasa
+  `channel=`, el Chromium completo era peso muerto: `--only-shell`
+  descarga solo el binario que se usa. *(El primer intento fue el
+  inverso —borrar el headless shell— y rompió el render con
+  `Executable doesn't exist at .../chromium_headless_shell-1248/...`;
+  el error de Playwright en los logs fue lo que lo dejó claro.)*
+- **Purga de fuentes y Xvfb que Chromium headless nunca carga:**
+  `fonts-unifont`, `fonts-wqy-zenhei`, `fonts-ipafont-gothic`,
+  `fonts-noto-color-emoji` y `xvfb` (~75 MB). Se purgan en la *misma*
+  capa que los instala, así que esos bytes nunca llegan a la imagen.
+
+La imagen del frontend quedó en **74 MB** (bundle estático + nginx).
+
+### Bug encontrado durante el build
+
+La primera versión del Dockerfile del frontend fijaba `NODE_ENV=production`
+en la etapa de build. `npm` omite las `devDependencies` cuando esa
+variable está puesta, así que `tsc` no existía y el build fallaba con
+`sh: tsc: not found`. La variable se quitó del stage de build (el bundle
+se compila con las devDependencies instaladas).
+
+### Verificación
+
+- `docker compose up --build -d` → backend y frontend **healthy**.
+- Generación real a través del proxy de nginx: HTTP 200 en 4,8 s, SSE
+  completo (`Validating Input` → `Finished`).
+- PDF descargado por `http://localhost:5173/api/download/...` (HTTP 200,
+  `application/pdf`, 33 KB).
+- Colores del PDF extraídos del content stream: `#000000` (cuerpo),
+  `#1B3A5C` (acento navy) y `#49617D` (tono secundario) — el RenderCV
+  y el render por Chromium aplican el mismo acento.
+- Ruta Chromium (`theme=classic_html`): HTTP 200 en 0,65 s, PDF de 1
+  página con 1.291 caracteres de texto seleccionable.
+- **321 tests en verde dentro del contenedor** (24,59 s).
+- UI de producción servida por nginx: landing y generador renderizan
+  igual que el dev server, y el catálogo de plantillas + paletas llega
+  desde el backend por el proxy del mismo origen.
+
 ## 2026-11-06 — Sesión "Color de acento + fixes de render"
 
 **Tipo:** feature + bug-fix.

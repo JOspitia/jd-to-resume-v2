@@ -335,12 +335,70 @@ jd-to-resume/
 
 ## Instalación y configuración
 
-### Prerrequisitos
+### Opción A — Todo con Docker (recomendada)
+
+Un solo comando levanta el stack completo: backend (FastAPI + RenderCV + Chromium) y frontend (nginx sirviendo el bundle de Vite y haciendo de proxy inverso de `/api`).
+
+```bash
+# 1. Tus credenciales (el .env NUNCA se copia dentro de la imagen)
+cp backend/.env.example backend/.env   # y edita tus claves
+
+# 2. Construir y levantar
+docker compose up --build -d
+
+# 3. Abrir
+#    http://localhost:5173   → la app (frontend)
+#    http://localhost:8000/docs → la API directa
+```
+
+```bash
+docker compose logs -f backend    # ver el log del pipeline
+docker compose ps                 # estado y healthcheck
+docker compose down                # parar (los PDFs sobreviven)
+docker compose down -v             # parar y borrar los PDFs generados
+```
+
+| Servicio | URL | Puerto host | Imagen |
+|---|---|---|---|
+| Frontend (nginx) | http://localhost:5173 | 5173 → 80 | `jd-to-resume-frontend:dev` |
+| Backend (uvicorn) | http://localhost:8000 | 8000 → 8000 | `jd-to-resume-backend:dev` |
+
+**Cómo está construido (optimizado):**
+
+- **Multi-stage.** La etapa de build instala las dependencias y descarga el navegador; la imagen final se queda solo con el venv, los binarios del navegador y el código de aplicación. Sin compiladores, sin caché de pip, sin listas de `apt` en la imagen final.
+- **Capas cacheables.** `requirements.txt` y `package-lock.json` viven en su propia capa: tocar código de aplicación no vuelve a descargar wheels ni el navegador (~3 min → ~5 s).
+- **Navegador horneado.** Antes se instalaba en cada arranque del contenedor; ahora se descarga una sola vez en el build, y solo la variante que Playwright realmente usa (`chromium --only-shell`): el Chromium completo que baja el comando por defecto no lo usa ninguna de las llamadas `launch(headless=True)` del backend.
+- **`.dockerignore` por servicio.** Se excluyen `.env`, `node_modules/` (~200 MB), `dist/`, `__pycache__/`, `output/`, `.pytest_cache/`, PDFs y logs del contexto de build: ni se envían al daemon ni se cocinan en una capa.
+- **Secretos fuera de la imagen.** `backend/.env` se inyecta en tiempo de ejecución con `env_file:` de Compose; nunca se hornea en una capa (verificable con `docker history`).
+- **Sin root.** El backend corre como usuario no-root (`appuser`, uid 10001).
+- **Healthchecks + `depends_on`.** El frontend espera a que el backend responda `/` antes de arrancar, así no hay ventanas de error al levantarse.
+- **Persistencia.** Los PDFs y las fotos se guardan en el volumen `jd-to-resume-output`, no en la capa del contenedor: `docker compose down` no borra tus CVs.
+- **SSE sin buffering.** nginx proxea `/api/` con `proxy_buffering off`, así el progreso de `/api/generate` avanza paso a paso en vez de saltar de 0 a 100.
+
+Tamaño de las imágenes:
+
+| Imagen | Tamaño |
+|---|---|
+| `jd-to-resume-backend:dev` | **2,03 GB** (Playwright + Chromium + Typst + PyMuPDF) |
+| `jd-to-resume-frontend:dev` | **74 MB** (bundle estático + nginx) |
+
+```bash
+# Tests dentro del contenedor (pytest viene en la imagen)
+docker compose exec backend python -m pytest -o asyncio_mode=auto --ignore=tests/test_yaml_endpoints.py -q
+# -> 321 passed
+
+# Tamaño de las imágenes
+docker images | grep jd-to-resume
+```
+
+### Opción B — Desarrollo local (sin Docker)
+
+#### Prerrequisitos
 - Node.js 18+
 - Python 3.10+
 - Clave API de al menos un proveedor LLM (gratis en [Google AI Studio](https://aistudio.google.com/app/apikey)).
 
-### 1. Backend
+#### 1. Backend
 
 ```bash
 cd backend
