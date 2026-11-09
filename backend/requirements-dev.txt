@@ -1,0 +1,8 @@
+# Test-only dependencies. Kept out of requirements.txt so the runtime
+# image stays lean; installed in the Docker build stage so the suite can be
+# run inside the container:
+#
+#   docker compose exec backend pytest
+#
+pytest
+pytest-asyncio

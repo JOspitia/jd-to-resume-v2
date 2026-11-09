@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# Keep the build context small and the image free of local state.
+#
+# Every pattern below is excluded from the Docker build context, so it never
+# reaches the daemon and never lands in a layer.
+# ---------------------------------------------------------------------------
+
+# --- Secrets: never bake credentials into an image -------------------------
+.env
+.env.*
+!.env.example
+
+# --- Python caches and build artifacts -------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Runtime artifacts (PDFs are stored in the `jd-output` volume) ---------
+output/
+rendercv_output/
+*.pdf
+*.log
+
+# --- Local tooling / editor ------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# --- Container files themselves (they are injected by the build) ------------
+Dockerfile
+.dockerignore

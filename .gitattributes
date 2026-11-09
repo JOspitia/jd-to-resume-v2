@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# Normalización de finales de línea.
+#
+# Docker, compose y nginx interpretan los finales de línea CRLF como parte
+# del comando: un `RUN pip install ...\r` en un Dockerfile falla con
+# "/bin/sh: \r: not found" dentro de un contenedor Linux. Git guarda LF en
+# el repositorio, pero en un checkout de Windows el working copy se
+# convierte a CRLF, así que hay que fijar el eol de estos archivos
+# explícitamente.
+# ---------------------------------------------------------------------------
+
+# --- Imágenes y orquestación ---
+Dockerfile      text eol=lf
+*/Dockerfile    text eol=lf
+*.dockerignore  text eol=lf
+compose.yaml    text eol=lf
+compose.yml     text eol=lf
+docker-compose.yaml text eol=lf
+docker-compose.yml  text eol=lf
+
+# --- Configuración del servidor web ---
+*.conf          text eol=lf

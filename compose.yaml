@@ -1,0 +1,66 @@
+# ---------------------------------------------------------------------------
+# ResumeTailor-AI — full stack in Docker.
+#
+#   docker compose up --build -d      # build + start everything
+#   docker compose logs -f backend    # follow the API logs
+#   docker compose down                # stop (PDFs survive in the volume)
+#   docker compose down -v             # stop AND delete the generated PDFs
+#
+# The frontend is served by nginx on http://localhost:5173 and reverse-proxies
+# /api to the backend, so the browser only ever talks to one origin.
+# ---------------------------------------------------------------------------
+
+name: jd-to-resume
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: jd-to-resume-backend:dev
+    container_name: jd-to-resume-backend
+    restart: unless-stopped
+
+    # Secrets are injected at runtime, never baked into the image.
+    env_file:
+      - ./backend/.env
+
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PLAYWRIGHT_BROWSERS_PATH: /opt/ms-playwright
+
+    ports:
+      # Published so the API stays reachable directly (docs, curl, tests).
+      # The UI does not need it: nginx proxies internally.
+      - "8000:8000"
+
+    volumes:
+      # Generated PDFs and uploaded photos live outside the container, so
+      # `docker compose down` does not delete them.
+      - jd-output:/app/output
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: jd-to-resume-frontend:dev
+    container_name: jd-to-resume-frontend
+    restart: unless-stopped
+
+    ports:
+      - "5173:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  jd-output:
+    name: jd-to-resume-output
