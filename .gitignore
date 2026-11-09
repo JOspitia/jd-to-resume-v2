@@ -24,6 +24,7 @@ build/
 *.log
 *.txt
 !requirements.txt
+!requirements-dev.txt
 !knowledge_base.txt
 !README.md
 !*.md
