@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+{#
+  Cover-letter template.
+
+  Renders the letter as a one-page document that shares the CV's visual
+  language: the same accent CSS custom properties (injected by the
+  backend from `design_palettes`), the same ATS-safe rules (body copy
+  never tinted, no background fills behind text, URLs on their own line
+  so the extracted text layer keeps them intact) and the same typographic
+  scale.
+
+  Three styles mirror the three CV designs:
+    * classic  -> centered letterhead, serif body (the CV's `classic`)
+    * modern   -> left-aligned letterhead, sans body (the CV's `sb2nov`)
+    * sidebar  -> contact column on the left (the CV's `moderncv`)
+
+  The `ats_link` filter renders a profile URL as `linkedin.com/in/<slug>`
+  instead of the word "LinkedIn": ATS crawlers read the extracted text
+  layer, not the link annotations, so the URL has to be visible text.
+#}
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root {
+    --accent-body: {{ accent.body|default('#000000') }};
+    --accent-strong: {{ accent.accent|default('#000000') }};
+    --accent-muted: {{ accent.muted|default('#000000') }};
+    --accent-rule: {{ accent.rule|default('#000000') }};
+  }
+  @page { size: letter; margin: 0.6in; }
+
+  body { margin: 0; color: var(--accent-body); font-size: 11pt; }
+  p { margin: 0 0 9pt 0; }
+
+  .name { font-weight: bold; color: var(--accent-strong); margin: 0; }
+  .contact-line { color: var(--accent-body); }
+  .contact-line a, .profile-links a { color: var(--accent-muted); text-decoration: none; }
+  .profile-links a { white-space: nowrap; }
+
+  .salutation { margin-bottom: 10pt; }
+  .body-paragraph { margin-bottom: 10pt; }
+
+  .signature-name { font-weight: bold; margin: 14pt 0 2pt 0; }
+  .signature-contact { color: var(--accent-muted); font-size: 9.5pt; }
+  .signature-contact a { color: var(--accent-muted); text-decoration: none; }
+
+  /* ------------------------------------------------------------------ *
+   * style: classic — centred letterhead, serif body.
+   * ------------------------------------------------------------------ */
+  body.style-classic { font-family: 'Times New Roman', Garamond, serif; line-height: 1.45; }
+  body.style-classic .letterhead { text-align: center; margin-bottom: 16pt; }
+  body.style-classic .name { font-size: 21pt; text-transform: uppercase; letter-spacing: 0.5pt; }
+  body.style-classic .contact-line { font-size: 10pt; margin-top: 3pt; }
+  body.style-classic .profile-links { font-size: 10pt; margin-top: 3pt; }
+  body.style-classic .letterhead-rule {
+    margin-top: 10pt; border-bottom: 1.5pt solid var(--accent-rule);
+  }
+  body.style-classic .signature { margin-top: 16pt; }
+
+  /* ------------------------------------------------------------------ *
+   * style: modern — left-aligned letterhead, sans body.
+   * ------------------------------------------------------------------ */
+  body.style-modern { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; line-height: 1.5; }
+  body.style-modern .letterhead { text-align: left; margin-bottom: 16pt; }
+  body.style-modern .name { font-size: 24pt; letter-spacing: -0.3pt; }
+  body.style-modern .contact-line { font-size: 10pt; margin-top: 4pt; }
+  body.style-modern .profile-links { font-size: 10pt; margin-top: 3pt; }
+  body.style-modern .letterhead-rule {
+    margin-top: 10pt; border-bottom: 2pt solid var(--accent-rule);
+  }
+  body.style-modern .salutation { font-weight: bold; }
+  body.style-modern .signature { margin-top: 16pt; }
+
+  /* ------------------------------------------------------------------ *
+   * style: sidebar — contact column on the left, letter on the right.
+   * ------------------------------------------------------------------ */
+  body.style-sidebar { font-family: 'Times New Roman', Garamond, serif; line-height: 1.45; }
+  body.style-sidebar .columns { display: flex; gap: 18pt; align-items: flex-start; }
+  body.style-sidebar .sidebar {
+    flex: 0 0 132pt; border-right: 1.5pt solid var(--accent-rule);
+    padding-right: 12pt; font-size: 9.5pt;
+  }
+  body.style-sidebar .sidebar .name {
+    font-size: 15pt; text-transform: uppercase; margin-bottom: 4pt; line-height: 1.15;
+  }
+  body.style-sidebar .sidebar .contact-line { margin-bottom: 3pt; }
+  body.style-sidebar .sidebar .profile-links { margin-top: 6pt; }
+  body.style-sidebar .sidebar .profile-links a { display: block; }
+  body.style-sidebar .sidebar .profile-links a::after { content: ""; }
+  body.style-sidebar .letter { flex: 1 1 auto; }
+  body.style-sidebar .letter .name { display: none; }
+  body.style-sidebar .signature { margin-top: 16pt; }
+</style>
+</head>
+<body class="style-{{ style|default('classic') }}">
+  {% set has_sidebar = (style|default('classic')) == 'sidebar' %}
+  {% if has_sidebar %}
+  <div class="columns">
+    <div class="sidebar">
+      <div class="name">{{ name }}</div>
+      <div class="contact-line">
+        {% set items = [] %}
+        {% if location %}{% set _ = items.append(location) %}{% endif %}
+        {% if phone %}{% set _ = items.append(phone) %}{% endif %}
+        {% if email %}{% set _ = items.append(email) %}{% endif %}
+        {{ items|join(' | ') }}
+      </div>
+      {% set links = [] %}
+      {% if linkedin %}{% set _ = links.append('<a href="' ~ (linkedin | e) ~ '">' ~ (linkedin | ats_link('linkedin')) ~ '</a>') %}{% endif %}
+      {% if github %}{% set _ = links.append('<a href="' ~ (github | e) ~ '">' ~ (github | ats_link('github')) ~ '</a>') %}{% endif %}
+      {% if portfolio %}{% set _ = links.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
+      {% if links %}
+      <div class="profile-links">{{ links|join('<br />')|safe }}</div>
+      {% endif %}
+    </div>
+    <div class="letter">
+      {% include "letter_body.html.j2" %}
+    </div>
+  </div>
+  {% else %}
+  <div class="letterhead">
+    <div class="name">{{ name }}</div>
+    <div class="contact-line">
+      {% set items = [] %}
+      {% if location %}{% set _ = items.append(location) %}{% endif %}
+      {% if phone %}{% set _ = items.append(phone) %}{% endif %}
+      {% if email %}{% set _ = items.append(email) %}{% endif %}
+      {{ items|join(' | ') }}
+    </div>
+    {% set links = [] %}
+    {% if linkedin %}{% set _ = links.append('<a href="' ~ (linkedin | e) ~ '">' ~ (linkedin | ats_link('linkedin')) ~ '</a>') %}{% endif %}
+    {% if github %}{% set _ = links.append('<a href="' ~ (github | e) ~ '">' ~ (github | ats_link('github')) ~ '</a>') %}{% endif %}
+    {% if portfolio %}{% set _ = links.append('<a href="' ~ (portfolio | e) ~ '">' ~ (portfolio | ats_link('portfolio')) ~ '</a>') %}{% endif %}
+    {% if links %}
+    <div class="profile-links">{{ links|join(' | ')|safe }}</div>
+    {% endif %}
+    <div class="letterhead-rule"></div>
+  </div>
+  {% include "letter_body.html.j2" %}
+  {% endif %}
+</body>
+</html>

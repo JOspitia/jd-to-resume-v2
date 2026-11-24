@@ -267,7 +267,7 @@ STRICT RULES (CRITICAL — ALL MUST BE FOLLOWED):
    - 'opening': two or three sentences. Why THIS vacancy and THIS company, and the single strongest thing the candidate brings to it. No "I am writing to apply for the position" filler — start from the match.
    - 'body': an array of TWO or three paragraphs. Each paragraph carries one argument and its evidence. Paragraphs are 3 to 5 sentences long.
    - 'closing': two or three sentences. Availability, willingness to talk, the practical facts the candidate can offer (schedule, city, mobility) WHEN the resume supports them, and a clear next step.
-   - 'signature': the candidate's name followed by their contact line (phone and email) exactly as they appear in the resume. If the resume has no phone or email, keep only the name — never invent contact details.
+   - 'signature': the candidate's full name and NOTHING ELSE. The app builds the contact block (phone, email, LinkedIn) itself from the candidate's real CV, so do not write a phone number, an email address or a URL here — and never invent one.
 7. PARAGRAPH FLOW: no headings, no bullet points, no markdown, no bold. Plain prose that reads as a continuous letter, in the same voice from the first sentence to the last.
 8. NO META-COMMENTARY: never mention the ATS, the scoring, the AI, the job market, "this letter", "the position advertised on your site", or anything about the writing process. The candidate is writing to a person.
 9. DO NOT ASK FOR A TEST OR A TASK, and do not ask the reader to contact the candidate "at my earliest convenience" — state availability plainly and close with a clear, low-friction next step.
@@ -281,7 +281,7 @@ Respond ONLY with a JSON object in this exact structure:
   "opening": "Two or three sentences that connect the candidate to this specific vacancy.",
   "body": ["First body paragraph, 3 to 5 sentences.", "Second body paragraph, 3 to 5 sentences."],
   "closing": "Two or three sentences: availability, practical facts, next step.",
-  "signature": "Full Name\\n+57 300 000 0000\\nname@example.com"
+  "signature": "Full Name"
 }}
 
 Base Resume:

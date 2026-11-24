@@ -74,6 +74,10 @@ export function useProfile() {
   const [coverLetterTone, setCoverLetterTone] = useState<CoverLetterTone>('professional');
   const [coverLetterLength, setCoverLetterLength] = useState<CoverLetterLength>('medium');
   const [coverLetterLanguage, setCoverLetterLanguage] = useState<CoverLetterLanguage>('auto');
+  /** Letter layout for the PDF: mirrors the CV designs (classic / modern / sidebar). */
+  const [letterStyle, setLetterStyle] = useState<string>('classic');
+  /** Accent palette id for the letter PDF (same catalogue as the CV). */
+  const [letterAccent, setLetterAccent] = useState<string>('none');
 
   // ATS & AI Detection flags
   const [autoValidateATS, setAutoValidateATS] = useState(false);
@@ -214,6 +218,8 @@ export function useProfile() {
     setCoverLetterTone('professional');
     setCoverLetterLength('medium');
     setCoverLetterLanguage('auto');
+    setLetterStyle('classic');
+    setLetterAccent('none');
     clearPhoto();
     try {
       localStorage.removeItem(CONTACT_STORAGE_KEY);
@@ -278,6 +284,10 @@ export function useProfile() {
     setCoverLetterLength,
     coverLetterLanguage,
     setCoverLetterLanguage,
+    letterStyle,
+    setLetterStyle,
+    letterAccent,
+    setLetterAccent,
     resetProfile,
   };
 }

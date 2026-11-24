@@ -30,6 +30,11 @@ type CoverLetterDeps = {
     | 'coverLetterTone'
     | 'coverLetterLength'
     | 'coverLetterLanguage'
+    | 'letterStyle'
+    | 'letterAccent'
+    | 'linkedinUrl'
+    | 'githubUrl'
+    | 'portfolioUrl'
     | 'customPrompt'
   >;
 };
@@ -60,6 +65,11 @@ export function useCoverLetter({ profile }: CoverLetterDeps) {
     coverLetterTone,
     coverLetterLength,
     coverLetterLanguage,
+    letterStyle,
+    letterAccent,
+    linkedinUrl,
+    githubUrl,
+    portfolioUrl,
     customPrompt,
   } = profile;
 
@@ -107,6 +117,14 @@ export function useCoverLetter({ profile }: CoverLetterDeps) {
     formData.append('tone', coverLetterTone);
     formData.append('length', coverLetterLength);
     formData.append('language', coverLetterLanguage);
+    formData.append('letter_style', letterStyle);
+    formData.append('accent', letterAccent);
+    // The profile links: whatever the user typed in the form wins over
+    // what the PDF extraction found. They end up in the letterhead and
+    // in the signature.
+    formData.append('linkedin_url', linkedinUrl || '');
+    formData.append('github_url', githubUrl || '');
+    formData.append('portfolio_url', portfolioUrl || '');
     formData.append('custom_instructions', customPrompt || '');
 
     // The letter is a single LLM round-trip; 90s is a generous ceiling

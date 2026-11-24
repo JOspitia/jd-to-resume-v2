@@ -100,14 +100,19 @@ class TestDomainGamesRegistry:
 class TestSecurityConstants:
     def test_download_filename_regex_is_strict(self):
         """The regex must reject anything that could escape OUTPUT_DIR."""
-        # Inline duplicate of the regex from main.py so we can test the
-        # contract without re-importing main (which rewrites sys.stdout).
-        pattern = r"^tailored_resume_\d+\.pdf$"
+        # Inline duplicate of the regex from the storage adapter so we can
+        # test the contract without re-importing main (which rewrites
+        # sys.stdout). The route uses the SAME regex to validate read
+        # requests. Two prefixes are allowed: the generated CV
+        # (tailored_resume) and the generated cover letter (cover_letter).
+        pattern = r"^(tailored_resume|cover_letter)_\d+\.pdf$"
         rgx = re.compile(pattern)
 
         good = [
             "tailored_resume_1234567890.pdf",
             "tailored_resume_1.pdf",
+            "cover_letter_1234567890.pdf",
+            "cover_letter_1.pdf",
         ]
         for name in good:
             assert rgx.fullmatch(name), name
@@ -117,10 +122,17 @@ class TestSecurityConstants:
             "..\\windows\\system32",
             "/etc/passwd",
             "tailored_resume_1.pdf.bak",
+            "cover_letter_1.pdf.bak",
             "tailored_resume_abc.pdf",
             "tailored_resume_.pdf",
+            "cover_letter_abc.pdf",
+            "cover_letter_.pdf",
             "Tailored_resume_1.pdf",
+            "Cover_letter_1.pdf",
             "tailored_resume_1.PDF",
+            "cover_letter_1.PDF",
+            "cover_letter_1.exe",
+            "letter_1.pdf",
             "",
             "tailored_resume_1",
             "tailored_resume_1234.exe",

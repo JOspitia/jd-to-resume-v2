@@ -4,6 +4,98 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-24 — Sesión "Carta de presentación: PDF, diseño y contactos"
+
+**Tipo:** feature.
+
+### Feature — La carta también sale en PDF, con el diseño del CV y los contactos reales
+
+La carta de presentación solo se podía copiar como texto. Pero el PDF es
+lo que más se usa: es lo que uno adjunta, lo que se imprime y lo que se
+sube a un portal que pide archivo. Y tiene que **verse como el CV**, no
+como un texto suelto.
+
+**El PDF de la carta**
+
+- `backend/templates/letter.html.j2` + `backend/templates/letter_body.html.j2`
+  (nuevos) — la plantilla de la carta. Reutiliza el sistema visual del
+  CV: las mismas variables CSS de acento, las mismas reglas de seguridad
+  ATS (el cuerpo nunca se tiñe, nada tiene relleno de color detrás del
+  texto, las URLs van en su propia línea) y la misma escala tipográfica.
+- `backend/adapters/renderer/cover_letter_adapter.py` (nuevo) — renderiza
+  la carta con el mismo Chromium headless que usa el fallback HTML del
+  CV. **No** se reutilizan los renderizadores del CV porque están
+  construidos alrededor de un documento por secciones (RenderCV espera
+  un esquema de currículum: educación, skills, experiencia, proyectos) y
+  una carta no tiene nada de eso. Lo que sí se reutiliza son las piezas
+  que hacen bueno al CV: `design_palettes.accent_css_variables` (los
+  mismos colores) y `_ats_link_label` (las URLs impresas como
+  `linkedin.com/in/<slug>`, que es lo que leen los rastreadores de ATS).
+- Tres estilos que reflejan los tres diseños del CV: **clásica**
+  (encabezado centrado, cuerpo serif), **moderna** (encabezado a la
+  izquierda, cuerpo sans) y **lateral** (columna de contactos a la
+  izquierda, carta a la derecha).
+- `backend/routes/design_router.py` — el catálogo de estilos de carta se
+  sirve desde el mismo endpoint `/api/design-options` que los temas del
+  CV, para que el swatch que el usuario ve sea el hex exacto que el
+  renderizador va a aplicar.
+
+**Los contactos:LinkedIn incluido, y siempre reales**
+
+- `backend/application/services/cover_letter_service.py` — el bloque de
+  contactos se resuelve **de forma determinista**, nunca con lo que diga
+  el modelo: primero lo que el usuario escribió en el formulario, y si
+  no, lo que se extrajo del propio PDF (`parser.extract_header`).
+  El modelo solo aporta el **nombre**; el backend reescribe la firma con
+  los contactos verificados. Una carta ya no puede inventar un teléfono,
+  un correo ni una URL.
+- El prompt cambió en consecuencia: la regla 6 ahora pide el nombre y
+  nada más, y dice explícitamente que no escriba teléfono, correo ni
+  enlaces.
+- El LinkedIn sale en el encabezado y en la firma, impreso como
+  `linkedin.com/in/<slug>` y clicable en el PDF.
+
+**El resto**
+
+- `backend/adapters/storage/filesystem_storage.py` y
+  `backend/ports/resume_storage.py` — la carta se guarda como
+  `cover_letter_<ts>.pdf` y se sirve por la misma ruta `/api/download`
+  que los CV; el regex de allowlist pasa a
+  `^(tailored_resume|cover_letter)_\d+\.pdf$` (el camino relativo sigue
+  bloqueado).
+- `backend/routes/cover_letter_router.py` — acepta `letter_style`,
+  `accent`, `linkedin_url`, `github_url` y `portfolio_url`, y devuelve
+  `pdf_url` + `pdf_filename` + `contact`. Un estilo o un color
+  desconocidos caen al valor por defecto en vez de romper la petición.
+- El render del PDF corre en un thread (`asyncio.to_thread`): la API
+  sincrónica de Playwright no puede arrancar dentro de un event loop, y
+  el endpoint es asíncrono. Si el PDF falla, la carta de texto se
+  devuelve igual.
+- Frontend: `CoverLetterOptions` suma el selector de diseño y los
+  swatches de color (mismo catálogo que el CV), `CoverLetterPanel`
+  suma **Descargar PDF** (descarga real: el servidor responde con
+  `Content-Disposition: attachment`) y **Ver PDF** (apertura en el
+  visor del navegador, como el botón Preview del CV), y el hook
+  manda los links del formulario.
+- `backend/tests/test_cover_letter.py` — 9 tests nuevos: el bloque de
+  contactos determinista, el form por encima del CV, el PDF
+  descargable con la URL intacta en la capa de texto, el fallback de
+  estilo y color desconocidos, y el regex de almacenamiento.
+- `backend/tests/test_input_validation.py` — el regex inline copia el
+  nuevo allowlist, con los dos prefijos y sus casos inválidos.
+
+### Verificación
+
+- **369 tests en verde** (29,25 s), antes 360.
+- Prueba real end-to-end con el LLM configurado: `sample-pdfs/jakes-resume.pdf`
+  + una JD de Ejecutivo Comercial, perfil general, empresa "Tiendas
+  Alcala", estilo lateral y color navy → 200, PDF de **una sola página**,
+  texto seleccionable, con el LinkedIn del CV (`linkedin.com/in/jake`)
+  intacto en la capa de texto y una cifra real del CV (200 impresoras).
+- Los tres estilos renderizados y revisados visualmente: la URL del
+  perfil sale clicable y sin partirse en el guion.
+- `tsc --noEmit` del frontend sin errores.
+
 ## 2026-11-24 — Sesión "Carta de presentación"
 
 **Tipo:** feature.

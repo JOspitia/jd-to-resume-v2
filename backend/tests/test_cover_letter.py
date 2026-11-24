@@ -224,6 +224,7 @@ class TestCoverLetterService:
             "closing",
             "signature",
             "plain_text",
+            "contact",
             "meta",
         ):
             assert key in out, key
@@ -400,3 +401,184 @@ class TestCoverLetterEndpoint:
         )
         keys = [k for k in _RL_HITS if k.startswith("cover-letter:")]
         assert keys, "the cover-letter scope was never registered"
+
+
+# ---------------------------------------------------------------------------
+# Contact block — the signature is built from real data, never from the model
+# ---------------------------------------------------------------------------
+
+
+class _StubParser:
+    """Parser stub whose header carries a known contact block."""
+
+    def extract_text(self, path):  # pragma: no cover — not used in these tests
+        return RESUME_TEXT
+
+    def extract_header(self, text):
+        return {
+            "email": "cv@example.com",
+            "phone": "+57 300 0000000",
+            "linkedin": "linkedin.com/in/from-cv",
+            "github": "",
+            "portfolio": "",
+        }
+
+
+class TestContactBlock:
+    @pytest.mark.asyncio
+    async def test_signature_uses_the_real_contacts_not_the_model(self):
+        """The model only supplies the name. The contacts come from the CV."""
+        svc = CoverLetterService(_StubLLM(), _StubParser())
+        out = await svc.generate_text(
+            RESUME_TEXT,
+            JD_TEXT,
+            get_game("tech"),
+            header=_StubParser().extract_header(RESUME_TEXT),
+        )
+        assert out["contact"]["email"] == "cv@example.com"
+        assert out["contact"]["phone"] == "+57 300 0000000"
+        assert out["contact"]["linkedin"] == "linkedin.com/in/from-cv"
+        # The signature carries them, and the model's invented ones are gone.
+        assert "cv@example.com" in out["signature"]
+        assert "linkedin.com/in/from-cv" in out["signature"]
+        assert "name@example.com" not in out["signature"]
+
+    @pytest.mark.asyncio
+    async def test_the_form_wins_over_the_cv(self):
+        """A link typed in the form overrides what the PDF extraction found."""
+        svc = CoverLetterService(_StubLLM(), _StubParser())
+        out = await svc.generate_text(
+            RESUME_TEXT,
+            JD_TEXT,
+            get_game("tech"),
+            header=_StubParser().extract_header(RESUME_TEXT),
+            contact_overrides={"linkedin": "linkedin.com/in/from-form"},
+        )
+        assert out["contact"]["linkedin"] == "linkedin.com/in/from-form"
+        assert "linkedin.com/in/from-form" in out["signature"]
+        assert "linkedin.com/in/from-cv" not in out["signature"]
+
+    @pytest.mark.asyncio
+    async def test_plain_text_carries_the_contact_block(self):
+        svc = CoverLetterService(_StubLLM(), _StubParser())
+        out = await svc.generate_text(
+            RESUME_TEXT,
+            JD_TEXT,
+            get_game("tech"),
+            header=_StubParser().extract_header(RESUME_TEXT),
+        )
+        assert "linkedin.com/in/from-cv" in out["plain_text"]
+
+
+# ---------------------------------------------------------------------------
+# The PDF
+# ---------------------------------------------------------------------------
+
+
+class TestCoverLetterPdf:
+    def test_endpoint_returns_a_downloadable_pdf(self, client, valid_pdf):
+        c, _ = client
+        r = c.post(
+            "/api/cover-letter",
+            files={"file": ("input.pdf", valid_pdf, "application/pdf")},
+            data={
+                "jd": JD_TEXT,
+                "domain_game": "tech",
+                "letter_style": "classic",
+                "accent": "navy",
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body.get("pdf_filename"), body
+        assert body["pdf_filename"].startswith("cover_letter_")
+        assert body["pdf_url"] == f"/api/download/{body['pdf_filename']}"
+        assert body["meta"]["letter_style"] == "classic"
+        assert body["meta"]["accent"] == "navy"
+
+        pdf = c.get(body["pdf_url"])
+        assert pdf.status_code == 200
+        assert pdf.content.startswith(b"%PDF")
+
+    def test_the_pdf_keeps_the_profile_url_intact(self, client, valid_pdf):
+        """ATS crawlers read the text layer: a URL split at a hyphen reads as
+        a broken URL."""
+        c, _ = client
+        r = c.post(
+            "/api/cover-letter",
+            files={"file": ("input.pdf", valid_pdf, "application/pdf")},
+            data={
+                "jd": JD_TEXT,
+                "domain_game": "tech",
+                "linkedin_url": "https://www.linkedin.com/in/jane-doe/",
+                "letter_style": "classic",
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["contact"]["linkedin"] == "https://www.linkedin.com/in/jane-doe/"
+
+        pdf = c.get(body["pdf_url"])
+        import pymupdf
+
+        doc = pymupdf.open(stream=pdf.content, filetype="pdf")
+        text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        assert "linkedin.com/in/jane-doe" in text
+
+    def test_an_unknown_style_or_accent_falls_back(self, client, valid_pdf):
+        c, _ = client
+        r = c.post(
+            "/api/cover-letter",
+            files={"file": ("input.pdf", valid_pdf, "application/pdf")},
+            data={
+                "jd": JD_TEXT,
+                "letter_style": "not-a-style",
+                "accent": "not-a-palette",
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["meta"]["letter_style"] == "classic"
+        assert body["meta"]["accent"] == "none"
+
+
+# ---------------------------------------------------------------------------
+# Renderer helpers
+# ---------------------------------------------------------------------------
+
+
+class TestLetterRenderer:
+    def test_unknown_styles_fall_back_to_the_default(self):
+        from adapters.renderer.cover_letter_adapter import normalize_letter_style
+
+        assert normalize_letter_style("modern") == "modern"
+        assert normalize_letter_style("sidebar") == "sidebar"
+        assert normalize_letter_style("bogus") == "classic"
+        assert normalize_letter_style(None) == "classic"
+        assert normalize_letter_style("") == "classic"
+
+    def test_signature_links_use_the_ats_readable_label(self):
+        from adapters.renderer.cover_letter_adapter import build_signature_links
+
+        links = build_signature_links(
+            {
+                "linkedin": "https://www.linkedin.com/in/jane-doe/",
+                "github": "https://github.com/jane",
+                "portfolio": "",
+            }
+        )
+        labels = [link["label"] for link in links]
+        assert "linkedin.com/in/jane-doe" in labels
+        assert "github.com/jane" in labels
+        assert len(labels) == 2
+
+    def test_the_storage_allows_the_cover_letter_filename(self):
+        from adapters.storage.filesystem_storage import FilesystemStorage
+
+        rgx = FilesystemStorage.download_filename_regex()
+        assert rgx.fullmatch("cover_letter_1712345678.pdf")
+        assert rgx.fullmatch("tailored_resume_1712345678.pdf")
+        assert not rgx.fullmatch("cover_letter_abc.pdf")
+        assert not rgx.fullmatch("../cover_letter_1.pdf")
+        assert not rgx.fullmatch("cover_letter_1.PDF")

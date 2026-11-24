@@ -25,9 +25,11 @@ from photo_helpers import save_photo as _save_photo
 from ports.resume_storage import ResumeStorage
 
 
-# Filename pattern: tailored_resume_<unix_seconds>.pdf. The downstream route
-# uses the SAME regex to validate read requests.
-_DOWNLOAD_FILENAME_RE = re.compile(r"^tailored_resume_\d+\.pdf$")
+# Filename pattern: <prefix>_<unix_seconds>.pdf, where the prefix is either
+# ``tailored_resume`` (the generated CV) or ``cover_letter`` (the generated
+# cover letter). The downstream route uses the SAME regex to validate read
+# requests.
+_DOWNLOAD_FILENAME_RE = re.compile(r"^(tailored_resume|cover_letter)_\d+\.pdf$")
 
 
 class FilesystemStorage:
@@ -78,13 +80,18 @@ class FilesystemStorage:
             f.write(content)
         return tmp_path
 
-    def save_generated_pdf(self, source_path: str) -> str:
+    def save_generated_pdf(self, source_path: str, prefix: str = "tailored_resume") -> str:
         """Promote a generated PDF to the persistent output dir with the
-        canonical ``tailored_resume_<ts>.pdf`` name.
+        canonical ``<prefix>_<ts>.pdf`` name.
+
+        ``prefix`` is ``"tailored_resume"`` for the CV and ``"cover_letter"``
+        for the cover letter. It must match the allowlist regex, otherwise
+        the file could never be downloaded back.
 
         Returns the absolute path of the final file.
         """
-        filename = f"tailored_resume_{int(time.time())}.pdf"
+        safe_prefix = prefix if prefix in ("tailored_resume", "cover_letter") else "tailored_resume"
+        filename = f"{safe_prefix}_{int(time.time())}.pdf"
         dest = self._output_dir / filename
         shutil.copy(source_path, dest)
         return str(dest)

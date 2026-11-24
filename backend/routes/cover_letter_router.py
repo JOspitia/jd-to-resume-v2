@@ -48,6 +48,11 @@ def build_cover_letter_router(service: CoverLetterService) -> APIRouter:
         length: Optional[str] = Form(None),
         language: Optional[str] = Form(None),
         custom_instructions: Optional[str] = Form(None),
+        letter_style: Optional[str] = Form(None),
+        accent: Optional[str] = Form(None),
+        linkedin_url: Optional[str] = Form(None),
+        github_url: Optional[str] = Form(None),
+        portfolio_url: Optional[str] = Form(None),
     ):
         from application.rate_limit import enforce_rate_limit
 
@@ -92,6 +97,16 @@ def build_cover_letter_router(service: CoverLetterService) -> APIRouter:
                 ),
             )
 
+        # The letter style and the accent palette are normalised, not
+        # rejected: an unknown value falls back to the default design
+        # instead of failing the whole request (same policy as the
+        # palette ids in /api/design-options).
+        from adapters.renderer.cover_letter_adapter import normalize_letter_style
+        from design_palettes import normalize_palette_id
+
+        effective_style = normalize_letter_style(letter_style)
+        effective_accent = normalize_palette_id(accent)
+
         # Persist the upload to a temp file (the parser expects a path).
         suffix = Path(file.filename or "upload.pdf").suffix or ".pdf"
         fd, file_path = tempfile.mkstemp(suffix=suffix, dir=tempfile.gettempdir())
@@ -106,7 +121,7 @@ def build_cover_letter_router(service: CoverLetterService) -> APIRouter:
             from domain_games import get_game
 
             game = get_game(domain_game)
-            return await service.generate_from_pdf(
+            letter = await service.generate_from_pdf(
                 file_path,
                 (jd or "").strip(),
                 game,
@@ -116,7 +131,19 @@ def build_cover_letter_router(service: CoverLetterService) -> APIRouter:
                 length=effective_length,
                 language=effective_language,
                 custom_instructions=(custom_instructions or "").strip(),
+                letter_style=effective_style,
+                accent=effective_accent,
+                linkedin_url=(linkedin_url or "").strip(),
+                github_url=(github_url or "").strip(),
+                portfolio_url=(portfolio_url or "").strip(),
             )
+
+            # The PDF is served by the same hardened /api/download route
+            # the generated CVs use.
+            pdf_filename = letter.get("pdf_filename")
+            if pdf_filename:
+                letter["pdf_url"] = f"/api/download/{pdf_filename}"
+            return letter
         except HTTPException:
             raise
         except ValueError as exc:

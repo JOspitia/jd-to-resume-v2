@@ -175,6 +175,25 @@ Las dos opciones comparten el perfil, el CV y la vacante porque leen lo mismo. L
 | **Tono** | Profesional · Persuasiva · Cercana · Directa | El registro de la carta. |
 | **Longitud** | Corta (120-180) · Media (220-320) · Larga (350-450 palabras) | El presupuesto de palabras. |
 | **Idioma** | Idioma de la oferta · Español · Inglés | Por defecto sigue el idioma de la vacante, igual que el CV. |
+| **Diseño del PDF** | Clásica · Moderna · Lateral | Los tres miran el CV: encabezado centrado con cuerpo serif, encabezado a la izquierda con cuerpo sans, o columna de contactos a la izquierda. |
+| **Color de acento** | Sin color · Azul marino · Verde azulado · Verde bosque · Granate · Ciruela · Gris pizarra | **El mismo catálogo que el CV**, con las mismas reglas: solo tiñe el nombre, la regla y los enlaces; el texto del cuerpo sigue negro. |
+
+### Los contactos y el LinkedIn
+
+El bloque de contactos de la carta (encabezado y firma) se arma **con datos reales, nunca con lo que diga el modelo**:
+
+1. Lo que el usuario escribió en **LINKS (opcional)** de la sección LA VACANTE.
+2. Si no, lo que se extrajo del propio PDF del CV (email, teléfono, LinkedIn, GitHub, portafolio).
+
+El modelo solo aporta el **nombre** del candidato. El backend reescribe la firma con los contactos verificados, así que una carta no puede inventar un teléfono, un correo ni una URL.
+
+El LinkedIn se imprime como `linkedin.com/in/<slug>` y no como la palabra "LinkedIn": los rastreadores de ATS leen la capa de texto del PDF, no las anotaciones de enlace, y una URL partida en dos se lee como una URL rota. En el PDF sale como enlace clicable.
+
+### La carta en PDF
+
+Es un PDF de una página, generado con el mismo Chromium headless que usa el renderizador HTML del CV, y con las mismas reglas de seguridad ATS: una sola columna, texto seleccionable, el cuerpo sin relleno de color y las URLs en su propia línea.
+
+El archivo se guarda como `cover_letter_<timestamp>.pdf` y se sirve por la misma ruta endurecida `/api/download/{filename}` que los CV, con su regex de allowlist ampliado a los dos prefijos.
 
 ### Cómo está escrita
 
@@ -198,7 +217,10 @@ curl -X POST http://localhost:8000/api/cover-letter \
   -F "company_name=Tiendas Falabella" \
   -F "tone=professional" \
   -F "length=medium" \
-  -F "language=auto"
+  -F "language=auto" \
+  -F "letter_style=classic" \
+  -F "accent=navy" \
+  -F "linkedin_url=https://linkedin.com/in/mi-perfil"
 ```
 
 Respuesta:
@@ -209,15 +231,29 @@ Respuesta:
   "opening": "...",
   "body": ["...", "..."],
   "closing": "...",
-  "signature": "Nombre\n+57 300 000 0000\ncorreo@example.com",
+  "signature": "Nombre\n+57 300 000 0000 | correo@example.com\nlinkedin.com/in/mi-perfil",
   "plain_text": "la carta completa, lista para copiar",
-  "meta": {"word_count": 246, "language": "es", "domain_game": "general", "tone": "professional", "length": "medium"}
+  "contact": {
+    "name": "Nombre",
+    "email": "correo@example.com",
+    "phone": "+57 300 000 0000",
+    "linkedin": "https://linkedin.com/in/mi-perfil",
+    "github": "",
+    "portfolio": ""
+  },
+  "pdf_filename": "cover_letter_1712345678.pdf",
+  "pdf_url": "/api/download/cover_letter_1712345678.pdf",
+  "meta": {
+    "word_count": 246, "language": "es", "domain_game": "general",
+    "tone": "professional", "length": "medium",
+    "letter_style": "classic", "accent": "navy"
+  }
 }
 ```
 
 `plain_text` lo arma el backend a partir de los campos estructurados, no el modelo: así el texto que se ve en pantalla y el que se copia son exactamente el mismo.
 
-Si el modelo devuelve algo ilegible (no es JSON, o le falta un campo), el endpoint responde **HTTP 502** con un mensaje legible en lugar de devolver una carta vacía.
+Si el modelo devuelve algo ilegible (no es JSON, o le falta un campo), el endpoint responde **HTTP 502** con un mensaje legible en lugar de devolver una carta vacía. Si el PDF falla por lo que sea, la carta de texto se devuelve igual: el PDF es la comodidad, no la fuente de verdad.
 
 ---
 

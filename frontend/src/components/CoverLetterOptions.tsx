@@ -1,5 +1,14 @@
-import { Building2, MessageSquareQuote, Ruler, Languages } from 'lucide-react';
+import {
+  Building2,
+  MessageSquareQuote,
+  Ruler,
+  Languages,
+  LayoutTemplate,
+  Droplet,
+  Link2,
+} from 'lucide-react';
 
+import { useDesignOptions } from '../lib/designOptions';
 import {
   TONE_LABELS,
   LENGTH_LABELS,
@@ -14,8 +23,13 @@ import {
  *
  * These replace the CV's "OPCIONES AVANZADAS" section when the user
  * picks the cover-letter deliverable: a theme or an accent colour mean
- * nothing for a text letter, while the tone, the length, the company name
- * and the language are exactly what the letter prompt needs.
+ * nothing for a plain text letter, while the tone, the length, the
+ * company name, the language and the **PDF design** are exactly what the
+ * letter needs.
+ *
+ * The design picker reuses the CV's own catalogue (the backend is the
+ * source of truth for both the swatch hex and the layout ids), so the
+ * letter matches the CV the user already picked.
  *
  * Company name matters: when it is known, the letter addresses the
  * company by name and argues the match against that company; when it is
@@ -32,6 +46,12 @@ export type CoverLetterOptionsProps = {
   onLengthChange: (value: CoverLetterLength) => void;
   language: CoverLetterLanguage;
   onLanguageChange: (value: CoverLetterLanguage) => void;
+  letterStyle: string;
+  onLetterStyleChange: (value: string) => void;
+  letterAccent: string;
+  onLetterAccentChange: (value: string) => void;
+  /** The LinkedIn the user typed in the form (section 3), for the hint. */
+  linkedinUrl?: string;
 };
 
 const inputClass =
@@ -51,9 +71,16 @@ export function CoverLetterOptions({
   onLengthChange,
   language,
   onLanguageChange,
+  letterStyle,
+  onLetterStyleChange,
+  letterAccent,
+  onLetterAccentChange,
+  linkedinUrl,
 }: CoverLetterOptionsProps) {
+  const { letterStyles, palettes } = useDesignOptions();
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex flex-col gap-1.5">
         <label htmlFor="cover-company" className={labelClass}>
           <Building2 className="w-3.5 h-3.5" /> Empresa (opcional)
@@ -126,6 +153,88 @@ export function CoverLetterOptions({
           </select>
         </div>
       </div>
+
+      {/* PDF design — the same three looks the CV offers. */}
+      <fieldset>
+        <legend className={labelClass}>
+          <LayoutTemplate className="w-3.5 h-3.5" /> Diseño del PDF
+        </legend>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {letterStyles.map((style) => {
+            const selected = letterStyle === style.id;
+            return (
+              <button
+                key={style.id}
+                type="button"
+                onClick={() => onLetterStyleChange(style.id)}
+                aria-pressed={selected}
+                className={`p-2.5 text-left border-2 transition-all ${
+                  selected
+                    ? 'border-primary bg-primary/15 font-bold shadow-neo-sm text-foreground'
+                    : 'border-border bg-card hover:bg-accent text-foreground'
+                }`}
+              >
+                <span className="text-[10px] font-mono px-1 py-0.5 bg-muted text-foreground font-bold uppercase inline-block mb-1">
+                  {style.badge}
+                </span>
+                <div className="text-xs font-serif font-bold text-foreground">{style.name}</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                  {style.description}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      {/* Accent colour — the same palettes as the CV, the same safety
+          rules: only the name, the rules and the links get tinted. */}
+      <fieldset>
+        <legend className={labelClass}>
+          <Droplet className="w-3.5 h-3.5" /> Color de acento
+        </legend>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {palettes.map((p) => {
+            const selected = letterAccent === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onLetterAccentChange(p.id)}
+                aria-pressed={selected}
+                aria-label={`Color de acento: ${p.label}`}
+                className={`p-2.5 text-left border-2 transition-all ${
+                  selected
+                    ? 'border-primary bg-primary/15 font-bold shadow-neo-sm text-foreground'
+                    : 'border-border bg-card hover:bg-accent text-foreground'
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="block w-full h-6 border-2 border-border mb-1.5"
+                  style={{ backgroundColor: p.hex }}
+                />
+                <div className="text-xs font-serif font-bold text-foreground">{p.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+        <Link2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+        <span>
+          El LinkedIn va en el encabezado y en la firma de la carta. Sale de tu CV si
+          lo tiene; si no, agregalo en <strong>LINKS (opcional)</strong>, arriba, en
+          la sección LA VACANTE.
+          {linkedinUrl ? (
+            <>
+              {' '}
+              <span className="font-mono break-all">({linkedinUrl})</span>
+            </>
+          ) : null}
+        </span>
+      </p>
     </div>
   );
 }

@@ -24,6 +24,22 @@ export type CoverLetterMeta = {
   domain_game: string;
   tone: string;
   length: string;
+  letter_style: string;
+  accent: string;
+};
+
+/**
+ * The contact block of the letterhead. Every field is a fact: it comes
+ * from the candidate's own PDF or from the links the user typed in the
+ * form — never from the model.
+ */
+export type CoverLetterContact = {
+  name: string;
+  email: string;
+  phone: string;
+  linkedin: string;
+  github: string;
+  portfolio: string;
 };
 
 export type CoverLetter = {
@@ -35,12 +51,20 @@ export type CoverLetter = {
   body: string[];
   /** Availability, practical facts and the next step. */
   closing: string;
-  /** Name + contact line, exactly as in the resume. */
+  /** Name + contact line + profile URLs, built from real data. */
   signature: string;
   /** The whole letter, assembled by the backend — ready to copy/paste. */
   plain_text: string;
+  /** What the letterhead shows. */
+  contact: CoverLetterContact;
+  /** The rendered PDF, served by /api/download. */
+  pdf_url?: string;
+  pdf_filename?: string;
   meta: CoverLetterMeta;
 };
+
+/** The cover-letter layouts the backend can render. */
+export type LetterStyle = 'classic' | 'modern' | 'sidebar';
 
 /** Human-readable labels for the tone selector. */
 export const TONE_LABELS: Record<CoverLetterTone, string> = {

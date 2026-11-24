@@ -1,9 +1,17 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { CheckCircle2, Copy, Download, RefreshCw, FileText } from 'lucide-react';
+import {
+  CheckCircle2,
+  Copy,
+  Download,
+  Eye,
+  RefreshCw,
+  FileText,
+} from 'lucide-react';
 
 import { Card } from './ui/Card';
-import { Button } from './ui/Button';
+import { Button, buttonVariants } from './ui/Button';
 import { Badge } from './ui/Badge';
+import { apiUrl } from '../lib/api';
 import type { CoverLetter } from '../types/coverLetter';
 
 /**
@@ -38,6 +46,8 @@ export function CoverLetterPanel({
   onDownload,
   onRegenerate,
 }: CoverLetterPanelProps) {
+  const pdfUrl = letter?.pdf_url;
+
   return (
     <AnimatePresence mode="popLayout">
       {status === 'success' && letter && (
@@ -91,7 +101,34 @@ export function CoverLetterPanel({
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2 mt-4">
-              <Button onClick={onCopy} variant="primary" size="md">
+              {pdfUrl ? (
+                <>
+                  <a
+                    href={apiUrl(pdfUrl)}
+                    download="Carta_de_presentacion.pdf"
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Descargar el PDF de la carta de presentación"
+                    className={buttonVariants({ variant: 'primary', size: 'md' })}
+                  >
+                    <Download className="w-4 h-4" aria-hidden="true" /> Descargar PDF
+                  </a>
+                  <a
+                    href={`${apiUrl(pdfUrl)}${pdfUrl.includes('?') ? '&' : '?'}inline=1`}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label="Previsualizar el PDF de la carta de presentación"
+                    className={buttonVariants({ variant: 'outline', size: 'md' })}
+                  >
+                    <Eye className="w-4 h-4" aria-hidden="true" /> Ver PDF
+                  </a>
+                </>
+              ) : (
+                <Button variant="primary" size="md" disabled>
+                  <FileText className="w-4 h-4" /> PDF no disponible
+                </Button>
+              )}
+              <Button onClick={onCopy} variant="outline" size="md">
                 {copied ? (
                   <CheckCircle2 className="w-4 h-4" />
                 ) : (
@@ -100,7 +137,7 @@ export function CoverLetterPanel({
                 {copied ? 'Copiada' : 'Copiar carta'}
               </Button>
               <Button onClick={onDownload} variant="outline" size="md">
-                <Download className="w-4 h-4" /> Descargar .txt
+                <FileText className="w-4 h-4" /> Descargar .txt
               </Button>
               <Button onClick={onRegenerate} variant="warning" size="md">
                 <RefreshCw className="w-4 h-4" /> Generar otra versión

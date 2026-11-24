@@ -234,6 +234,11 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
               onLengthChange={profile.setCoverLetterLength}
               language={profile.coverLetterLanguage}
               onLanguageChange={profile.setCoverLetterLanguage}
+              letterStyle={profile.letterStyle}
+              onLetterStyleChange={profile.setLetterStyle}
+              letterAccent={profile.letterAccent}
+              onLetterAccentChange={profile.setLetterAccent}
+              linkedinUrl={profile.linkedinUrl}
             />
           </Section>
         ) : (

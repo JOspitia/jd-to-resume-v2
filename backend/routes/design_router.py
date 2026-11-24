@@ -53,6 +53,31 @@ THEMES = [
 ]
 
 
+#: The cover-letter layouts the renderer can produce. They mirror the
+#: three CV designs, because a letter has no sections to arrange — but
+#: the user still expects to pick a look that matches their CV.
+LETTER_STYLES = [
+    {
+        "id": "classic",
+        "name": "Clásica",
+        "badge": "Sobrio",
+        "description": "Encabezado centrado y cuerpo serif, como el CV clásico.",
+    },
+    {
+        "id": "modern",
+        "name": "Moderna",
+        "badge": "Limpia",
+        "description": "Encabezado a la izquierda y tipografía sin serifas.",
+    },
+    {
+        "id": "sidebar",
+        "name": "Lateral",
+        "badge": "Visual",
+        "description": "Columna de contactos a la izquierda y la carta a la derecha.",
+    },
+]
+
+
 def build_design_router() -> APIRouter:
     """Build the design-options router. No DI needed — pure catalogue."""
     router = APIRouter(prefix="/api", tags=["design"])
@@ -63,12 +88,14 @@ def build_design_router() -> APIRouter:
         return {
             "themes": THEMES,
             "palettes": palette_catalog(),
+            "letter_styles": LETTER_STYLES,
             "default_theme": "sb2nov",
             "default_palette": "none",
+            "default_letter_style": "classic",
             "palette_ids": list(PALETTE_IDS),
         }
 
     return router
 
 
-__all__ = ["build_design_router", "THEMES"]
+__all__ = ["build_design_router", "THEMES", "LETTER_STYLES"]
