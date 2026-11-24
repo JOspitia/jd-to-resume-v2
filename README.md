@@ -351,6 +351,47 @@ curl -X POST http://localhost:8000/api/generate \
 
 ---
 
+## Previsualizar y descargar sin salir de la app
+
+**El síntoma.** Al tocar **Preview** o **Descargar PDF**, la página se recargaba y el usuario volvía a la **landing**, con el formulario vacío y el resultado perdido. El motivo: los dos botones eran `<a href="…?inline=1" target="_blank">`, y en un navegador embebido (el panel lateral de la app, Electron, kioscos) `_blank` se resuelve **en la misma pestaña**: la SPA era reemplazada por el visor de PDF. Al volver, la SPA reiniciaba desde cero.
+
+El bug era de dos capas, y por eso la app perdía el trabajo incluso cuando el navegador sí abría una pestaña aparte:
+
+1. **La acción navegaba.** Un enlace usado como mecanismo de descarga es frágil: depende de cómo el navegador resuelva el destino.
+2. **El estado era efímero.** `App.tsx` guardaba la vista activa (landing vs. herramienta) solo en estado de React, así que cualquier recarga de la SPA volvía a la landing y tiraba el formulario, la vacante y el resultado.
+
+### Qué hace ahora
+
+| | Antes | Ahora |
+|---|---|---|
+| **Preview** | `<a target="_blank">` → navega | Modal dentro de la app, con el PDF renderizado en un `<iframe>` sobre el formulario |
+| **Descargar PDF** | `<a download target="_blank">` → navega | `fetch` → `Blob` → `<a download>` en memoria: el archivo se guarda y la página no se mueve |
+| **Recargar (F5)** | Vuelve a la landing, se pierde todo | Vuelve a la herramienta, con el formulario y el resultado restaurados |
+| **Abrir en otra pestaña** | — | Botón explícito en el modal, para quien prefiera el visor del navegador |
+
+El PDF se sirve como `Blob` y se muestra con una `blob:` URL: al ser del mismo origen, el visor de PDF del navegador lo renderiza siempre, sin depender de cómo esté configurado el CORS del backend. Si el `fetch` falla (CORS mal configurado en un despliegue), la descarga cae de forma automática a "abrir en otra pestaña" en vez de dejar un botón muerto.
+
+### Qué se persiste, y dónde
+
+En **`sessionStorage`**, no en `localStorage`: es trabajo en curso, no una preferencia duradera, así que una pestaña nueva arranca limpia.
+
+| Clave | Qué guarda | Dónde vive |
+|---|---|---|
+| `jd-to-resume.view` | La vista activa (landing / herramienta) | `App.tsx` |
+| `jd-to-resume.profile` | El formulario: vacante, cargo, perfil, tema, acento, opciones de la carta… | `useProfile` |
+| `jd-to-resume.result` | El PDF generado (nombre de archivo), su YAML y su idioma | `useGeneration` |
+| `jd-to-resume.cover-letter` | La carta generada | `useCoverLetter` |
+
+Los **contactos** (GitHub, LinkedIn, portafolio) siguen en `localStorage` a propósito: esos sí son una preferencia duradera y el usuario no debería reescribirlos nunca.
+
+El archivo PDF subido **no** se persiste (un `File` no se serializa), así que después de recargar hay que volver a subirlo. Todo lo demás —el formulario, el YAML, el resultado, el diseño— sigue ahí, y el flujo de "editar YAML → re-renderizar → cambiar diseño" se puede seguir usando sin volver a generar.
+
+### La restauración es perezosa, no un efecto
+
+El snapshot se lee **una sola vez** al montar y cada campo arranca con ese valor (`useState(() => …)`). Restaurar dentro de un `useEffect` provocaba un render en cascada —React lo marca como `react-hooks/set-state-in-effect`— y además hacía parpadear el formulario vacío un frame antes de llenarse.
+
+---
+
 ## Features
 
 ### 1. Tres motores LLM en cadena

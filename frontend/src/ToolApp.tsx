@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 
@@ -11,6 +11,7 @@ import { useCoverLetter } from './hooks/useCoverLetter';
 import type { Generation } from './hooks/useGeneration';
 import type { YamlEditorOps } from './hooks/useYamlEditor';
 import { apiUrl } from './lib/api';
+import { downloadPdfOrOpen } from './lib/pdf';
 
 import { Section } from './components/Section';
 import { DeliverableSwitch } from './components/DeliverableSwitch';
@@ -26,6 +27,7 @@ import { RedesignPanel } from './components/RedesignPanel';
 import { YamlEditorPanel } from './components/YamlEditorPanel';
 import { AuditPanel } from './components/AuditPanel';
 import { CoverLetterPanel } from './components/CoverLetterPanel';
+import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { PhotoField } from './components/PhotoField';
 import { Button } from './components/ui/Button';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -85,6 +87,37 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   const coverLetter = useCoverLetter({ profile });
 
   const isCoverLetter = profile.deliverable === 'cover_letter';
+
+  /**
+   * The PDF preview modal.
+   *
+   * The preview used to be a link that navigated to the PDF. In the
+   * embedded browser that replaces the whole tab, so the user came back
+   * to a reloaded app — landing page, empty form, result lost. The modal
+   * shows the PDF over the app instead, so the form stays right there
+   * for the next iteration.
+   */
+  const [pdfPreview, setPdfPreview] = useState<{
+    url: string;
+    filename: string;
+    title: string;
+  } | null>(null);
+
+  const openPdfPreview = useCallback(
+    (url: string, filename: string, title: string) => {
+      if (!url) return;
+      setPdfPreview({ url, filename, title });
+    },
+    [],
+  );
+
+  const closePdfPreview = useCallback(() => setPdfPreview(null), []);
+
+  /** Saves the PDF without leaving the app (falls back to a new tab). */
+  const downloadPdfFile = useCallback(async (url: string, filename: string) => {
+    if (!url) return;
+    await downloadPdfOrOpen(url, filename);
+  }, []);
 
   /**
    * Switching the deliverable clears the OTHER deliverable's result, so a
@@ -286,6 +319,19 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
               onCopy={coverLetter.handleCopy}
               onDownload={coverLetter.handleDownload}
               onRegenerate={coverLetter.handleGenerate}
+              onPreviewPdf={() =>
+                openPdfPreview(
+                  apiUrl(coverLetter.letter?.pdf_url ?? ''),
+                  'Carta_de_presentacion.pdf',
+                  'Carta de presentación',
+                )
+              }
+              onDownloadPdf={() =>
+                void downloadPdfFile(
+                  apiUrl(coverLetter.letter?.pdf_url ?? ''),
+                  'Carta_de_presentacion.pdf',
+                )
+              }
             />
           </>
         ) : (
@@ -302,7 +348,6 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             {/* Results panel (only on success) */}
             <ResultsPanel
               status={generation.status}
-              downloadUrl={generation.downloadUrl}
               hasYamlSnapshot={!!generation.lastGeneratedYaml}
               atsStatus={audit.atsStatus}
               lastOutputLanguage={generation.lastOutputLanguage}
@@ -331,6 +376,16 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
                 generation.handleGenerate();
               }}
               onReset={handleResetProcess}
+              onPreviewPdf={() =>
+                openPdfPreview(
+                  generation.downloadUrl,
+                  'Tailored_Resume.pdf',
+                  'Tu CV adaptado',
+                )
+              }
+              onDownloadPdf={() =>
+                void downloadPdfFile(generation.downloadUrl, 'Tailored_Resume.pdf')
+              }
             />
 
             {/* YAML editor overlay */}
@@ -407,6 +462,16 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
               : 'Generar CV adaptado'
         }
       />
+
+      {/* PDF preview — over the app, never replacing it. */}
+      {pdfPreview && (
+        <PdfPreviewModal
+          url={pdfPreview.url}
+          filename={pdfPreview.filename}
+          title={pdfPreview.title}
+          onClose={closePdfPreview}
+        />
+      )}
     </div>
   );
 }

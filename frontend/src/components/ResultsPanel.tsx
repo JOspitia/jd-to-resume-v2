@@ -7,7 +7,7 @@ import { ScoreHistory } from './ScoreHistory';
 import type { ScoreEntry } from '../hooks/useAudit';
 
 import { Card } from './ui/Card';
-import { Button, buttonVariants } from './ui/Button';
+import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 
 /**
@@ -28,9 +28,13 @@ import { Badge } from './ui/Badge';
  *   6. Score history timeline (only if there's history to show)
  *
  * PR5 polish: migrated all rm-* classes to <Card> / <Button> / <Badge>
- * primitives + buttonVariants() helper for the inline anchors (preview /
- * download). Semantic colors now flow from the token system so the
+ * primitives. Semantic colors now flow from the token system so the
  * dark mode toggle (PR6) will re-tint without touching this file.
+ *
+ * The preview and the download are plain <Button>s, NOT links: a link
+ * would navigate (and in the embedded browser, replace the whole tab),
+ * which cost the user the app state. The parent owns the preview modal
+ * and the blob download.
  */
 
 type AuditScores = {
@@ -41,7 +45,6 @@ type AuditScores = {
 
 export type ResultsPanelProps = {
   status: 'idle' | 'generating' | 'success' | 'error';
-  downloadUrl: string;
   hasYamlSnapshot: boolean;
   atsStatus: 'idle' | 'analyzing' | 'success' | 'error';
   lastOutputLanguage: 'en' | 'es' | 'unknown';
@@ -55,11 +58,21 @@ export type ResultsPanelProps = {
   onAudit: () => void;
   onTranslate: () => void;
   onReset: () => void;
+  /**
+   * Opens the PDF preview INSIDE the app (a modal over the form).
+   *
+   * It used to be an `<a target="_blank">`, which in the embedded browser
+   * replaces the current tab with the PDF viewer — the user came back to
+   * a reloaded app (landing page, empty form). The modal keeps the app
+   * alive next to the PDF.
+   */
+  onPreviewPdf: () => void;
+  /** Saves the PDF to disk without navigating away from the app. */
+  onDownloadPdf: () => void;
 };
 
 export function ResultsPanel({
   status,
-  downloadUrl,
   hasYamlSnapshot,
   atsStatus,
   lastOutputLanguage,
@@ -72,6 +85,8 @@ export function ResultsPanel({
   onAudit,
   onTranslate,
   onReset,
+  onPreviewPdf,
+  onDownloadPdf,
 }: ResultsPanelProps) {
   return (
     <AnimatePresence mode="popLayout">
@@ -108,26 +123,26 @@ export function ResultsPanel({
             </Button>
           )}
 
-          {/* 3. Download group */}
+          {/* 3. Download group — both actions stay inside the app: the
+              preview opens a modal over the form and the download saves
+              the file without navigating. */}
           <div className="grid grid-cols-2 gap-3">
-            <a
-              href={`${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}inline=1`}
-              target="_blank"
-              rel="noreferrer"
+            <Button
+              onClick={onPreviewPdf}
+              variant="outline"
+              size="md"
               aria-label="Previsualizar el PDF generado"
-              className={buttonVariants({ variant: 'outline', size: 'md' })}
             >
               <Eye className="w-4 h-4" aria-hidden="true" /> Preview
-            </a>
-            <a
-              href={downloadUrl}
-              download="Tailored_Resume.pdf"
-              target="_blank"
+            </Button>
+            <Button
+              onClick={onDownloadPdf}
+              variant="secondary"
+              size="md"
               aria-label="Descargar el PDF generado"
-              className={buttonVariants({ variant: 'secondary', size: 'md' })}
             >
               <Download className="w-4 h-4" aria-hidden="true" /> Descargar PDF
-            </a>
+            </Button>
           </div>
 
           {/* 4. Change the design without touching the text */}
