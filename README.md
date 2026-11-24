@@ -152,6 +152,129 @@ Sin `yaml_content` no hay nada que renderizar; el endpoint nunca llama al LLM.
 
 ---
 
+## Carta de presentación
+
+El mismo CV y la misma vacante que producen el PDF **también producen una carta de presentación**. Es un entregable aparte, no un flag: una carta es una narrativa y un CV es un documento estructurado, así que el prompt, el contrato de respuesta y el presupuesto de rate limit son distintos.
+
+### Cómo se usa
+
+En `ToolApp` el primer control es **¿Qué querés generar?**:
+
+| Opción | Qué produce | Qué se ve |
+|---|---|---|
+| **CV adaptado** | El PDF optimizado para ATS (el flujo original, sin cambios). | Secciones 1-4 + resultados con preview, descarga, auditoría y editor YAML. |
+| **Carta de presentación** | Una carta en texto, lista para copiar y pegar en la postulación. | Secciones 1-3 (compartidas) + **Opciones de la carta** + panel con la carta, botón de copiar y descarga `.txt`. |
+
+Las dos opciones comparten el perfil, el CV y la vacante porque leen lo mismo. Lo que cambia es el bloque de opciones (el tema y el color de acento no significan nada en un texto; el tono, la longitud, la empresa y el idioma sí) y el CTA de la barra inferior.
+
+### Opciones de la carta
+
+| Opción | Valores | Qué hace |
+|---|---|---|
+| **Empresa** | texto libre | Cuando está, la carta saluda a la empresa por nombre y arguye el match contra ella. Cuando está vacía, saluda al equipo de selección de forma neutra — **nunca** inventa un nombre. |
+| **Tono** | Profesional · Persuasiva · Cercana · Directa | El registro de la carta. |
+| **Longitud** | Corta (120-180) · Media (220-320) · Larga (350-450 palabras) | El presupuesto de palabras. |
+| **Idioma** | Idioma de la oferta · Español · Inglés | Por defecto sigue el idioma de la vacante, igual que el CV. |
+| **Diseño del PDF** | Clásica · Moderna · Lateral | Los tres miran el CV: encabezado centrado con cuerpo serif, encabezado a la izquierda con cuerpo sans, o columna de contactos a la izquierda. |
+| **Color de acento** | Sin color · Azul marino · Verde azulado · Verde bosque · Granate · Ciruela · Gris pizarra | **El mismo catálogo que el CV**, con las mismas reglas: solo tiñe el nombre, la regla y los enlaces; el texto del cuerpo sigue negro. |
+
+### Los contactos y el LinkedIn
+
+El bloque de contactos de la carta (encabezado y firma) se arma **con datos reales, nunca con lo que diga el modelo**:
+
+1. Lo que el usuario escribió en **LINKS (opcional)** de la sección LA VACANTE.
+2. Si no, lo que se extrajo del propio PDF del CV (email, teléfono, LinkedIn, GitHub, portafolio).
+
+El modelo solo aporta el **nombre** del candidato. El backend reescribe la firma con los contactos verificados, así que una carta no puede inventar un teléfono, un correo ni una URL.
+
+El LinkedIn se imprime como `linkedin.com/in/<slug>` y no como la palabra "LinkedIn": los rastreadores de ATS leen la capa de texto del PDF, no las anotaciones de enlace, y una URL partida en dos se lee como una URL rota. En el PDF sale como enlace clicable.
+
+### La carta en PDF
+
+Es un PDF de una página, generado con el mismo Chromium headless que usa el renderizador HTML del CV, y con las mismas reglas de seguridad ATS: una sola columna, texto seleccionable, el cuerpo sin relleno de color y las URLs en su propia línea.
+
+El archivo se guarda como `cover_letter_<timestamp>.pdf` y se sirve por la misma ruta endurecida `/api/download/{filename}` que los CV, con su regex de allowlist ampliado a los dos prefijos.
+
+### Cómo está escrita
+
+El prompt vive en `backend/domain/cover_letter_prompts.py` y tiene reglas propias, porque una carta falla de otra forma que un CV:
+
+- **La carta tiene que añadir algo que el CV no dice.** El reclutador ya tiene el CV; repetir sus bullets es peor que no mandar carta. La carta escoge los **dos o tres** requisitos que más pesan en la vacante y argumenta cada uno.
+- **Cero invención.** Cada frase que nombre una habilidad, una herramienta, una cifra, una empresa o una fecha tiene que ser rastreable al CV base. Si no se puede rastrear, la frase no se escribe.
+- **Sin frases vacías.** "Persona dinámica y proactiva", "gran capacidad de adaptación", "excelente compromiso" y "apasionado por el servicio" están prohibidos salvo que el CV las respalde.
+
+#### Las cifras se verifican, no se piden
+
+El prompt pide que la carta no invente cifras, pero **el prompt no basta**: la prosa es donde un modelo se desliza. Así que el backend lo verifica.
+
+`backend/domain/letter_facts.py` extrae todas las cifras de la carta y las compara, **normalizadas**, contra el CV y contra la vacante. Normalizar importa, porque la misma cifra se escribe de varias formas:
+
+| En el CV | En la carta | ¿Es la misma? |
+|---|---|---|
+| `50K+ lines of code` | `50.000 líneas` | Sí |
+| `2K+ downloads` | `2.000 descargas` | Sí |
+| `4.5/5-star` | `4,5 sobre 5` | Sí |
+| `200 printers` | `200 impresoras` | Sí |
+
+Si una cifra no tiene respaldo, la carta se corrige: primero se le pide al modelo un segundo borrador sin esas cifras; si el modelo insiste, se eliminan las oraciones que las llevan. Si el cuerpo entero quedara vacío, la API responde **502** en vez de devolver una carta con datos inventados.
+
+No se verifican: los enteros pequeños (1 a 12, que son recuentos y ordinales, no métricas), las URL, los correos, los teléfonos y las cifras que salen de la vacante (que es un documento real).
+
+- **Cifras, no adjetivos.** Una o dos métricas reales del CV (volumen atendido, % de meta, tiempo reducido).
+- **Sin metatexto.** Nunca menciona el ATS, el scoring, la IA ni "esta carta". Quien escribe es el candidato, no un robot.
+- **Ángulo por dominio.** Cada perfil aporta su propio enfoque: la carta de *tech* abre con el problema que el candidato resolvió de punta a punta, la de *hr* con la escala del proceso y la calidad de las decisiones, la de *psychology* con la población atendida y el rigor del método, y la de *general* con lo que el candidato le hace al cliente y cómo lo miden.
+- **El vocabulario sale del perfil elegido**, no de otra disciplina: `game.skill_taxonomy_es` entra en el prompt, así que la carta de un candidato de ventas no dice "pruebas psicotécnicas".
+
+### API
+
+```bash
+curl -X POST http://localhost:8000/api/cover-letter \
+  -F "file=@mi-cv.pdf" \
+  -F "jd=Ejecutivo Comercial..." \
+  -F "domain_game=general" \
+  -F "company_name=Tiendas Falabella" \
+  -F "tone=professional" \
+  -F "length=medium" \
+  -F "language=auto" \
+  -F "letter_style=classic" \
+  -F "accent=navy" \
+  -F "linkedin_url=https://linkedin.com/in/mi-perfil"
+```
+
+Respuesta:
+
+```json
+{
+  "salutation": "Estimado equipo de Tiendas Falabella:",
+  "opening": "...",
+  "body": ["...", "..."],
+  "closing": "...",
+  "signature": "Nombre\n+57 300 000 0000 | correo@example.com\nlinkedin.com/in/mi-perfil",
+  "plain_text": "la carta completa, lista para copiar",
+  "contact": {
+    "name": "Nombre",
+    "email": "correo@example.com",
+    "phone": "+57 300 000 0000",
+    "linkedin": "https://linkedin.com/in/mi-perfil",
+    "github": "",
+    "portfolio": ""
+  },
+  "pdf_filename": "cover_letter_1712345678.pdf",
+  "pdf_url": "/api/download/cover_letter_1712345678.pdf",
+  "meta": {
+    "word_count": 246, "language": "es", "domain_game": "general",
+    "tone": "professional", "length": "medium",
+    "letter_style": "classic", "accent": "navy"
+  }
+}
+```
+
+`plain_text` lo arma el backend a partir de los campos estructurados, no el modelo: así el texto que se ve en pantalla y el que se copia son exactamente el mismo.
+
+Si el modelo devuelve algo ilegible (no es JSON, o le falta un campo), el endpoint responde **HTTP 502** con un mensaje legible en lugar de devolver una carta vacía. Si el PDF falla por lo que sea, la carta de texto se devuelve igual: el PDF es la comodidad, no la fuente de verdad.
+
+---
+
 ## Features
 
 ### 1. Tres motores LLM en cadena
@@ -273,6 +396,7 @@ Resumen de lo que pasa cuando presionas **Generar**:
 | `POST` | `/api/render-from-yaml` | Renderiza desde YAML ya parseado. Acepta `yaml_content` (required), `theme`, `accent`, `fit_single_page`, `page_break_section`, `jd`, `custom_instructions`, `domain_game`. Reusa el path RenderCV/Playwright. Sin llamada LLM. Devuelve `{"download_url": "/api/download/<filename>", "filename": "..."}`. |
 | `POST` | `/api/analyze-yaml` | Audita desde YAML sin renderizar. Acepta `yaml_content` (required), `jd`, `domain_game`. Serializa el YAML a narrativa y corre el mismo audit LLM que `/api/analyze-ats`. Sin PDF. |
 | `POST` | `/api/analyze-ats` | Audita sin generar. Acepta `file` (PDF) + `jd` + `domain_game`. Devuelve JSON: `ats_score`, `match_level`, `matched_keywords`, `missing_keywords`, `ai_detection_score`, `ai_tone_verdict`, `ai_humanize_tips`, `ats_formatting_score`, `actionable_tips`. |
+| `POST` | `/api/cover-letter` | Redacta una carta de presentación a partir del mismo CV + JD. Acepta `file` (PDF), `jd`, `domain_game` (`tech` \| `hr_recruiting` \| `psychology` \| `general`, default `tech`), `target_role`, `company_name`, `tone` (`professional` \| `persuasive` \| `warm` \| `concise`, default `professional`), `length` (`short` \| `medium` \| `long`, default `medium`), `language` (`auto` \| `es` \| `en`, default `auto`), `custom_instructions`. Devuelve JSON: `salutation`, `opening`, `body[]`, `closing`, `signature`, `plain_text` y `meta` (`word_count`, `language`, `domain_game`, `tone`, `length`). |
 | `GET` | `/api/download/{filename}` | Sirve el PDF desde `backend/output/`. |
 | `GET` | `/api/design-options` | Catálogo de plantillas y paletas de acento (`themes`, `palettes`, `default_theme`, `default_palette`). Es la fuente de verdad del frontend: los swatches muestran el hex exacto que va a salir en el PDF. |
 | `POST` | `/api/clear-cache` | Borra todos los PDFs de `output/`. Devuelve `{deleted_files: N}`. |

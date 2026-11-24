@@ -31,10 +31,13 @@ class ResumeStorage(Protocol):
         """
         ...
 
-    def save_generated_pdf(self, source_path: str) -> str:
+    def save_generated_pdf(self, source_path: str, prefix: str = "tailored_resume") -> str:
         """Promote a generated PDF (typically in /tmp) to the persistent
-        ``OUTPUT_DIR`` with the canonical ``tailored_resume_<ts>.pdf`` name.
-        Returns the absolute path of the final file."""
+        ``OUTPUT_DIR`` with the canonical ``<prefix>_<ts>.pdf`` name.
+        Returns the absolute path of the final file.
+
+        ``prefix`` is ``"tailored_resume"`` for the CV and ``"cover_letter"``
+        for the cover letter."""
         ...
 
     def read_pdf(self, filename: str) -> bytes:

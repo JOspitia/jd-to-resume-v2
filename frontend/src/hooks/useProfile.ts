@@ -22,6 +22,22 @@ import type { ChangeEvent } from 'react';
 // not pick anything.
 export type DomainGame = 'tech' | 'hr_recruiting' | 'psychology' | 'general';
 
+/**
+ * What the tool produces. The two deliverables share the first three
+ * steps (perfil, tu CV, la vacante) and diverge afterwards: the CV
+ * renders a PDF, the cover letter returns a narrative to copy.
+ */
+export type Deliverable = 'cv' | 'cover_letter';
+
+/** Register of the cover letter. */
+export type CoverLetterTone = 'professional' | 'persuasive' | 'warm' | 'concise';
+
+/** Word budget of the cover letter. */
+export type CoverLetterLength = 'short' | 'medium' | 'long';
+
+/** Language of the cover letter: follow the job description, or force one. */
+export type CoverLetterLanguage = 'auto' | 'es' | 'en';
+
 /** Contact URLs are persisted under this key between visits (unchanged key). */
 const CONTACT_STORAGE_KEY = 'jd-to-resume.contact';
 
@@ -48,6 +64,20 @@ export function useProfile() {
   const [accentColor, setAccentColor] = useState<string>('none');
   const [fitSinglePage, setFitSinglePage] = useState<boolean>(true);
   const [pageBreakSection, setPageBreakSection] = useState<string>('none');
+
+  // === Cover letter deliverable ===
+  // `deliverable` picks what the primary CTA produces. The letter-specific
+  // controls only make sense in the cover-letter mode, so they live here
+  // next to the rest of the form state.
+  const [deliverable, setDeliverable] = useState<Deliverable>('cv');
+  const [companyName, setCompanyName] = useState<string>('');
+  const [coverLetterTone, setCoverLetterTone] = useState<CoverLetterTone>('professional');
+  const [coverLetterLength, setCoverLetterLength] = useState<CoverLetterLength>('medium');
+  const [coverLetterLanguage, setCoverLetterLanguage] = useState<CoverLetterLanguage>('auto');
+  /** Letter layout for the PDF: mirrors the CV designs (classic / modern / sidebar). */
+  const [letterStyle, setLetterStyle] = useState<string>('classic');
+  /** Accent palette id for the letter PDF (same catalogue as the CV). */
+  const [letterAccent, setLetterAccent] = useState<string>('none');
 
   // ATS & AI Detection flags
   const [autoValidateATS, setAutoValidateATS] = useState(false);
@@ -183,6 +213,13 @@ export function useProfile() {
     setDomainGame('tech');
     setCustomPrompt('');
     setEditBeforeGenerate(false);
+    setDeliverable('cv');
+    setCompanyName('');
+    setCoverLetterTone('professional');
+    setCoverLetterLength('medium');
+    setCoverLetterLanguage('auto');
+    setLetterStyle('classic');
+    setLetterAccent('none');
     clearPhoto();
     try {
       localStorage.removeItem(CONTACT_STORAGE_KEY);
@@ -237,6 +274,20 @@ export function useProfile() {
     setAutoValidateATS,
     editBeforeGenerate,
     setEditBeforeGenerate,
+    deliverable,
+    setDeliverable,
+    companyName,
+    setCompanyName,
+    coverLetterTone,
+    setCoverLetterTone,
+    coverLetterLength,
+    setCoverLetterLength,
+    coverLetterLanguage,
+    setCoverLetterLanguage,
+    letterStyle,
+    setLetterStyle,
+    letterAccent,
+    setLetterAccent,
     resetProfile,
   };
 }

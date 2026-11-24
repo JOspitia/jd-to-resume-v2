@@ -4,6 +4,259 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-24 — Sesión "Carta de presentación: PDF, diseño y contactos"
+
+**Tipo:** feature.
+
+### Fix — La carta ya no puede inventar cifras (guard determinista)
+
+**El bug.** En la prueba end-to-end, la carta decía *"En mis roles he
+atendido a más de 120 clientes por día"*. El CV no menciona ningún
+cliente: es un CV de soporte de TI. La cifra no estaba inventada por
+casualidad — **era un ejemplo copiado del prompt**. La regla 5 del
+prompt de la carta ilustraba la gramática de una frase concreta con
+ejemplos que traían números de verdad ("atendí a más de 120 clientes
+por día", "cerré 35 ventas mensuales"), y el modelo los reutilizó
+como si fueran datos del candidato.
+
+Eso viola la regla que el proyecto sostiene desde el principio (no
+inventar), y en una carta es peor que en el CV: el CV es una lista
+verificable, la carta es prosa, y una cifra plausible se cuela sola.
+
+**Las dos correcciones, complementarias:**
+
+1. **La causa raíz (el prompt).** Los ejemplos de la regla 5 pasaron a
+   ser marcadores de posición explícitos — `"atendí a [NÚMERO DEL CV]
+   clientes por día"` — con un aviso de que son formas gramaticales y
+   **no** datos, y de que sus números no se copian nunca. La regla 12
+   (fact check) ahora avisa que las cifras se verifican
+   mecánicamente.
+
+2. **El garante (el backend).** El prompt no basta: la prosa es
+   donde un modelo se desliza. Nuevo módulo
+   `backend/domain/letter_facts.py`:
+   - Extrae todas las cifras de la carta y las compara, **normalizadas**,
+     contra el CV y contra la vacante. Normalizar importa: el CV
+     escribe "50K+ líneas" y "2.000 descargas"; la carta escribe
+     "50.000" y "2.000" — son la misma cifra, no una invención. La
+     notación `K`/`M`, los separadores de miles y las decimales se
+     normalizan antes de comparar.
+   - No se marcan: los enteros pequeños (1 a 12, que son recuentos y
+     ordinales, no métricas), las URL, los correos y los teléfonos; y
+     las cifras que salen de la vacante (que es un documento real). Los
+     decimales **sí** se marcan siempre. Un rango de años ("2014 -
+     2018") tiene la misma forma que un teléfono, así que se distingue
+     antes de comparar.
+   - Si hay una cifra sin respaldo: **un reintento correctivo** con el
+     modelo (se le dice exactamente cuáles son y se le pasa el
+     borrador), y si el reintento también falla, **se eliminan las
+     oraciones** que la llevan. Si el cuerpo entero quedara vacío, la
+     petición responde 502 en vez de devolver una carta con datos
+     inventados.
+   - El `opening` y el `closing` pueden quedar vacíos: una carta que
+     arranca con el argumento después del saludo es una carta normal,
+     y una cifra inventada no lo es.
+
+**Verificación.** Prueba real contra el LLM configurado: la carta
+devuelta tiene exactamente tres cifras — 200 impresoras, 2.000
+descargas y 4,5 de calificación — y **las tres están en el CV**.
+Cero cifras sin respaldo. 16 tests nuevos (385 en total).
+
+### Feature — La carta también sale en PDF, con el diseño del CV y los contactos reales
+
+La carta de presentación solo se podía copiar como texto. Pero el PDF es
+lo que más se usa: es lo que uno adjunta, lo que se imprime y lo que se
+sube a un portal que pide archivo. Y tiene que **verse como el CV**, no
+como un texto suelto.
+
+**El PDF de la carta**
+
+- `backend/templates/letter.html.j2` + `backend/templates/letter_body.html.j2`
+  (nuevos) — la plantilla de la carta. Reutiliza el sistema visual del
+  CV: las mismas variables CSS de acento, las mismas reglas de seguridad
+  ATS (el cuerpo nunca se tiñe, nada tiene relleno de color detrás del
+  texto, las URLs van en su propia línea) y la misma escala tipográfica.
+- `backend/adapters/renderer/cover_letter_adapter.py` (nuevo) — renderiza
+  la carta con el mismo Chromium headless que usa el fallback HTML del
+  CV. **No** se reutilizan los renderizadores del CV porque están
+  construidos alrededor de un documento por secciones (RenderCV espera
+  un esquema de currículum: educación, skills, experiencia, proyectos) y
+  una carta no tiene nada de eso. Lo que sí se reutiliza son las piezas
+  que hacen bueno al CV: `design_palettes.accent_css_variables` (los
+  mismos colores) y `_ats_link_label` (las URLs impresas como
+  `linkedin.com/in/<slug>`, que es lo que leen los rastreadores de ATS).
+- Tres estilos que reflejan los tres diseños del CV: **clásica**
+  (encabezado centrado, cuerpo serif), **moderna** (encabezado a la
+  izquierda, cuerpo sans) y **lateral** (columna de contactos a la
+  izquierda, carta a la derecha).
+- `backend/routes/design_router.py` — el catálogo de estilos de carta se
+  sirve desde el mismo endpoint `/api/design-options` que los temas del
+  CV, para que el swatch que el usuario ve sea el hex exacto que el
+  renderizador va a aplicar.
+
+**Los contactos:LinkedIn incluido, y siempre reales**
+
+- `backend/application/services/cover_letter_service.py` — el bloque de
+  contactos se resuelve **de forma determinista**, nunca con lo que diga
+  el modelo: primero lo que el usuario escribió en el formulario, y si
+  no, lo que se extrajo del propio PDF (`parser.extract_header`).
+  El modelo solo aporta el **nombre**; el backend reescribe la firma con
+  los contactos verificados. Una carta ya no puede inventar un teléfono,
+  un correo ni una URL.
+- El prompt cambió en consecuencia: la regla 6 ahora pide el nombre y
+  nada más, y dice explícitamente que no escriba teléfono, correo ni
+  enlaces.
+- El LinkedIn sale en el encabezado y en la firma, impreso como
+  `linkedin.com/in/<slug>` y clicable en el PDF.
+
+**El resto**
+
+- `backend/adapters/storage/filesystem_storage.py` y
+  `backend/ports/resume_storage.py` — la carta se guarda como
+  `cover_letter_<ts>.pdf` y se sirve por la misma ruta `/api/download`
+  que los CV; el regex de allowlist pasa a
+  `^(tailored_resume|cover_letter)_\d+\.pdf$` (el camino relativo sigue
+  bloqueado).
+- `backend/routes/cover_letter_router.py` — acepta `letter_style`,
+  `accent`, `linkedin_url`, `github_url` y `portfolio_url`, y devuelve
+  `pdf_url` + `pdf_filename` + `contact`. Un estilo o un color
+  desconocidos caen al valor por defecto en vez de romper la petición.
+- El render del PDF corre en un thread (`asyncio.to_thread`): la API
+  sincrónica de Playwright no puede arrancar dentro de un event loop, y
+  el endpoint es asíncrono. Si el PDF falla, la carta de texto se
+  devuelve igual.
+- Frontend: `CoverLetterOptions` suma el selector de diseño y los
+  swatches de color (mismo catálogo que el CV), `CoverLetterPanel`
+  suma **Descargar PDF** (descarga real: el servidor responde con
+  `Content-Disposition: attachment`) y **Ver PDF** (apertura en el
+  visor del navegador, como el botón Preview del CV), y el hook
+  manda los links del formulario.
+- `backend/tests/test_cover_letter.py` — 9 tests nuevos: el bloque de
+  contactos determinista, el form por encima del CV, el PDF
+  descargable con la URL intacta en la capa de texto, el fallback de
+  estilo y color desconocidos, y el regex de almacenamiento.
+- `backend/tests/test_input_validation.py` — el regex inline copia el
+  nuevo allowlist, con los dos prefijos y sus casos inválidos.
+
+### Verificación
+
+- **369 tests en verde** (29,25 s), antes 360.
+- Prueba real end-to-end con el LLM configurado: `sample-pdfs/jakes-resume.pdf`
+  + una JD de Ejecutivo Comercial, perfil general, empresa "Tiendas
+  Alcala", estilo lateral y color navy → 200, PDF de **una sola página**,
+  texto seleccionable, con el LinkedIn del CV (`linkedin.com/in/jake`)
+  intacto en la capa de texto y una cifra real del CV (200 impresoras).
+- Los tres estilos renderizados y revisados visualmente: la URL del
+  perfil sale clicable y sin partirse en el guion.
+- `tsc --noEmit` del frontend sin errores.
+
+## 2026-11-24 — Sesión "Carta de presentación"
+
+**Tipo:** feature.
+
+### Feature — Segundo entregable: carta de presentación
+
+El tool solo producía un PDF. Ahora, con el **mismo CV y la misma
+vacante**, también produce una carta de presentación: un entregable
+aparte, no un flag sobre `/api/generate`, porque una carta es una
+narrativa y un CV es un documento estructurado — el prompt, el contrato
+de respuesta y el presupuesto de rate limit son distintos.
+
+**Backend**
+
+- `backend/domain/cover_letter_prompts.py` (nuevo) — el cuerpo del
+  prompt. Reglas propias de una carta, porque falla de otra forma que
+  un CV:
+  - tiene que **añadir algo que el CV no dice** (el reclutador ya
+    tiene el CV): escoge los dos o tres requisitos que más pesan en la
+    vacante y argumenta cada uno;
+  - **cero invención**, con la regla de que toda frase que nombre una
+    habilidad, una herramienta, una cifra, una empresa o una fecha debe
+    ser rastreable al CV base;
+  - **sin frases vacías** ("persona dinámica y proactiva", "gran
+    capacidad de adaptación", "excelente compromiso", "apasionado por el
+    servicio");
+  - cifras, no adjetivos;
+  - sin metatexto (nunca menciona el ATS, el scoring ni la IA);
+  - **ángulo por dominio**: la carta de *tech* abre con el problema que
+    el candidato resolvió de punta a punta, la de *hr* con la escala
+    del proceso, la de *psychology* con la población atendida y el rigor
+    del método, y la de *general* con lo que el candidato le hace al
+    cliente y cómo lo miden. El vocabulario sale de
+    `game.skill_taxonomy_es`, así que la carta de un candidato de
+    ventas no dice "pruebas psicotécnicas".
+  - controles de **tono** (professional / persuasive / warm / concise),
+    **longitud** (120-180 / 220-320 / 350-450 palabras) e **idioma**
+    (auto / es / en).
+- `backend/application/services/cover_letter_service.py` (nuevo) — la
+  orquestación. Corre la cascada de LLM compartida y **normaliza** la
+  respuesta a un contrato estable: `salutation`, `opening`, `body[]`,
+  `closing`, `signature`, `plain_text` y `meta`. Tolera las cuatro
+  formas que el modelo usa en la práctica: JSON desnudo, bloque con
+  ```json, lista que envuelve el objeto y envelope `{"letter": {...}}`.
+  `plain_text` lo arma el backend a partir de los campos estructurados,
+  no el modelo, para que lo que se ve en pantalla y lo que se copia
+  sean exactamente lo mismo.
+- `backend/routes/cover_letter_router.py` (nuevo) — `POST
+  /api/cover-letter`. Valida `domain_game`, `tone`, `length` y
+  `language` (422 fuera de rango), persiste el PDF subido a un archivo
+  temporal y lo borra al terminar. Usa su **propio scope de rate limit**
+  (`cover-letter`), para que el presupuesto de la carta sea
+  independiente del de la generación de CV.
+- `backend/main.py` — el router se enchufa en el composition root con el
+  mismo `LLMOrchestrator` y el mismo parser PyMuPDF que el resto.
+
+**Frontend**
+
+- `frontend/src/components/DeliverableSwitch.tsx` (nuevo) — el primer
+  control del tool: **CV adaptado** o **Carta de presentación**. No es
+  un paso numerado: decide qué produce el resto del flujo, así que va
+  arriba y los pasos 1-3 (perfil, tu CV, la vacante) se comparten.
+- `frontend/src/components/CoverLetterOptions.tsx` (nuevo) — empresa,
+  tono, longitud e idioma. Reemplazan a "OPCIONES AVANZADAS" cuando el
+  entregable es la carta: un tema o un color de acento no significan
+  nada en un texto.
+- `frontend/src/components/CoverLetterPanel.tsx` (nuevo) — el resultado:
+  la carta en prosa, con **Copiar**, **Descargar .txt** y **Generar otra
+  versión**.
+- `frontend/src/hooks/useCoverLetter.ts` (nuevo) — la máquina de estados
+  de la llamada, con timeout de 90 s y lectura del envelope de error
+  (422/429/500/502).
+- `frontend/src/types/coverLetter.ts` (nuevo) — los tipos y las etiquetas
+  de los selectores.
+- `frontend/src/hooks/useProfile.ts` — el estado del entregable y de las
+  opciones de la carta; el reset los devuelve a sus valores por defecto.
+- `frontend/src/components/ActionBar.tsx` — el CTA sigue al entregable
+  ("Generar carta de presentación" / "Generar CV"), con los textos
+  originales como default para no tocar el flujo del CV.
+- `frontend/src/components/GenerationProgress.tsx` — barra
+  **indeterminada** opcional, para operaciones de un solo disparo que no
+  tienen stream de pasos (la carta): mostrar un porcentaje congelado
+  sería mentir.
+- `frontend/src/ToolApp.tsx` — el cableado. Cambiar de entregable
+  limpia el resultado del otro, así un PDF viejo nunca queda debajo de
+  una carta (ni al revés). En modo carta se ocultan la foto (solo es
+  del render) y los paneles de auditoría y editor YAML, que no aplican.
+
+### Verificación
+
+- **360 tests en verde** (25,84 s), antes 333: los 27 nuevos cubren el
+  prompt (que lleva los datos, la taxonomía del dominio, el ángulo por
+  dominio, el tono, la longitud y el override de idioma), las seis
+  variantes de parseo, los errores (campo faltante, cuerpo vacío,
+  respuesta no-JSON) y el contrato del endpoint (422 en cada parámetro
+  inválido, 200 con el cuerpo documentado, 502 cuando el modelo no
+  entrega una carta legible, y el scope de rate limit propio).
+- **Prueba real end-to-end** contra el servidor corriendo con el LLM
+  configurado: `sample-pdfs/jakes-resume.pdf` + una JD de Ejecutivo
+  Comercial con `domain_game=general` → 200, 246 palabras, en español,
+  saluteando a la empresa por nombre, con la experiencia de soporte en
+  TI traducida al lenguaje comercial ("resolver sus problemas técnicos
+  y asegurar su satisfacción" → "asesorar y cerrar soluciones"), una
+  cifra real del CV (200 impresoras) y los datos de disponibilidad
+  (turnos, fines de semana, movilizarme en Medellín).
+- `tsc --noEmit` del frontend sin errores.
+
 ## 2026-11-24 — Sesión "Perfil general (servicio, ventas y operaciones)"
 
 **Tipo:** feature.

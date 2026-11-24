@@ -29,6 +29,14 @@ export type PaletteOption = {
   description: string;
 };
 
+/** The cover-letter layouts the backend can render. */
+export type LetterStyleOption = {
+  id: string;
+  name: string;
+  badge: string;
+  description: string;
+};
+
 /** Mirrors `backend/routes/design_router.py`. */
 export const THEMES: ThemeOption[] = [
   { id: 'sb2nov', name: 'SB2Nov', badge: 'ATS / Silicon Valley', description: 'Limpio y estructurado para Tech' },
@@ -48,7 +56,18 @@ export const FALLBACK_PALETTES: PaletteOption[] = [
   { id: 'slate', label: 'Gris pizarra', hex: '#3D4A5C', description: 'Color de acento en nombre y títulos' },
 ];
 
-type Catalogue = { themes: ThemeOption[]; palettes: PaletteOption[] };
+/** Fallback letter styles, used while the catalogue request is in flight. */
+export const FALLBACK_LETTER_STYLES: LetterStyleOption[] = [
+  { id: 'classic', name: 'Clásica', badge: 'Sobrio', description: 'Encabezado centrado y cuerpo serif.' },
+  { id: 'modern', name: 'Moderna', badge: 'Limpia', description: 'Encabezado a la izquierda y sin serifas.' },
+  { id: 'sidebar', name: 'Lateral', badge: 'Visual', description: 'Contactos a la izquierda, carta a la derecha.' },
+];
+
+type Catalogue = {
+  themes: ThemeOption[];
+  palettes: PaletteOption[];
+  letterStyles: LetterStyleOption[];
+};
 
 let cataloguePromise: Promise<Catalogue> | null = null;
 
@@ -61,11 +80,19 @@ function loadCatalogue(): Promise<Catalogue> {
         themes: Array.isArray(data?.themes) && data.themes.length > 0 ? data.themes : THEMES,
         palettes:
           Array.isArray(data?.palettes) && data.palettes.length > 0 ? data.palettes : FALLBACK_PALETTES,
+        letterStyles:
+          Array.isArray(data?.letter_styles) && data.letter_styles.length > 0
+            ? data.letter_styles
+            : FALLBACK_LETTER_STYLES,
       }))
       .catch(() => {
         // Allow a later retry (e.g. the backend was still booting).
         cataloguePromise = null;
-        return { themes: THEMES, palettes: FALLBACK_PALETTES };
+        return {
+          themes: THEMES,
+          palettes: FALLBACK_PALETTES,
+          letterStyles: FALLBACK_LETTER_STYLES,
+        };
       });
   }
   return cataloguePromise;
@@ -81,6 +108,7 @@ export function useDesignOptions(): Catalogue {
   const [catalogue, setCatalogue] = useState<Catalogue>({
     themes: THEMES,
     palettes: FALLBACK_PALETTES,
+    letterStyles: FALLBACK_LETTER_STYLES,
   });
 
   useEffect(() => {

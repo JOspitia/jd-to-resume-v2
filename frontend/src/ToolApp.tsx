@@ -7,21 +7,25 @@ import { useAudit } from './hooks/useAudit';
 import { useGeneration } from './hooks/useGeneration';
 import { useYamlEditor } from './hooks/useYamlEditor';
 import { useRedesign } from './hooks/useRedesign';
+import { useCoverLetter } from './hooks/useCoverLetter';
 import type { Generation } from './hooks/useGeneration';
 import type { YamlEditorOps } from './hooks/useYamlEditor';
 import { apiUrl } from './lib/api';
 
 import { Section } from './components/Section';
+import { DeliverableSwitch } from './components/DeliverableSwitch';
 import { ProfileSelector } from './components/ProfileSelector';
 import { CvUploader } from './components/CvUploader';
 import { JobContext } from './components/JobContext';
 import { AdvancedOptions } from './components/AdvancedOptions';
+import { CoverLetterOptions } from './components/CoverLetterOptions';
 import { ActionBar } from './components/ActionBar';
 import { GenerationProgress } from './components/GenerationProgress';
 import { ResultsPanel } from './components/ResultsPanel';
 import { RedesignPanel } from './components/RedesignPanel';
 import { YamlEditorPanel } from './components/YamlEditorPanel';
 import { AuditPanel } from './components/AuditPanel';
+import { CoverLetterPanel } from './components/CoverLetterPanel';
 import { PhotoField } from './components/PhotoField';
 import { Button } from './components/ui/Button';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -77,6 +81,26 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
   // "Change the design, keep the text" — re-renders the current YAML without
   // calling the LLM.
   const redesign = useRedesign({ profile, generation });
+  // Cover letter deliverable — same inputs, different prompt + response.
+  const coverLetter = useCoverLetter({ profile });
+
+  const isCoverLetter = profile.deliverable === 'cover_letter';
+
+  /**
+   * Switching the deliverable clears the OTHER deliverable's result, so a
+   * stale CV PDF never sits under a letter (or vice versa).
+   */
+  const handleDeliverableChange = useCallback(
+    (value: 'cv' | 'cover_letter') => {
+      profile.setDeliverable(value);
+      if (value === 'cover_letter') {
+        generation.resetGeneration();
+      } else {
+        coverLetter.reset();
+      }
+    },
+    [profile, generation, coverLetter],
+  );
 
   /**
    * Resets the frontend state across every hook, then purges the backend
@@ -89,12 +113,13 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
     audit.resetAudit();
     yamlEditor.resetYamlEditor();
     redesign.closePanel();
+    coverLetter.reset();
     try {
       await fetch(apiUrl('/api/clear-cache'), { method: 'POST' });
     } catch (e) {
       console.error('No se pudo limpiar la caché del backend:', e);
     }
-  }, [profile, generation, audit, yamlEditor, redesign]);
+  }, [profile, generation, audit, yamlEditor, redesign, coverLetter]);
 
   return (
     <div className="min-h-screen text-foreground flex flex-col items-center pt-10 pb-44 px-4 md:px-8 selection:bg-primary selection:text-primary-foreground relative">
@@ -138,13 +163,21 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
           </span>
         </h1>
         <p className="text-sm md:text-base text-muted-foreground mt-2">
-          Subí tu CV, elegí el perfil, pegá la vacante — generamos un PDF
-          adaptado en minutos.
+          {isCoverLetter
+            ? 'Subí tu CV, elegí el perfil, pegá la vacante — redactamos una carta de presentación lista para copiar o para descargar en PDF.'
+            : 'Subí tu CV, elegí el perfil, pegá la vacante — generamos un PDF adaptado en minutos.'}
         </p>
       </motion.header>
 
       {/* Main flow — numbered sections */}
       <div className="w-full max-w-5xl space-y-6 z-10">
+        {/* Deliverable switch — not a numbered step: it decides what the
+            rest of the flow produces, so it sits above the steps. */}
+        <DeliverableSwitch
+          value={profile.deliverable}
+          onChange={handleDeliverableChange}
+        />
+
         <Section number={1} title="PERFIL">
           <ProfileSelector
             domainGame={profile.domainGame}
@@ -178,120 +211,184 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             onPortfolioUrlChange={profile.setPortfolioUrl}
           />
 
-          <PhotoField
-            preview={profile.photoPreview}
-            error={profile.photoError}
-            inputRef={profile.photoInputRef}
-            onChange={profile.handlePhotoChange}
-            onClear={profile.clearPhoto}
-          />
+          {/* The photo only exists for the rendered CV. */}
+          {!isCoverLetter && (
+            <PhotoField
+              preview={profile.photoPreview}
+              error={profile.photoError}
+              inputRef={profile.photoInputRef}
+              onChange={profile.handlePhotoChange}
+              onClear={profile.clearPhoto}
+            />
+          )}
         </Section>
 
-        <Section number={4} title="OPCIONES AVANZADAS">
-          <AdvancedOptions
-            selectedTheme={profile.selectedTheme}
-            onThemeChange={profile.setSelectedTheme}
-            accentColor={profile.accentColor}
-            onAccentColorChange={profile.setAccentColor}
-            fitSinglePage={profile.fitSinglePage}
-            onFitSinglePageChange={profile.setFitSinglePage}
-            pageBreakSection={profile.pageBreakSection}
-            onPageBreakSectionChange={profile.setPageBreakSection}
-            autoValidateATS={profile.autoValidateATS}
-            onAutoValidateAtsChange={profile.setAutoValidateATS}
-            editBeforeGenerate={profile.editBeforeGenerate}
-            onEditBeforeGenerateChange={profile.setEditBeforeGenerate}
-            strictEditsOnly={profile.strictEditsOnly}
-            onStrictEditsOnlyChange={profile.setStrictEditsOnly}
-            customPrompt={profile.customPrompt}
-            onCustomPromptChange={profile.setCustomPrompt}
-          />
-        </Section>
+        {isCoverLetter ? (
+          <Section number={4} title="OPCIONES DE LA CARTA">
+            <CoverLetterOptions
+              companyName={profile.companyName}
+              onCompanyNameChange={profile.setCompanyName}
+              tone={profile.coverLetterTone}
+              onToneChange={profile.setCoverLetterTone}
+              length={profile.coverLetterLength}
+              onLengthChange={profile.setCoverLetterLength}
+              language={profile.coverLetterLanguage}
+              onLanguageChange={profile.setCoverLetterLanguage}
+              letterStyle={profile.letterStyle}
+              onLetterStyleChange={profile.setLetterStyle}
+              letterAccent={profile.letterAccent}
+              onLetterAccentChange={profile.setLetterAccent}
+              linkedinUrl={profile.linkedinUrl}
+            />
+          </Section>
+        ) : (
+          <Section number={4} title="OPCIONES AVANZADAS">
+            <AdvancedOptions
+              selectedTheme={profile.selectedTheme}
+              onThemeChange={profile.setSelectedTheme}
+              accentColor={profile.accentColor}
+              onAccentColorChange={profile.setAccentColor}
+              fitSinglePage={profile.fitSinglePage}
+              onFitSinglePageChange={profile.setFitSinglePage}
+              pageBreakSection={profile.pageBreakSection}
+              onPageBreakSectionChange={profile.setPageBreakSection}
+              autoValidateATS={profile.autoValidateATS}
+              onAutoValidateAtsChange={profile.setAutoValidateATS}
+              editBeforeGenerate={profile.editBeforeGenerate}
+              onEditBeforeGenerateChange={profile.setEditBeforeGenerate}
+              strictEditsOnly={profile.strictEditsOnly}
+              onStrictEditsOnlyChange={profile.setStrictEditsOnly}
+              customPrompt={profile.customPrompt}
+              onCustomPromptChange={profile.setCustomPrompt}
+            />
+          </Section>
+        )}
 
-        {/* Generation progress (only while running) */}
-        <GenerationProgress
-          status={generation.status}
-          progress={generation.progress}
-          stepMessage={generation.stepMessage}
-          elapsedSeconds={generation.elapsedSeconds}
-          errorMessage={generation.errorMessage}
-        />
+        {isCoverLetter ? (
+          <>
+            {/* Letter progress (single LLM round-trip, no step stream) */}
+            <GenerationProgress
+              status={coverLetter.status}
+              progress={0}
+              stepMessage="Redactando la carta de presentación…"
+              elapsedSeconds={coverLetter.elapsedSeconds}
+              errorMessage={coverLetter.errorMessage}
+              indeterminate
+            />
 
-        {/* Results panel (only on success) */}
-        <ResultsPanel
-          status={generation.status}
-          downloadUrl={generation.downloadUrl}
-          hasYamlSnapshot={!!generation.lastGeneratedYaml}
-          atsStatus={audit.atsStatus}
-          lastOutputLanguage={generation.lastOutputLanguage}
-          auditScores={generation.auditScores}
-          translationMeta={generation.translationMeta}
-          scoreHistory={audit.scoreHistory}
-          onReopenYamlEditor={yamlEditor.handleReopenYamlEditor}
-          onOpenRedesign={redesign.openPanel}
-          redesignPanel={
-            redesign.open ? (
-              <RedesignPanel
-                theme={redesign.theme}
-                accent={redesign.accent}
-                onThemeChange={redesign.setTheme}
-                onAccentChange={redesign.setAccent}
-                onApply={redesign.apply}
-                onCancel={redesign.closePanel}
-                applying={redesign.status === 'applying'}
-                errorMessage={redesign.errorMessage}
-              />
-            ) : null
-          }
-          onAudit={() => audit.handleValidateATS()}
-          onTranslate={() => {
-            generation.setForceTranslateToEnglish(true);
-            generation.handleGenerate();
-          }}
-          onReset={handleResetProcess}
-        />
+            <CoverLetterPanel
+              status={coverLetter.status}
+              letter={coverLetter.letter}
+              copied={coverLetter.copied}
+              onCopy={coverLetter.handleCopy}
+              onDownload={coverLetter.handleDownload}
+              onRegenerate={coverLetter.handleGenerate}
+            />
+          </>
+        ) : (
+          <>
+            {/* Generation progress (only while running) */}
+            <GenerationProgress
+              status={generation.status}
+              progress={generation.progress}
+              stepMessage={generation.stepMessage}
+              elapsedSeconds={generation.elapsedSeconds}
+              errorMessage={generation.errorMessage}
+            />
 
-        {/* YAML editor overlay */}
-        <YamlEditorPanel
-          yamlContent={yamlEditor.yamlContent}
-          yamlReady={yamlEditor.yamlReady}
-          onYamlChange={yamlEditor.setYamlContent}
-          yamlError={yamlEditor.yamlError}
-          yamlRepairing={yamlEditor.yamlRepairing}
-          yamlRepairNotice={yamlEditor.yamlRepairNotice}
-          hasBackup={!!yamlEditor.yamlBackup}
-          status={generation.status}
-          atsStatus={audit.atsStatus}
-          onRender={yamlEditor.handleRenderFromYaml}
-          onRegenerate={yamlEditor.handleRegenerateYaml}
-          onAudit={yamlEditor.handleAuditYaml}
-          onRepair={yamlEditor.handleRepairYaml}
-          onRestoreBackup={yamlEditor.handleRestoreYamlBackup}
-          onClose={yamlEditor.handleCloseYamlEditor}
-        />
+            {/* Results panel (only on success) */}
+            <ResultsPanel
+              status={generation.status}
+              downloadUrl={generation.downloadUrl}
+              hasYamlSnapshot={!!generation.lastGeneratedYaml}
+              atsStatus={audit.atsStatus}
+              lastOutputLanguage={generation.lastOutputLanguage}
+              auditScores={generation.auditScores}
+              translationMeta={generation.translationMeta}
+              scoreHistory={audit.scoreHistory}
+              onReopenYamlEditor={yamlEditor.handleReopenYamlEditor}
+              onOpenRedesign={redesign.openPanel}
+              redesignPanel={
+                redesign.open ? (
+                  <RedesignPanel
+                    theme={redesign.theme}
+                    accent={redesign.accent}
+                    onThemeChange={redesign.setTheme}
+                    onAccentChange={redesign.setAccent}
+                    onApply={redesign.apply}
+                    onCancel={redesign.closePanel}
+                    applying={redesign.status === 'applying'}
+                    errorMessage={redesign.errorMessage}
+                  />
+                ) : null
+              }
+              onAudit={() => audit.handleValidateATS()}
+              onTranslate={() => {
+                generation.setForceTranslateToEnglish(true);
+                generation.handleGenerate();
+              }}
+              onReset={handleResetProcess}
+            />
 
-        {/* ATS + AI-tone audit results */}
-        <AuditPanel
-          atsStatus={audit.atsStatus}
-          atsData={audit.atsData}
-          atsErrorMessage={audit.atsErrorMessage}
-          selectedKeywords={audit.selectedKeywords}
-          onToggleKeyword={audit.toggleKeyword}
-          selectedTips={audit.selectedTips}
-          onToggleTip={audit.toggleTip}
-          status={generation.status}
-          strictEditsOnly={profile.strictEditsOnly}
-          onStrictEditsOnlyChange={profile.setStrictEditsOnly}
-          onRegenerateWithFeedback={generation.handleRegenerateWithFeedback}
-        />
+            {/* YAML editor overlay */}
+            <YamlEditorPanel
+              yamlContent={yamlEditor.yamlContent}
+              yamlReady={yamlEditor.yamlReady}
+              onYamlChange={yamlEditor.setYamlContent}
+              yamlError={yamlEditor.yamlError}
+              yamlRepairing={yamlEditor.yamlRepairing}
+              yamlRepairNotice={yamlEditor.yamlRepairNotice}
+              hasBackup={!!yamlEditor.yamlBackup}
+              status={generation.status}
+              atsStatus={audit.atsStatus}
+              onRender={yamlEditor.handleRenderFromYaml}
+              onRegenerate={yamlEditor.handleRegenerateYaml}
+              onAudit={yamlEditor.handleAuditYaml}
+              onRepair={yamlEditor.handleRepairYaml}
+              onRestoreBackup={yamlEditor.handleRestoreYamlBackup}
+              onClose={yamlEditor.handleCloseYamlEditor}
+            />
+
+            {/* ATS + AI-tone audit results */}
+            <AuditPanel
+              atsStatus={audit.atsStatus}
+              atsData={audit.atsData}
+              atsErrorMessage={audit.atsErrorMessage}
+              selectedKeywords={audit.selectedKeywords}
+              onToggleKeyword={audit.toggleKeyword}
+              selectedTips={audit.selectedTips}
+              onToggleTip={audit.toggleTip}
+              status={generation.status}
+              strictEditsOnly={profile.strictEditsOnly}
+              onStrictEditsOnlyChange={profile.setStrictEditsOnly}
+              onRegenerateWithFeedback={generation.handleRegenerateWithFeedback}
+            />
+          </>
+        )}
       </div>
 
       {/* Sticky bottom — only the primary CTA lives here (spec S7, S8) */}
       <ActionBar
-        status={generation.status}
-        elapsedSeconds={generation.elapsedSeconds}
+        status={isCoverLetter ? coverLetter.status : generation.status}
+        elapsedSeconds={
+          isCoverLetter ? coverLetter.elapsedSeconds : generation.elapsedSeconds
+        }
         hasFile={!!profile.file}
-        onGenerate={generation.handleGenerate}
+        onGenerate={
+          isCoverLetter
+            ? () => coverLetter.handleGenerate()
+            : generation.handleGenerate
+        }
+        ctaLabel={isCoverLetter ? 'Generar carta de presentación' : 'Generar CV'}
+        ctaBusyLabel={isCoverLetter ? 'Generando la carta' : 'Generando CV'}
+        ctaEmptyLabel={
+          isCoverLetter ? 'Subí un CV para empezar' : 'Subí un CV para empezar'
+        }
+        ctaAriaLabel={
+          isCoverLetter
+            ? 'Generar carta de presentación a partir del CV'
+            : 'Generar CV adaptado'
+        }
       />
     </div>
   );

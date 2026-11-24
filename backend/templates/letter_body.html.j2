@@ -1,0 +1,42 @@
+{#
+  The body of the cover letter: salutation, opening, the body paragraphs,
+  the closing and the signature.
+
+  Kept in its own partial because the letter has two layouts (a letterhead
+  on top, or a sidebar column) and both render exactly the same prose.
+
+  The signature is built by the backend from real data (the candidate's
+  CV or the links the user typed in the form), never from the model — so
+  the contact block can only contain facts.
+#}
+{% if salutation %}
+<p class="salutation">{{ salutation }}</p>
+{% endif %}
+
+{% if opening %}
+<p class="body-paragraph">{{ opening }}</p>
+{% endif %}
+
+{% for paragraph in body %}
+<p class="body-paragraph">{{ paragraph }}</p>
+{% endfor %}
+
+{% if closing %}
+<p class="body-paragraph">{{ closing }}</p>
+{% endif %}
+
+<div class="signature">
+  {% if signature_name %}
+  <div class="signature-name">{{ signature_name }}</div>
+  {% endif %}
+  {% if signature_lines %}
+  <div class="signature-contact">{{ signature_lines|join(' | ') }}</div>
+  {% endif %}
+  {% if signature_links %}
+  <div class="signature-contact">
+    {% for link in signature_links %}
+    <a href="{{ link.url|e }}">{{ link.label }}</a>{% if not loop.last %} | {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

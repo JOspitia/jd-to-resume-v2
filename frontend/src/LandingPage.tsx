@@ -22,6 +22,11 @@ const FEATURES = [
     body: 'Subís tu CV maestro y la descripción de la vacante. La IA que configures reescribe la estructura mapeando cada skill y proyecto a los keywords exactos del algoritmo — sin inventar métricas.',
   },
   {
+    title: 'Carta de presentación',
+    titleClass: 'text-secondary',
+    body: 'Con el mismo CV y la misma vacante, generás una carta en prosa para copiar y pegar o un PDF con el mismo diseño del CV. Elige el tono, la extensión y la empresa: la carta argumenta por vos sin inventar experiencia.',
+  },
+  {
     title: 'Auditoría ATS',
     titleClass: 'text-secondary',
     body: 'Después de generar, obtenés un puntaje de compatibilidad, las palabras clave que faltan, señales de detección de IA y sugerencias accionables para subir el match.',
@@ -29,7 +34,7 @@ const FEATURES = [
   {
     title: 'Personalización total',
     titleClass: 'text-warning',
-    body: 'Editor YAML en vivo con validación de esquema y autoguardado. Soporta Tech, RR.HH. y Psicología, traducción al inglés y modo claro/oscuro — sin volver a empezar.',
+    body: 'Editor YAML en vivo con validación de esquema y autoguardado. Cuatro perfiles — Tech, RR.HH., Psicología y General —, traducción al inglés y modo claro/oscuro — sin volver a empezar.',
   },
 ] as const;
 
@@ -186,7 +191,7 @@ export default function LandingPage({ onStart }: { onStart: () => void }) {
             Capacidades
           </h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 md:gap-8">
             {FEATURES.map((feature) => (
               <Card
                 key={feature.title}
