@@ -35,6 +35,8 @@ from domain.translation_facts import (  # noqa: E402
     set_path,
     spanish_markers_in,
     strip_degree_markers,
+    strip_leading_subject,
+    strip_subjects,
 )
 
 
@@ -239,6 +241,78 @@ class TestTargetedPrompt:
         prompt = build_targeted_prompt({"summary": "Desarrollo de software"})
         assert "summary" in prompt
         assert "Do not add, drop or merge" in prompt
+
+
+# ---------------------------------------------------------------------------
+# The first-person subject
+# ---------------------------------------------------------------------------
+
+
+class TestLeadingSubject:
+    """Spanish bullets carry a conjugated verb; English bullets don't.
+
+    "Incrementé la cobertura..." translates literally to "I increased the
+    coverage...", but an English CV bullet never repeats the subject:
+    the app's own tailoring prompt writes "Reduced response times by
+    45%...".
+    """
+
+    def test_it_drops_the_subject_of_a_past_tense_bullet(self):
+        assert (
+            strip_leading_subject("I increased automated test coverage to 90%.")
+            == "Increased automated test coverage to 90%."
+        )
+        assert (
+            strip_leading_subject("I reduced bugs detected in production by 30%.")
+            == "Reduced bugs detected in production by 30%."
+        )
+        assert (
+            strip_leading_subject("I developed backend applications in PHP.")
+            == "Developed backend applications in PHP."
+        )
+
+    def test_it_handles_irregular_past_tense_verbs(self):
+        assert strip_leading_subject("I led the migration.") == "Led the migration."
+        assert strip_leading_subject("I built the platform.") == "Built the platform."
+
+    def test_it_leaves_a_present_tense_alone(self):
+        """Only the past tense is the CV convention."""
+        assert (
+            strip_leading_subject("I am the first contact for any team failure.")
+            == "I am the first contact for any team failure."
+        )
+        assert (
+            strip_leading_subject("I have 4 years of experience.")
+            == "I have 4 years of experience."
+        )
+
+    def test_it_leaves_a_sentence_that_only_mentions_the_subject_alone(self):
+        assert (
+            strip_leading_subject("In 2019 I led the team.")
+            == "In 2019 I led the team."
+        )
+
+    def test_it_leaves_a_name_alone(self):
+        assert strip_leading_subject("Ingeniero TICs - QA") == "Ingeniero TICs - QA"
+
+    def test_it_walks_the_whole_document(self):
+        data = {
+            "summary": "Full Stack Engineer with React and Node.js",
+            "experience": [
+                {
+                    "company": "Acme",
+                    "role": "ICT Engineer - QA",
+                    "points": [
+                        "I increased automated test coverage to 90%.",
+                        "Built a REST API with FastAPI.",
+                    ],
+                }
+            ],
+        }
+        strip_subjects(data)
+        assert data["experience"][0]["points"][0].startswith("Increased")
+        assert data["experience"][0]["points"][1] == "Built a REST API with FastAPI."
+        assert data["experience"][0]["role"] == "ICT Engineer - QA"
 
 
 # ---------------------------------------------------------------------------

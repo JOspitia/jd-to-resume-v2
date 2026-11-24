@@ -312,6 +312,68 @@ def set_path(data: Any, path: str, value: str) -> bool:
     return True
 
 
+#: Irregular past-tense verbs that show up in CVs. They do not end in
+#: "ed", so the rule cannot rely on the suffix alone.
+_IRREGULAR_PAST_TENSE = frozenset(
+    {
+        "led", "built", "made", "wrote", "took", "gave", "drove", "brought",
+        "taught", "sold", "told", "found", "kept", "ran", "held", "met",
+        "sent", "spent", "stood", "won", "read", "did", "saw", "came",
+        "became", "began", "broke", "chose", "drew", "fell", "felt",
+        "fought", "grew", "heard", "knew", "left", "lost", "meant", "paid",
+        "put", "spoke", "understood", "wore", "overcame", "sought", "set",
+        "cut", "hit", "let", "shut", "cost", "bent", "built", "wrought",
+    }
+)
+
+
+def strip_leading_subject(text: str) -> str:
+    """Drop the "I" from a bullet written as "I increased ...".
+
+    Spanish needs the conjugated verb ("Incrementé", "Reduje"), so a
+    literal translation drags the subject along. English CV bullets do
+    not carry one: the app's own tailoring prompt writes "Reduced
+    response times by 45%...", never "I reduced...". Repeating "I" on
+    every bullet of a CV reads as clumsy and wastes the line.
+
+    The subject is only dropped when what follows is clearly a past-tense
+    verb, so "In 2019 I led..." and "I am the first contact..." are left
+    alone.
+
+    Args:
+        text: the string to clean.
+
+    Returns:
+        The string without the subject, or the original.
+    """
+    if not text.startswith("I "):
+        return text
+    rest = text[2:]
+    if not rest:
+        return text
+    first = rest.split(" ", 1)[0].strip(",.;:!?").lower()
+    is_past = first.endswith("ed") or first in _IRREGULAR_PAST_TENSE
+    if not is_past:
+        return text
+    return rest[0].upper() + rest[1:]
+
+
+def strip_subjects(parsed_data: dict) -> dict:
+    """Apply :func:`strip_leading_subject` to every prose string.
+
+    Args:
+        parsed_data: the parsed CV (mutated in place).
+
+    Returns:
+        The same dict, for chaining.
+    """
+    for path, text in list(_walk(parsed_data, "")):
+        cleaned = strip_leading_subject(text)
+        if cleaned != text:
+            set_path(parsed_data, path, cleaned)
+    return parsed_data
+
+
 def strip_degree_markers(parsed_data: dict) -> dict:
     """Remove the RenderCV ``in`` marker that leaks from the source PDF.
 
@@ -351,4 +413,6 @@ __all__ = [
     "set_path",
     "spanish_markers_in",
     "strip_degree_markers",
+    "strip_leading_subject",
+    "strip_subjects",
 ]

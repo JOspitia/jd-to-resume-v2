@@ -324,6 +324,23 @@ El arreglo son dos cosas:
 
 Un detalle que el guard también resuelve: el texto extraído del PDF arrastra el marcador `in` que RenderCV imprime antes de un grado ("in in Bachelor's Degree"). El backend lo limpia, así que el título no sale duplicado.
 
+### Los bullets en inglés no llevan sujeto
+
+Una traducción literal arrastra el sujeto: en español el bullet va con verbo conjugado ("**Incrementé** la cobertura…", "**Reduje** los errores…"), y el verbo en inglés necesita un sujeto, así que la traducción sale "**I** increased…", "**I** reduced…". Con seis bullets, la primera persona se repite seis veces y el CV en inglés suena raro.
+
+En inglés el bullet de CV **no lleva sujeto**: el verbo va directo, en pasado.
+
+| Español (origen) | Inglés (correcto) |
+|---|---|
+| Incrementé la cobertura de pruebas automatizadas al 90% | Increased automated test coverage to 90% |
+| Reduje los errores en producción un 30% | Reduced production bugs by 30% |
+| Lideré la adopción de prácticas ágiles | Led the adoption of agile practices |
+
+El arreglo tiene dos partes:
+
+1. **El prompt lo avisa.** La sección "THE FIRST PERSON" del prompt de traducción explica que el español exige el sujeto y que el inglés de CV no, con los ejemplos de arriba.
+2. **El backend lo normaliza** (`strip_subjects` en `backend/domain/translation_facts.py`). Si aun así queda un "I" al principio de un bullet, se quita **solo** cuando lo sigue un verbo en pasado ("increased", "reduced", "configured"… o los irregulares "led", "built", "wrote"), y el verbo queda en mayúscula inicial. Lo que **no** se toca: "In 2019 I led the team" (el sujeto no va al principio), "I am the first point of contact" (no es pasado) ni los textos que no son bullets, como el resumen.
+
 ```bash
 curl -X POST http://localhost:8000/api/generate \
   -F "file=@mi-cv-en-español.pdf" \

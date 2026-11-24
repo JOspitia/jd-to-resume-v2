@@ -4,6 +4,54 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-24 — Sesión "Los bullets traducidos no empiezan con 'I'"
+
+**Tipo:** fix.
+
+### Fix — La traducción arrastraba el sujeto ("I increased…")
+
+**El síntoma.** El usuario revisó el PDF traducido y notó que **todos** los
+bullets de experiencia empezaban con "I": "I increased automated test
+coverage…", "I reduced bugs detected in production…", "I validated medical
+flows…". Seis bullets, seis "I".
+
+**¿Es lo correcto?** No. La convención del CV en inglés es el **verbo en
+pasado sin sujeto**: "Reduced response times by 45%…". De hecho, el propio
+prompt de adaptación del repo ya lo hace así. El problema es de la
+traducción, no de la convención.
+
+**La causa.** El español obliga a conjugar el verbo ("Incrementé",
+"Reduje"), y un verbo conjugado necesita sujeto. La traducción literal
+arrastra el "I" porque no es opcional en la lengua de origen. El prompt no
+decía nada del asunto, así que el modelo hizo lo natural: traducir la
+oración completa.
+
+**El arreglo, en dos capas:**
+
+1. **El prompt** (`backend/domain/translate_prompts.py`) gana una sección
+   "THE FIRST PERSON" que explica la diferencia entre las dos lenguas y da
+   los pares de ejemplo (Incrementé la cobertura → Increased test
+   coverage).
+
+2. **El backend normaliza** (`strip_subjects` /
+   `strip_leading_subject` en `backend/domain/translation_facts.py`). Si el
+   modelo aun así deja un "I" al principio, se quita **solo** cuando lo
+   sigue un verbo en pasado — regular ("increased", "reduced",
+   "configured") o irregular ("led", "built", "wrote") — y el verbo queda
+   con mayúscula inicial.
+
+   Lo que **no** se toca, a propósito:
+   - "In 2019 I led the team" → el sujeto no va al principio.
+   - "I am the first point of contact" → no es un verbo en pasado.
+   - "I have 4 years of experience" → tampoco es pasado.
+   - El resumen y cualquier otro texto que no es un bullet de experiencia.
+
+**Verificación.** 6 tests nuevos (`TestLeadingSubject`), 432 en verde.
+Prueba real sobre el CV del usuario: **0 bullets con sujeto "I"** y **0
+campos en español**, con un PDF de dos páginas limpio.
+
+---
+
 ## 2026-11-24 — Sesión "Traducción fiel del CV al inglés"
 
 **Tipo:** feature.

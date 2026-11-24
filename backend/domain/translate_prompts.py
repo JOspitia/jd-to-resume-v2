@@ -157,6 +157,18 @@ WHAT YOU MUST TRANSLATE — go through this list, item by item:
 - EVERY entry of "achievements" → English
 - the "section_labels" → the English labels listed below
 
+THE FIRST PERSON: Spanish writes bullets with a conjugated first-person
+verb ("Incrementé la cobertura...", "Reduje en un 30%...", "Validé los
+flujos..."). English CV bullets do NOT carry the subject. Translate them
+WITHOUT the "I":
+  "Incrementé la cobertura..."  →  "Increased test coverage..."
+  "Reduje en un 30%..."         →  "Reduced production bugs by 30%..."
+  "Validé los flujos..."        →  "Validated the flows..."
+  "Desarrollé aplicaciones..."  →  "Developed applications..."
+The verb stays in the past tense; only the subject is dropped. Do the
+same in the summary if it starts the same way ("I have 4 years of
+experience" → "4 years of experience in...").
+
 WHAT MUST NOT CHANGE — the content of your translation:
 1. KEEP THE STRUCTURE EXACTLY. The same sections, in the same order.
    The same entries in each section, in the same order. The same number
