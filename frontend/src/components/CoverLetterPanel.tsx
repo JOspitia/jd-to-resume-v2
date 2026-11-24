@@ -9,9 +9,8 @@ import {
 } from 'lucide-react';
 
 import { Card } from './ui/Card';
-import { Button, buttonVariants } from './ui/Button';
+import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
-import { apiUrl } from '../lib/api';
 import type { CoverLetter } from '../types/coverLetter';
 
 /**
@@ -36,6 +35,16 @@ export type CoverLetterPanelProps = {
   onCopy: () => void;
   onDownload: () => void;
   onRegenerate: () => void;
+  /**
+   * Opens the letter PDF inside the app (modal over the form).
+   *
+   * It used to be an `<a target="_blank">`, which in the embedded browser
+   * replaces the current tab with the PDF viewer — the user came back to
+   * a reloaded app (landing page, empty form).
+   */
+  onPreviewPdf: () => void;
+  /** Saves the letter PDF to disk without navigating away from the app. */
+  onDownloadPdf: () => void;
 };
 
 export function CoverLetterPanel({
@@ -45,6 +54,8 @@ export function CoverLetterPanel({
   onCopy,
   onDownload,
   onRegenerate,
+  onPreviewPdf,
+  onDownloadPdf,
 }: CoverLetterPanelProps) {
   const pdfUrl = letter?.pdf_url;
 
@@ -103,25 +114,22 @@ export function CoverLetterPanel({
             <div className="flex flex-col sm:flex-row gap-2 mt-4">
               {pdfUrl ? (
                 <>
-                  <a
-                    href={apiUrl(pdfUrl)}
-                    download="Carta_de_presentacion.pdf"
-                    target="_blank"
-                    rel="noreferrer"
+                  <Button
+                    onClick={onDownloadPdf}
+                    variant="primary"
+                    size="md"
                     aria-label="Descargar el PDF de la carta de presentación"
-                    className={buttonVariants({ variant: 'primary', size: 'md' })}
                   >
                     <Download className="w-4 h-4" aria-hidden="true" /> Descargar PDF
-                  </a>
-                  <a
-                    href={`${apiUrl(pdfUrl)}${pdfUrl.includes('?') ? '&' : '?'}inline=1`}
-                    target="_blank"
-                    rel="noreferrer"
+                  </Button>
+                  <Button
+                    onClick={onPreviewPdf}
+                    variant="outline"
+                    size="md"
                     aria-label="Previsualizar el PDF de la carta de presentación"
-                    className={buttonVariants({ variant: 'outline', size: 'md' })}
                   >
                     <Eye className="w-4 h-4" aria-hidden="true" /> Ver PDF
-                  </a>
+                  </Button>
                 </>
               ) : (
                 <Button variant="primary" size="md" disabled>

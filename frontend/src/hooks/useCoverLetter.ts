@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { apiUrl } from '../lib/api';
+import { readSession, writeSession, clearSession } from '../lib/session';
 import type { Profile } from './useProfile';
 import type { CoverLetter } from '../types/coverLetter';
 
@@ -18,6 +19,13 @@ import type { CoverLetter } from '../types/coverLetter';
  */
 
 export type CoverLetterStatus = 'idle' | 'generating' | 'success' | 'error';
+
+/**
+ * The generated letter is persisted in sessionStorage under this key, so a
+ * reload of the SPA keeps the letter on screen (and copyable) instead of
+ * dropping the user back to an empty form.
+ */
+const LETTER_SESSION_KEY = 'cover-letter';
 
 type CoverLetterDeps = {
   profile: Pick<
@@ -73,8 +81,23 @@ export function useCoverLetter({ profile }: CoverLetterDeps) {
     customPrompt,
   } = profile;
 
-  const [status, setStatus] = useState<CoverLetterStatus>('idle');
-  const [letter, setLetter] = useState<CoverLetter | null>(null);
+  /**
+   * The generated letter is restored from sessionStorage on mount.
+   *
+   * The snapshot is read ONCE and used as the initial value of the state
+   * (instead of restoring it in an effect): the first render already shows
+   * the letter, so a reload does not wipe it.
+   */
+  const [savedLetter] = useState<CoverLetter | null>(() =>
+    readSession<CoverLetter>(LETTER_SESSION_KEY),
+  );
+  const restoredLetter =
+    savedLetter && typeof savedLetter.plain_text === 'string' ? savedLetter : null;
+
+  const [status, setStatus] = useState<CoverLetterStatus>(() =>
+    restoredLetter ? 'success' : 'idle',
+  );
+  const [letter, setLetter] = useState<CoverLetter | null>(() => restoredLetter);
   const [errorMessage, setErrorMessage] = useState('');
   const [copied, setCopied] = useState(false);
 
@@ -90,11 +113,21 @@ export function useCoverLetter({ profile }: CoverLetterDeps) {
     return () => clearInterval(interval);
   }, [status]);
 
+  // === Session persistence (reload-safe letter) ===
+  useEffect(() => {
+    if (status === 'success' && letter) {
+      writeSession(LETTER_SESSION_KEY, letter);
+    } else {
+      clearSession(LETTER_SESSION_KEY);
+    }
+  }, [status, letter]);
+
   const reset = () => {
     setStatus('idle');
     setLetter(null);
     setErrorMessage('');
     setCopied(false);
+    clearSession(LETTER_SESSION_KEY);
   };
 
   const handleGenerate = async () => {

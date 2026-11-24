@@ -4,6 +4,93 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-24 — Sesión "Preview y descarga sin salir de la app"
+
+**Tipo:** fix.
+
+### Fix — Preview/Descargar recargaban la app y la mandaban a la landing
+
+**El síntoma.** El usuario toca **Preview** o **Descargar PDF** y la página se
+recarga: vuelve a la **landing**, con el formulario vacío y el resultado
+perdido. En vez de quedarse en la app para seguir modificando.
+
+**La causa, en dos capas.**
+
+1. **La acción navegaba.** Los dos botones eran `<a href="…?inline=1"
+   target="_blank">`. En un navegador embebido (el panel lateral de la app,
+   Electron, kioscos) `_blank` se resuelve **en la misma pestaña**: la SPA
+   era reemplazada por el visor de PDF. Al volver, la SPA reiniciaba.
+
+2. **El estado era efímero.** `App.tsx` guardaba la vista activa (landing vs.
+   herramienta) solo en estado de React, así que **cualquier** recarga de la
+   SPA volvía a la landing y tiraba el formulario, la vacante y el resultado.
+   Por eso el usuario perdía el trabajo incluso con un navegador que sí
+   abría una pestaña aparte.
+
+**Reproducido, no supuesto:** con el PDF de muestra subido, el clic en
+**Preview** dejaba la URL del panel en
+`http://localhost:8000/api/download/tailored_resume_….pdf?inline=1` — la
+pestaña había cambiado de la app al PDF.
+
+### El arreglo
+
+**1. La previsualización vive dentro de la app** (`PdfPreviewModal`, nuevo).
+El PDF se pide como `Blob`, se muestra en un `<iframe>` con una `blob:` URL
+dentro de un modal sobre el formulario, y el usuario nunca sale. La URL de
+blob es del mismo origen, así que el visor de PDF del navegador la renderiza
+siempre, sin depender del CORS del backend. Botones: *Descargar*, *Abrir en
+otra pestaña* (escape hatch explícito) y *Cerrar* (también con `Esc`).
+
+**2. La descarga no navega** (`frontend/src/lib/pdf.ts`). `fetch` → `Blob` →
+`<a download>` en memoria: el archivo se guarda y la página no se mueve. Si
+el `fetch` falla (CORS mal configurado), cae a "abrir en otra pestaña" en
+lugar de dejar un botón muerto.
+
+**3. La sesión sobrevive a la recarga.** `frontend/src/lib/session.ts` agrega
+helpers de `sessionStorage`, y el estado se persiste en tres hooks:
+
+| Clave | Qué guarda |
+|---|---|
+| `jd-to-resume.view` | La vista activa (landing / herramienta) |
+| `jd-to-resume.profile` | El formulario: vacante, cargo, perfil, tema, acento, opciones de la carta… |
+| `jd-to-resume.result` | El PDF generado, su YAML y su idioma |
+| `jd-to-resume.cover-letter` | La carta generada |
+
+`sessionStorage` y no `localStorage` a propósito: es trabajo en curso, no una
+preferencia duradera — una pestaña nueva arranca limpia. Los **contactos**
+(GitHub, LinkedIn, portafolio) siguen en `localStorage`: esos sí son
+preferencia duradera.
+
+El **archivo PDF subido no se persiste** (un `File` no se serializa), así que
+después de recargar hay que volver a subirlo. Todo lo demás —formulario,
+YAML, resultado, diseño— sigue ahí, y el flujo *editar YAML → re-renderizar
+→ cambiar diseño* se puede seguir usando sin volver a generar.
+
+**4. La restauración es perezosa, no un efecto.** El snapshot se lee una
+sola vez al montar y cada campo arranca con ese valor (`useState(() => …)`).
+Restaurar dentro de un `useEffect` provocaba un render en cascada —React lo
+marca como `react-hooks/set-state-in-effect`— y además hacía parpadear el
+formulario vacío un frame antes de llenarse.
+
+### Verificación
+
+- `tsc --noEmit` sin errores; ESLint vuelve **exactamente al baseline**
+  (7 errores + 1 warning, todos preexistentes): **0 errores nuevos**.
+- **432 tests del backend en verde** (el backend no cambió).
+- En el navegador embebido, con generación real:
+  - **Preview** → modal con el PDF renderizado, la URL sigue en
+    `localhost:5173` (sin navegación).
+  - **Descargar PDF** → petición `resourceType: "fetch"` (no `document`),
+    sin navegación, sin errores de consola.
+  - **Recargar** → vuelve a la herramienta con el formulario, la vacante, el
+    YAML y el resultado restaurados (no a la landing).
+  - **Carta de presentación**: mismo comportamiento (preview en modal y
+    descarga por blob).
+- El doble fetch de StrictMode se aborta con `AbortController`: una sola
+  descarga real, la otra queda como `net::ERR_ABORTED` y sin warning.
+
+---
+
 ## 2026-11-24 — Sesión "Los bullets traducidos no empiezan con 'I'"
 
 **Tipo:** fix.

@@ -4,6 +4,7 @@ import type { Profile } from './useProfile';
 import type { Audit } from './useAudit';
 import type { YamlEditorOps } from './useYamlEditor';
 import { apiUrl } from '../lib/api';
+import { readSession, writeSession, clearSession } from '../lib/session';
 import type { AuditData } from '../types/audit';
 
 /**
@@ -13,6 +14,25 @@ import type { AuditData } from '../types/audit';
  * the abort/timeout logic, the progress + step-message surface and the
  * translation / audit bookkeeping that arrives on the same SSE event.
  */
+
+/**
+ * The generated result is persisted in sessionStorage under this key so a
+ * reload of the SPA does not throw it away. The PDF and the YAML that
+ * produced it stay reachable: the user can keep editing the YAML, change
+ * the design, re-audit or download the file without generating again.
+ */
+const RESULT_SESSION_KEY = 'result';
+
+type ResultSnapshot = {
+  filename: string;
+  yaml: string | null;
+  outputLanguage: OutputLanguage;
+  translationMeta: {
+    source_language?: string;
+    target_language?: string;
+    forced?: boolean;
+  } | null;
+};
 
 export type GenerationStatus = 'idle' | 'generating' | 'success' | 'error';
 export type OutputLanguage = 'en' | 'es' | 'unknown';
@@ -74,23 +94,45 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     photo,
   } = profile;
 
-  const [status, setStatus] = useState<GenerationStatus>('idle');
+  /**
+   * The last generated result is restored from sessionStorage on mount.
+   *
+   * The snapshot is read ONCE and used as the initial value of every field
+   * (instead of restoring it in an effect): the first render already shows
+   * the generated PDF, its YAML and its language, so a reload is harmless —
+   * the user comes back to the tool with the result still listed instead of
+   * the landing page with an empty form.
+   */
+  const [savedResult] = useState<ResultSnapshot | null>(() =>
+    readSession<ResultSnapshot>(RESULT_SESSION_KEY),
+  );
+  const restoredFilename = savedResult?.filename ?? '';
+
+  const [status, setStatus] = useState<GenerationStatus>(() =>
+    restoredFilename ? 'success' : 'idle',
+  );
   const [progress, setProgress] = useState(0);
   const [stepMessage, setStepMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [downloadUrl, setDownloadUrl] = useState('');
-  const [generatedPdfFilename, setGeneratedPdfFilename] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState(() =>
+    restoredFilename ? apiUrl(`/api/download/${restoredFilename}`) : '',
+  );
+  const [generatedPdfFilename, setGeneratedPdfFilename] = useState<string | null>(
+    () => restoredFilename || null,
+  );
 
   // Translation state — populated by the SSE handler after each generation/translate pass.
   // `forceTranslateToEnglish` is set on click and reset in handleGenerate's finally block.
   const [forceTranslateToEnglish, setForceTranslateToEnglish] = useState<boolean>(false);
-  const [lastOutputLanguage, setLastOutputLanguage] = useState<OutputLanguage>('unknown');
+  const [lastOutputLanguage, setLastOutputLanguage] = useState<OutputLanguage>(
+    () => savedResult?.outputLanguage ?? 'unknown',
+  );
   const [auditScores, setAuditScores] = useState<AuditData | null>(null);
   const [translationMeta, setTranslationMeta] = useState<{
     source_language?: string;
     target_language?: string;
     forced?: boolean;
-  } | null>(null);
+  } | null>(() => savedResult?.translationMeta ?? null);
 
   // Snapshot of the YAML that produced the currently-displayed PDF. Set on a
   // successful `handleRenderFromYaml` and on the direct (non-edit) SSE pass.
@@ -98,10 +140,35 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
   // the editor after the CV is generated and iterate (edit → re-render →
   // open again → re-edit). Independent of `yamlContent`, which represents the
   // live textarea state and gets cleared on success.
-  const [lastGeneratedYaml, setLastGeneratedYaml] = useState<string | null>(null);
+  const [lastGeneratedYaml, setLastGeneratedYaml] = useState<string | null>(() =>
+    typeof savedResult?.yaml === 'string' ? savedResult.yaml : null,
+  );
 
   // Live timer for loading states (seconds counter up to 60s)
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // === Session persistence (reload-safe result) ===
+  //
+  // The restore happens at mount (lazy initial state, see `savedResult`);
+  // this effect keeps the snapshot in sync with the current result.
+  useEffect(() => {
+    if (status !== 'success' || !generatedPdfFilename) {
+      clearSession(RESULT_SESSION_KEY);
+      return;
+    }
+    writeSession(RESULT_SESSION_KEY, {
+      filename: generatedPdfFilename,
+      yaml: lastGeneratedYaml,
+      outputLanguage: lastOutputLanguage,
+      translationMeta,
+    } satisfies ResultSnapshot);
+  }, [
+    status,
+    generatedPdfFilename,
+    lastGeneratedYaml,
+    lastOutputLanguage,
+    translationMeta,
+  ]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -129,6 +196,8 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     setLastOutputLanguage('unknown');
     setAuditScores(null);
     setTranslationMeta(null);
+    // The persisted result is stale after a reset.
+    clearSession(RESULT_SESSION_KEY);
   };
 
   const handleGenerate = async (customInstructionsOverride?: string, baseResumeFilename?: string, forceTranslate?: boolean) => {
