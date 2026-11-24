@@ -31,6 +31,7 @@ type GenerationDeps = {
     | 'step2Mode'
     | 'customPrompt'
     | 'strictEditsOnly'
+    | 'translateOnly'
     | 'selectedTheme'
     | 'accentColor'
     | 'fitSinglePage'
@@ -63,6 +64,7 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     step2Mode,
     customPrompt,
     strictEditsOnly,
+    translateOnly,
     selectedTheme,
     accentColor,
     fitSinglePage,
@@ -154,7 +156,12 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     // Create form data
     const formData = new FormData();
     formData.append("file", file);
-    if (step2Mode === 'custom' && !customInstructionsOverride) {
+    if (translateOnly) {
+      // Faithful translation: the job description is not used at all, and
+      // neither are the custom instructions. The whole point is that
+      // nothing is tailored.
+      formData.append("jd", "");
+    } else if (step2Mode === 'custom' && !customInstructionsOverride) {
       formData.append("custom_instructions", jd);
       formData.append("jd", "");
     } else {
@@ -199,7 +206,14 @@ export function useGeneration({ profile, audit, yamlOpsRef }: GenerationDeps) {
     // Use the local `forceTranslate` parameter (or the state) to decide.
     // Cleared in the finally block so subsequent refinements do not accidentally re-translate.
     const shouldTranslate = forceTranslate !== undefined ? forceTranslate : forceTranslateToEnglish;
-    if (shouldTranslate) {
+    if (translateOnly) {
+      // Faithful translation of the ORIGINAL upload. The base stays the
+      // file the user uploaded — not the last generated PDF, which would
+      // translate an already-tailored CV and break the promise of
+      // "nothing else changes".
+      formData.append("translate_only", "true");
+      formData.delete("base_resume_filename");
+    } else if (shouldTranslate) {
       formData.append("force_language", "en");
       // Translate the LAST-GENERATED PDF (preserves iterative tailoring decisions).
       // If no PDF has been generated yet, backend falls back to the original upload.

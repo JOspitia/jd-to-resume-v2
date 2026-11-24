@@ -35,6 +35,7 @@ from application.services.llm_orchestrator import LLMOrchestrator
 from application.services.linkedin_service import extract_linkedin_profile_data
 from application.services.translation_service import build_language_override
 from domain_games import get_game
+from domain.translate_prompts import build_translation_prompt
 from language import detect_language
 from photo_helpers import prune_orphaned_photos as _prune_photos
 from ports.resume_parser import ResumeParser
@@ -103,6 +104,7 @@ class GenerationService:
         edit_before_generate: bool = False,
         photo_path: Optional[str] = None,
         accent: Optional[str] = "none",
+        translate_only: bool = False,
     ) -> AsyncIterator[str]:
         """Yield SSE-formatted strings. See module docstring for the flow."""
         async for event in self._pipeline(
@@ -124,6 +126,7 @@ class GenerationService:
             edit_before_generate=edit_before_generate,
             photo_path=photo_path,
             accent=accent,
+            translate_only=translate_only,
         ):
             yield event
 
@@ -150,6 +153,7 @@ class GenerationService:
         edit_before_generate: bool,
         photo_path: Optional[str],
         accent: Optional[str],
+        translate_only: bool = False,
     ) -> AsyncIterator[str]:
         """The full pipeline. Yields SSE-formatted strings.
 
@@ -205,6 +209,11 @@ class GenerationService:
                     )
                     print(f"[WARN]    Expected path: {candidate_path}")
 
+            # A faithful translation always targets English, whatever the
+            # caller sent in ``force_language``.
+            if translate_only:
+                force_language = "en"
+
             # Language detection short-circuit
             source_language = "unknown"
             if force_language == "en":
@@ -224,7 +233,10 @@ class GenerationService:
                     f"source_language='{source_language}', detection_path='{detection_path}'"
                 )
                 if source_language == "en":
-                    raise ValueError("E_CV_ALREADY_ENGLISH::CV already in English")
+                    raise ValueError(
+                        "E_CV_ALREADY_ENGLISH::Tu CV ya está en inglés, "
+                        "así que no hay nada que traducir."
+                    )
 
             yield f"data: {json.dumps({'step': 'Extracting Text from Resume', 'progress': 20})}\n\n"
             resume_text = _get_resume_parser().extract_text(effective_file_path)
@@ -266,16 +278,33 @@ class GenerationService:
                 )
 
             linkedin_extracted_text = ""
-            if extract_linkedin_info and linkedin_url and linkedin_url.strip():
+            if (
+                extract_linkedin_info
+                and linkedin_url
+                and linkedin_url.strip()
+                and not translate_only
+            ):
                 yield f"data: {json.dumps({'step': 'Extrayendo datos del perfil de LinkedIn...', 'progress': 35})}\n\n"
                 # Imported at top — see the module-level import block.
                 linkedin_extracted_text = await extract_linkedin_profile_data(
                     linkedin_url.strip()
                 )
 
-            yield f"data: {json.dumps({'step': 'Analyzing with AI Model', 'progress': 50})}\n\n"
+            yield f"data: {json.dumps({'step': 'Translating with AI Model' if translate_only else 'Analyzing with AI Model', 'progress': 50})}\n\n"
 
-            if strict_edits_only:
+            if translate_only:
+                # Faithful translation: the job description, the tailoring
+                # rules and the LinkedIn enrichment are all out of scope.
+                # The prompt has its own output contract and its own
+                # "change nothing else" rules.
+                game = get_game(domain_game)
+                prompt = build_translation_prompt(
+                    resume_text,
+                    contact_header=extracted_header,
+                    section_labels=game.section_labels_en,
+                    source_language=source_language,
+                )
+            elif strict_edits_only:
                 user_requested_changes = (
                     custom_instructions.strip()
                     if (custom_instructions and custom_instructions.strip())
@@ -317,15 +346,16 @@ STRICT SURGICAL EDIT RULES (ABSOLUTE HIGHEST PRIORITY — OVERRIDES ALL OTHER DE
 
 {game.strict_rules_block}
 """
-            if custom_instructions and custom_instructions.strip() and not strict_edits_only:
-                prompt += (
-                    "12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): "
-                    "You MUST explicitly apply the following user-selected improvements, "
-                    "tone humanization tips, and custom instructions above all other "
-                    f"defaults: {custom_instructions.strip()}\n"
-                )
+            if not translate_only:
+                if custom_instructions and custom_instructions.strip() and not strict_edits_only:
+                    prompt += (
+                        "12. USER REFINEMENT FEEDBACK & SELECTED TIPS (HIGHEST PRIORITY): "
+                        "You MUST explicitly apply the following user-selected improvements, "
+                        "tone humanization tips, and custom instructions above all other "
+                        f"defaults: {custom_instructions.strip()}\n"
+                    )
 
-            prompt += f"""
+                prompt += f"""
 {language_override_block}
 Target Role: {target_role if target_role else 'Not specified'}
 GitHub: {effective_github}
@@ -415,25 +445,26 @@ Base Resume:
                     '* Project 4 (Metric/Performance Opening): "Reduced response times by 45% through Redis caching mechanisms..."',
                 )
                 print("[TRANSLATE] ✂️ Stripped contradictory language rules from prompt (rule 8 + Spanish verb examples).")
-            if linkedin_extracted_text:
-                prompt += f"""
+            if not translate_only:
+                if linkedin_extracted_text:
+                    prompt += f"""
 Extracted LinkedIn Profile Data (Use to enrich and complement the Base Resume):
 {linkedin_extracted_text}
 """
 
-            effective_jd = (
-                jd.strip()
-                if (jd and jd.strip())
-                else "No Job Description provided. Perform a comprehensive ATS resume enhancement focused on impact, Google XYZ achievement formula (Action + Context + Measurable Result), strong action verbs, clean structure, and domain-relevant technical skills."
-            )
+                effective_jd = (
+                    jd.strip()
+                    if (jd and jd.strip())
+                    else "No Job Description provided. Perform a comprehensive ATS resume enhancement focused on impact, Google XYZ achievement formula (Action + Context + Measurable Result), strong action verbs, clean structure, and domain-relevant technical skills."
+                )
 
-            prompt += f"""
+                prompt += f"""
 Job Description / Target Requirements:
 {effective_jd}
 """
 
-            generation_config = {"response_mime_type": "application/json"}
-            prompt += """
+                generation_config = {"response_mime_type": "application/json"}
+                prompt += """
 Respond ONLY with a JSON object in this exact structure. The 'section_labels' field MUST contain the localized section headings in the SAME language as the Job Description:
 {
   "name": "Jane Doe",
@@ -466,7 +497,7 @@ IMPORTANT:
 2. If the JD is in Spanish, the section_labels values must be in Spanish (e.g. 'Resumen Profesional', 'Educación', 'Habilidades', 'Experiencia Laboral', 'Proyectos', 'Logros', 'Portafolio'). If the JD is in English, they must be in English ('Professional Summary', 'Education', 'Skills', 'Work Experience', 'Projects', 'Achievements', 'Portfolio').
 """
 
-            yield f"data: {json.dumps({'step': 'Generating Tailored Resume Content', 'progress': 75})}\n\n"
+            yield f"data: {json.dumps({'step': 'Translating Resume Content' if translate_only else 'Generating Tailored Resume Content', 'progress': 75})}\n\n"
             try:
                 content = await asyncio.wait_for(self._call_llm(prompt), timeout=60.0)
             except asyncio.TimeoutError:
@@ -615,16 +646,28 @@ IMPORTANT:
             audit_scores = None
             translation_meta = None
             if force_language == "en":
-                yield f"data: {json.dumps({'step': 'Auditing translated CV', 'progress': 95})}\n\n"
-                try:
-                    audit_scores = await self.run_internal_audit(
-                        output_path, jd=jd,
-                        custom_instructions=custom_instructions,
-                        domain_game=domain_game,
-                    )
-                except Exception as audit_err:
-                    print(f"[WARN] Auto re-audit failed: {audit_err}")
-                translation_meta = {"source_language": source_language, "target_language": "en", "forced": True}
+                if translate_only:
+                    # A faithful translation is not tailored to anything, so
+                    # there is no job description to audit it against. The
+                    # ATS audit stays available from the frontend
+                    # ("Auto-validar ATS"), which the user can still tick.
+                    translation_meta = {
+                        "source_language": source_language,
+                        "target_language": "en",
+                        "forced": False,
+                        "translation_only": True,
+                    }
+                else:
+                    yield f"data: {json.dumps({'step': 'Auditing translated CV', 'progress': 95})}\n\n"
+                    try:
+                        audit_scores = await self.run_internal_audit(
+                            output_path, jd=jd,
+                            custom_instructions=custom_instructions,
+                            domain_game=domain_game,
+                        )
+                    except Exception as audit_err:
+                        print(f"[WARN] Auto re-audit failed: {audit_err}")
+                    translation_meta = {"source_language": source_language, "target_language": "en", "forced": True}
 
             yaml_payload = _yaml_safe_dump_unicode(parsed_data)
             download_url = f"/api/download/{output_filename}"

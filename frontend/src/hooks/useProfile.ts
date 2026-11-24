@@ -55,6 +55,13 @@ export function useProfile() {
   const [step2Mode, setStep2Mode] = useState<'jd' | 'custom'>('jd');
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [strictEditsOnly, setStrictEditsOnly] = useState<boolean>(false);
+  /**
+   * Faithful translation mode: translate the uploaded CV to English without
+   * tailoring it to any job description. It changes what the pipeline does
+   * (a different prompt, no JD, no LinkedIn enrichment), so it is a mode
+   * and not a micro-option.
+   */
+  const [translateOnly, setTranslateOnly] = useState<boolean>(false);
   const [selectedTheme, setSelectedTheme] = useState<string>('sb2nov');
   // === Accent colour for the rendered CV ===
   // An id from the backend catalogue (`/api/design-options`): "none" keeps
@@ -262,6 +269,8 @@ export function useProfile() {
     setCustomPrompt,
     strictEditsOnly,
     setStrictEditsOnly,
+    translateOnly,
+    setTranslateOnly,
     selectedTheme,
     setSelectedTheme,
     accentColor,

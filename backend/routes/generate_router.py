@@ -68,6 +68,7 @@ def build_generate_router(
         domain_game: Optional[str] = Form(None),
         edit_before_generate: Optional[bool] = Form(False),
         accent: Optional[str] = Form("none"),
+        translate_only: Optional[bool] = Form(False),
         photo: Optional[UploadFile] = File(None),
     ):
         from fastapi import HTTPException
@@ -113,6 +114,7 @@ def build_generate_router(
                 edit_before_generate=edit_before_generate or False,
                 photo_path=photo_path,
                 accent=accent or "none",
+                translate_only=translate_only or False,
             ),
             media_type="text/event-stream",
         )

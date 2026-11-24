@@ -6,3 +6,14 @@
 #
 pytest
 pytest-asyncio
+
+# Local development only. Uvicorn's `--reload-exclude` is a no-op without
+# watchfiles, and without the excludes the reloader watches `output/` and
+# `rendercv_output/` — so writing a PDF restarts the server mid-render and
+# kills the Playwright driver ("Connection closed while reading from the
+# driver"). With watchfiles installed, start the backend like this:
+#
+#   uvicorn main:app --reload \
+#     --reload-exclude output --reload-exclude rendercv_output \
+#     --reload-exclude venv --reload-exclude __pycache__
+watchfiles
