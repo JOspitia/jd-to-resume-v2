@@ -10,6 +10,8 @@ LLM how to write a CV for one professional domain. Currently supported games:
     * "tech"          — Software engineers, developers, data/ML engineers.
     * "hr_recruiting" — Analysts and managers in talent acquisition / selection.
     * "psychology"    — Psychologists (organizational, clinical, educational).
+    * "general"       — Customer service, commercial, retail and operations
+                        roles (sales, cash handling, merchandising, restocking).
 
 The tech game is the original prompt body of `main.py` v2.5, preserved verbatim
 and split into a renderable structure. HR and Psychology follow the same
@@ -31,6 +33,7 @@ from ._base import DomainGame
 from .tech import TechGame
 from .hr_recruiting import HrRecruitingGame
 from .psychology import PsychologyGame
+from .general import GeneralGame
 
 
 DEFAULT_GAME = "tech"
@@ -41,6 +44,7 @@ GAMES: dict[str, DomainGame] = {
     TechGame.name: TechGame(),
     HrRecruitingGame.name: HrRecruitingGame(),
     PsychologyGame.name: PsychologyGame(),
+    GeneralGame.name: GeneralGame(),
 }
 
 

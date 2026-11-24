@@ -16,9 +16,11 @@ import type { ChangeEvent } from 'react';
 //   'tech'          -> software engineers, full-stack, data/ML, DevOps, QA.
 //   'hr_recruiting' -> talent acquisition analysts / recruiters / HRBPs.
 //   'psychology'    -> psychologists (organizational / clinical / educational).
+//   'general'       -> customer service, commercial, retail and operations
+//                      roles (sales, cash handling, merchandising, restocking).
 // Default is 'tech' to preserve the v2.5 UX byte-for-byte when the user does
 // not pick anything.
-export type DomainGame = 'tech' | 'hr_recruiting' | 'psychology';
+export type DomainGame = 'tech' | 'hr_recruiting' | 'psychology' | 'general';
 
 /** Contact URLs are persisted under this key between visits (unchanged key). */
 const CONTACT_STORAGE_KEY = 'jd-to-resume.contact';

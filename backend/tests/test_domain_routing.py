@@ -7,8 +7,8 @@ Smoke + regression tests for the multi-domain resume tailoring feature.
 These tests intentionally avoid calling the LLM or rendering PDFs. They focus
 on the bits that are deterministic and fast to assert:
 
-  * The game registry exposes exactly 3 games today (tech, hr_recruiting,
-    psychology).
+  * The game registry exposes exactly 4 games today (tech, hr_recruiting,
+    psychology, general).
   * The tech game is the legacy v2.5 prompt body verbatim — provable by
     anchor-marker assertions.
   * Each non-tech game carries its own domain vocabulary in the rendered
@@ -43,10 +43,10 @@ def test_default_game_is_tech():
     assert DEFAULT_GAME == "tech"
 
 
-def test_registry_contains_exactly_three_games():
-    """Today: tech, hr_recruiting, psychology. Adding a 4th requires an
-    explicit test update so the contract stays visible."""
-    assert set(GAMES.keys()) == {"tech", "hr_recruiting", "psychology"}
+def test_registry_contains_exactly_four_games():
+    """Today: tech, hr_recruiting, psychology, general. Adding a 5th requires
+    an explicit test update so the contract stays visible."""
+    assert set(GAMES.keys()) == {"tech", "hr_recruiting", "psychology", "general"}
 
 
 def test_get_game_returns_instances_not_classes():
@@ -65,7 +65,7 @@ def test_get_game_returns_instances_not_classes():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology"])
+@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology", "general"])
 def test_each_game_has_full_contract(game_name):
     g = GAMES[game_name]
     # Mandatory string fields are non-empty.
@@ -150,6 +150,22 @@ def test_tech_prompt_preserves_legacy_anchors():
             # Tech-exclusive terms that must NOT appear
             ("FastAPI", "Kubernetes", "PostgreSQL"),
         ),
+        (
+            "general",
+            # Service / commercial anchors
+            (
+                "Atención al cliente",
+                "Manejo de caja",
+                "arqueo de caja",
+                "Cumplimiento de metas",
+                "merchandising",
+                "reposición",
+                "Fidelización",
+                "Disponibilidad & Mobilidad",
+            ),
+            # Terms that must NOT appear in a service CV
+            ("FastAPI", "Kubernetes", "PostgreSQL", "16PF", "BDI-II"),
+        ),
     ],
 )
 def test_non_tech_prompts_have_domain_specific_vocabulary(
@@ -175,7 +191,7 @@ def test_non_tech_prompts_have_domain_specific_vocabulary(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology"])
+@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology", "general"])
 def test_skill_taxonomies_are_distinct_per_game(game_name):
     """Skills taxonomies must NOT be identical across games — that would
     indicate the labels leaked between games."""
@@ -213,6 +229,37 @@ def test_hr_skill_taxonomy_has_ats_crm():
 def test_psych_skill_taxonomy_has_psychometrics():
     g = get_game("psychology")
     assert any("Psicotécnicas" in c or "Psicométr" in c for c in g.skill_taxonomy_es)
+
+
+def test_general_skill_taxonomy_has_service_categories():
+    """The general profile classifies the duties a service CV is judged on as
+    SKILL CATEGORIES: customer service & sales, cash/billing/inventory,
+    merchandising & restocking, target achievement, teamwork, tools, and the
+    practical availability/mobility facts."""
+    g = get_game("general")
+    taxonomy = " ".join(g.skill_taxonomy_es)
+    for marker in (
+        "Atención al Cliente & Ventas",
+        "Caja, Facturación & Inventarios",
+        "Exhibición & Reposición",
+        "Cumplimiento de Metas & Resultados",
+        "Disponibilidad & Mobilidad",
+    ):
+        assert marker in g.skill_taxonomy_es, (
+            f"general taxonomy missing {marker!r}: {g.skill_taxonomy_es}"
+        )
+    assert taxonomy  # non-empty
+
+
+def test_general_prompt_forbids_inventing_cash_and_licence_data():
+    """The service profile is the one most likely to tempt the model into
+    adding a cash register, a POS or a driving licence the candidate never
+    had. The prompt must forbid it explicitly."""
+    g = get_game("general")
+    body = g.strict_rules_block
+    assert "Manejo de caja" in body
+    assert "MUST NOT appear anywhere in the output" in body
+    assert "NEVER invent availability, a licence, a motorcycle" in body
 
 
 # ---------------------------------------------------------------------------
@@ -279,13 +326,13 @@ def test_unknown_or_empty_game_falls_back_to_tech(name):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology"])
+@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology", "general"])
 def test_render_system_intro_equals_cached_attribute(game_name):
     g = get_game(game_name)
     assert g.render_system_intro() == g.system_intro
 
 
-@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology"])
+@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology", "general"])
 def test_render_domain_prompt_block_is_non_trivial(game_name):
     g = get_game(game_name)
     block = g.render_domain_prompt_block()
@@ -302,7 +349,7 @@ def test_render_domain_prompt_block_is_non_trivial(game_name):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology"])
+@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology", "general"])
 def test_end_to_end_compose_contains_all_20_rules(game_name):
     """Simulating what generation_pipeline() does — build the prompt body
     from {language_override_block} + {game.system_intro} + {game.strict_rules_block}.
@@ -345,7 +392,7 @@ def test_end_to_end_compose_tech_matches_legacy_shape():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology"])
+@pytest.mark.parametrize("game_name", ["tech", "hr_recruiting", "psychology", "general"])
 def test_prompt_forbids_a_references_section(game_name):
     """Every game must tell the model not to emit a references section.
 

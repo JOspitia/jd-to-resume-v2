@@ -30,7 +30,7 @@ def build_audit_router(service: AuditService) -> APIRouter:
 
     router = APIRouter(prefix="/api", tags=["audit"])
 
-    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology", "general"}
 
     @router.post("/analyze-ats")
     async def analyze_ats(

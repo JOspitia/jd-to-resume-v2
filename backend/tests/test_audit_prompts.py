@@ -133,6 +133,32 @@ def test_psych_audit_prompt_embeds_psych_label_and_taxonomy():
 
 
 # ---------------------------------------------------------------------------
+# General (service / commercial)
+# ---------------------------------------------------------------------------
+
+
+def test_general_audit_prompt_uses_service_seed_keywords():
+    prompt = _build("general")
+    general_anchors = ["Atención al cliente", "Cierre de ventas", "Manejo de caja",
+                       "Merchandising", "Punto de venta (POS)",
+                       "Fidelización de clientes"]
+    for marker in general_anchors:
+        assert marker in prompt, (
+            f"general audit prompt missing required marker {marker!r}"
+        )
+
+
+def test_general_audit_prompt_embeds_general_label_and_taxonomy():
+    prompt = _build("general")
+    g = GAMES["general"]
+    assert g.label_es in prompt
+    for category in g.skill_taxonomy_es[:3]:
+        assert category in prompt, (
+            f"general audit prompt missing ES taxonomy category {category!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Cross-cutting: each prompt mentions the game's vocabulary
 # ---------------------------------------------------------------------------
 
@@ -143,6 +169,7 @@ def test_psych_audit_prompt_embeds_psych_label_and_taxonomy():
         ("tech", "Lenguajes & Frameworks"),
         ("hr_recruiting", "ATS & CRM"),
         ("psychology", "Psicotécnicas"),
+        ("general", "Atención al Cliente & Ventas"),
     ],
 )
 def test_each_audit_prompt_embeds_a_taxonomy_category(game_name, must_have_together):

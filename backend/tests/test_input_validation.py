@@ -65,8 +65,8 @@ class TestDomainGamesRegistry:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from domain_games import get_game
 
-        # The README advertises exactly these three.
-        for name in ("tech", "hr_recruiting", "psychology"):
+        # The README advertises exactly these four.
+        for name in ("tech", "hr_recruiting", "psychology", "general"):
             game = get_game(name)
             assert game is not None
             # Every game must expose the methods the LLM prompt builder needs.

@@ -4,6 +4,103 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-24 — Sesión "Perfil general (servicio, ventas y operaciones)"
+
+**Tipo:** feature.
+
+### Feature — Cuarto perfil de dominio: `general`
+
+Faltaba un perfil para quien **no viene de tecnología, selección ni
+psicología** y se postula a un cargo de atención al cliente, comercial o de
+operaciones (venta en tienda, mostrador, caja, reposición, exhibición,
+impulso, almacén, auxiliar de servicio). Con los tres juegos existentes,
+el prompt le habría endosado al candidato categorías que lo descalifican:
+un CV de ventas con "Lenguajes & Frameworks" o "Pruebas Psicotécnicas"
+lee como un perfil equivocado, tanto para el reclutador como para el
+matcher de keywords del ATS.
+
+- **`backend/domain_games/general.py`** (nuevo) — el juego, con el mismo
+  esqueleto de reglas que los otros tres (1–21) más tres reglas propias:
+  - **Regla 4** — resumen de 3 a 4 líneas en lenguaje llano de servicio,
+    sin jerga de psicología ni de software, y con una lista explícita de
+    frases vacías prohibidas ("persona dinámica y proactiva", "gran
+    compromiso", "excelente comunicador") salvo que los datos del
+    candidato las respalden.
+  - **Regla 5** — verbs de acción del dominio (Atendí, Asesoré, Cerré,
+    Arqué, Repuse, Reposé, Fidelicé…) y métricas de servicio en vez de
+    técnicas: personas atendidas, % de meta cumplida, candidatos
+    gestionados, tiempos reducidos, ventas cerradas, accuracy de
+    inventario. Las cifras que el CV base ya tiene ("más de 200
+    candidatos", "más de 10 comunidades") deben sobrevivir a la reescritura
+    con su número pegado al dato.
+  - **Regla 7** — el vocabulario que repiten las ofertas: atención al
+    cliente, servicio al cliente, asesoría comercial, ventas, cumplimiento
+    de metas, manejo de caja, facturación, arqueo de caja, inventarios,
+    exhibición de productos (merchandising), reposición, cierre de ventas,
+    fidelización de clientes, trabajo en equipo y manejo de
+    inconvenientes — **solo si son ciertas** en la experiencia.
+  - **Regla 10** — taxonomía propia: *Atención al Cliente & Ventas · Caja,
+    Facturación & Inventarios · Exhibición & Reposición · Cumplimiento de
+    Metas & Resultados · Trabajo en Equipo & Servicio · Herramientas &
+    Sistemas · Disponibilidad & Mobilidad*.
+  - **Regla 22 (nueva)** — traducción comercial de experiencias no
+    comerciales. El candidato no necesita haber vendido: lo que hizo se
+    reformula con el vocabulario del cargo sin perder un dato. Las cuatro
+    traducciones por defecto son *entrevistar/evaluar candidatos →
+    identificar necesidades y perfilar personas*, *atender usuarios →
+    manejo de clientes, empatía y resolución de quejas*, *seguimiento de
+    indicadores → control de metas y resultados* y *coordinación
+    operativa → organización, orden y cumplimiento de tiempos*.
+  - **Regla 23 (nueva)** — información práctica: disponibilidad de
+    horario y turnos (incluidos fines de semana), ciudad de residencia o
+    disposición a desplazarse, y moto o licencia de conducción, **solo si el
+    CV base las respalda**, en la categoría *Disponibilidad & Mobilidad*
+    y/o en el campo `location`.
+  - **Regla 24 (nueva)** — checklist final de los seis puntos que pide el
+    perfil: resumen corto, keywords, cifras, traducción comercial, skills
+    e información práctica.
+  - Regla 1 endurecida para este dominio: la tentación de inventar es
+    concreta (cifras de venta, manejo de caja, inventario, POS, turnos,
+    licencia de moto) y queda prohibida de forma explícita.
+- **`backend/domain_games/__init__.py`** — registro de `GeneralGame` en
+  el diccionario `GAMES`.
+- **`backend/routes/generate_router.py`,
+  `backend/routes/audit_router.py`,
+  `backend/routes/yaml_editor_router.py`** — `ALLOWED_GAMES` ahora
+  incluye `"general"`. Sin esto, `/api/generate` devolvía HTTP 422.
+- **`backend/domain/audit_prompts.py`** — semillas de auditoría propias
+  del dominio ("Atención al cliente", "Cierre de ventas", "Manejo de
+  caja" / "Merchandising", "Punto de venta (POS)", "Fidelización de
+  clientes"), para que la auditoría no sugiera herramientas de otro perfil.
+- **`frontend/src/hooks/useProfile.ts`** — el tipo `DomainGame` suma
+  `'general'`.
+- **`frontend/src/components/ProfileSelector.tsx`** — cuarto tile en el
+  selector de perfiles (icono `Store`), y la grilla pasa de
+  `sm:grid-cols-3` a `sm:grid-cols-2 xl:grid-cols-4` para que los cuatro
+  quepan sin apretar.
+- **`backend/tests/test_domain_routing.py`** — el contrato pasó de tres a
+  cuatro juegos (el propio test lo pedía explícitamente), se añadió el
+  caso de vocabulario propio en el parametrize de juegos no-tech, y dos
+  tests nuevos: la taxonomía de servicio y la prohibición de inventar
+  caja/licencia.
+- **`backend/tests/test_audit_prompts.py`** — dos tests para las
+  semillas y la taxonomía del perfil general.
+- **`backend/tests/test_input_validation.py`** — el chequeo del registro
+  ahora recorre los cuatro juegos.
+- **`README.md`** — fila del perfil en la tabla de dominios, el contrato
+  de API actualizado y una sección que explica las tres reglas propias.
+
+### Verificación
+
+- **333 tests en verde** (26,09 s), antes 321: los 12 nuevos cubren el
+  registro, el contrato estructural de cada juego, el vocabulario
+  propio, la taxonomía, las semillas de auditoría y el cartel de
+  referencia.
+- `render_domain_prompt_block()` del perfil general: 23.223 caracteres
+  (dentro del rango que exige el test: 5.000–25.000).
+- `get_game('general')` resuelve la instancia registrada y compone el
+  prompt con los 24 numerados + el bloque de patrones A/B/C/D.
+
 ## 2026-11-09 — Sesión "Docker de punta a punta"
 
 **Tipo:** feature (infraestructura).

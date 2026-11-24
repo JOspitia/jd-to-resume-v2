@@ -33,6 +33,10 @@ _AUDIT_SEEDS: dict[str, tuple[list[str], list[str]]] = {
         ["16PF", "Entrevista por Competencias", "consentimiento informado"],
         ["BDI-II", "psicoeducación", "TCC"],
     ),
+    "general": (
+        ["Atención al cliente", "Cierre de ventas", "Manejo de caja"],
+        ["Merchandising", "Punto de venta (POS)", "Fidelización de clientes"],
+    ),
 }
 
 
