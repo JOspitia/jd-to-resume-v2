@@ -181,6 +181,16 @@ from routes.generate_router import build_generate_router
 _generation_service = GenerationService(_storage, _llm_orchestrator, _audit_service)
 app.include_router(build_generate_router(_generation_service, _storage))
 
+# /api/cover-letter: generates a cover letter from the same resume + JD the
+# CV pipeline uses, reusing the same LLM orchestrator and the same
+# PyMuPDF parser. It is a separate endpoint (not a flag on /api/generate)
+# because the prompt, the response contract and the rate-limit budget are
+# all different — a letter is a narrative, a CV is a structured document.
+from application.services.cover_letter_service import CoverLetterService
+from routes.cover_letter_router import build_cover_letter_router
+_cover_letter_service = CoverLetterService(_llm_orchestrator, PyMuPDFParser())
+app.include_router(build_cover_letter_router(_cover_letter_service))
+
 
 @app.get("/")
 def read_root():

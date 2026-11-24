@@ -21,9 +21,27 @@ export type ActionBarProps = {
   elapsedSeconds: number;
   hasFile: boolean;
   onGenerate: (customInstructionsOverride?: string, baseResumeFilename?: string, forceTranslate?: boolean) => void;
+  /**
+   * CTA copy. The bar serves two deliverables (the CV and the cover
+   * letter), so the label follows the active one. Defaults keep the
+   * original v2.5 wording for the CV flow.
+   */
+  ctaLabel?: string;
+  ctaBusyLabel?: string;
+  ctaEmptyLabel?: string;
+  ctaAriaLabel?: string;
 };
 
-export function ActionBar({ status, elapsedSeconds, hasFile, onGenerate }: ActionBarProps) {
+export function ActionBar({
+  status,
+  elapsedSeconds,
+  hasFile,
+  onGenerate,
+  ctaLabel = 'Generar CV',
+  ctaBusyLabel = 'Generando CV',
+  ctaEmptyLabel = 'Subí un CV para empezar',
+  ctaAriaLabel = 'Generar CV adaptado',
+}: ActionBarProps) {
   const generating = status === 'generating';
   const disabled = generating || !hasFile;
 
@@ -35,7 +53,7 @@ export function ActionBar({ status, elapsedSeconds, hasFile, onGenerate }: Actio
           disabled={disabled}
           variant="primary"
           size="lg"
-          aria-label="Generar CV adaptado"
+          aria-label={ctaAriaLabel}
           className="w-full px-8 py-5 text-lg md:text-xl justify-center font-extrabold tracking-tight"
         >
           {generating ? (
@@ -49,10 +67,10 @@ export function ActionBar({ status, elapsedSeconds, hasFile, onGenerate }: Actio
             <Play className="w-6 h-6 fill-current" />
           )}
           {generating
-            ? `Generando CV… ${elapsedSeconds}s / 60s`
+            ? `${ctaBusyLabel}… ${elapsedSeconds}s / 60s`
             : hasFile
-              ? 'Generar CV'
-              : 'Subí un CV para empezar'}
+              ? ctaLabel
+              : ctaEmptyLabel}
         </Button>
       </div>
     </div>

@@ -25,6 +25,12 @@ export type GenerationProgressProps = {
   stepMessage: string;
   elapsedSeconds: number;
   errorMessage: string;
+  /**
+   * When true the bar animates without reporting a percentage. Used by
+   * single-shot operations that have no step stream (the cover letter),
+   * where showing a frozen percentage would be a lie.
+   */
+  indeterminate?: boolean;
 };
 
 export function GenerationProgress({
@@ -33,6 +39,7 @@ export function GenerationProgress({
   stepMessage,
   elapsedSeconds,
   errorMessage,
+  indeterminate = false,
 }: GenerationProgressProps) {
   return (
     <AnimatePresence mode="popLayout">
@@ -56,21 +63,34 @@ export function GenerationProgress({
                     <span>Tiempo transcurrido: {elapsedSeconds} s / 60s</span>
                   </div>
                 </div>
-                <span className="text-3xl font-black font-mono" aria-hidden="true">{progress} %</span>
+                <span className="text-3xl font-black font-mono" aria-hidden="true">
+                  {indeterminate ? '' : `${progress} %`}
+                </span>
               </div>
-              <div
-                className="w-full border-2 border-border h-10 bg-muted overflow-hidden relative"
-                role="progressbar"
-                aria-label="Progreso de generación del CV"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={progress}
-              >
+              {indeterminate ? (
                 <div
-                  className="bg-primary h-full transition-all duration-300 ease-out"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+                  className="w-full border-2 border-border h-10 bg-muted overflow-hidden relative"
+                  role="progressbar"
+                  aria-label="Generando la carta de presentación"
+                  aria-valuetext="En progreso"
+                >
+                  <div className="absolute inset-y-0 w-1/3 bg-primary animate-pulse" />
+                </div>
+              ) : (
+                <div
+                  className="w-full border-2 border-border h-10 bg-muted overflow-hidden relative"
+                  role="progressbar"
+                  aria-label="Progreso de generación del CV"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={progress}
+                >
+                  <div
+                    className="bg-primary h-full transition-all duration-300 ease-out"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              )}
             </div>
           )}
 

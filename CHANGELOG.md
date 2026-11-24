@@ -4,6 +4,113 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-24 — Sesión "Carta de presentación"
+
+**Tipo:** feature.
+
+### Feature — Segundo entregable: carta de presentación
+
+El tool solo producía un PDF. Ahora, con el **mismo CV y la misma
+vacante**, también produce una carta de presentación: un entregable
+aparte, no un flag sobre `/api/generate`, porque una carta es una
+narrativa y un CV es un documento estructurado — el prompt, el contrato
+de respuesta y el presupuesto de rate limit son distintos.
+
+**Backend**
+
+- `backend/domain/cover_letter_prompts.py` (nuevo) — el cuerpo del
+  prompt. Reglas propias de una carta, porque falla de otra forma que
+  un CV:
+  - tiene que **añadir algo que el CV no dice** (el reclutador ya
+    tiene el CV): escoge los dos o tres requisitos que más pesan en la
+    vacante y argumenta cada uno;
+  - **cero invención**, con la regla de que toda frase que nombre una
+    habilidad, una herramienta, una cifra, una empresa o una fecha debe
+    ser rastreable al CV base;
+  - **sin frases vacías** ("persona dinámica y proactiva", "gran
+    capacidad de adaptación", "excelente compromiso", "apasionado por el
+    servicio");
+  - cifras, no adjetivos;
+  - sin metatexto (nunca menciona el ATS, el scoring ni la IA);
+  - **ángulo por dominio**: la carta de *tech* abre con el problema que
+    el candidato resolvió de punta a punta, la de *hr* con la escala
+    del proceso, la de *psychology* con la población atendida y el rigor
+    del método, y la de *general* con lo que el candidato le hace al
+    cliente y cómo lo miden. El vocabulario sale de
+    `game.skill_taxonomy_es`, así que la carta de un candidato de
+    ventas no dice "pruebas psicotécnicas".
+  - controles de **tono** (professional / persuasive / warm / concise),
+    **longitud** (120-180 / 220-320 / 350-450 palabras) e **idioma**
+    (auto / es / en).
+- `backend/application/services/cover_letter_service.py` (nuevo) — la
+  orquestación. Corre la cascada de LLM compartida y **normaliza** la
+  respuesta a un contrato estable: `salutation`, `opening`, `body[]`,
+  `closing`, `signature`, `plain_text` y `meta`. Tolera las cuatro
+  formas que el modelo usa en la práctica: JSON desnudo, bloque con
+  ```json, lista que envuelve el objeto y envelope `{"letter": {...}}`.
+  `plain_text` lo arma el backend a partir de los campos estructurados,
+  no el modelo, para que lo que se ve en pantalla y lo que se copia
+  sean exactamente lo mismo.
+- `backend/routes/cover_letter_router.py` (nuevo) — `POST
+  /api/cover-letter`. Valida `domain_game`, `tone`, `length` y
+  `language` (422 fuera de rango), persiste el PDF subido a un archivo
+  temporal y lo borra al terminar. Usa su **propio scope de rate limit**
+  (`cover-letter`), para que el presupuesto de la carta sea
+  independiente del de la generación de CV.
+- `backend/main.py` — el router se enchufa en el composition root con el
+  mismo `LLMOrchestrator` y el mismo parser PyMuPDF que el resto.
+
+**Frontend**
+
+- `frontend/src/components/DeliverableSwitch.tsx` (nuevo) — el primer
+  control del tool: **CV adaptado** o **Carta de presentación**. No es
+  un paso numerado: decide qué produce el resto del flujo, así que va
+  arriba y los pasos 1-3 (perfil, tu CV, la vacante) se comparten.
+- `frontend/src/components/CoverLetterOptions.tsx` (nuevo) — empresa,
+  tono, longitud e idioma. Reemplazan a "OPCIONES AVANZADAS" cuando el
+  entregable es la carta: un tema o un color de acento no significan
+  nada en un texto.
+- `frontend/src/components/CoverLetterPanel.tsx` (nuevo) — el resultado:
+  la carta en prosa, con **Copiar**, **Descargar .txt** y **Generar otra
+  versión**.
+- `frontend/src/hooks/useCoverLetter.ts` (nuevo) — la máquina de estados
+  de la llamada, con timeout de 90 s y lectura del envelope de error
+  (422/429/500/502).
+- `frontend/src/types/coverLetter.ts` (nuevo) — los tipos y las etiquetas
+  de los selectores.
+- `frontend/src/hooks/useProfile.ts` — el estado del entregable y de las
+  opciones de la carta; el reset los devuelve a sus valores por defecto.
+- `frontend/src/components/ActionBar.tsx` — el CTA sigue al entregable
+  ("Generar carta de presentación" / "Generar CV"), con los textos
+  originales como default para no tocar el flujo del CV.
+- `frontend/src/components/GenerationProgress.tsx` — barra
+  **indeterminada** opcional, para operaciones de un solo disparo que no
+  tienen stream de pasos (la carta): mostrar un porcentaje congelado
+  sería mentir.
+- `frontend/src/ToolApp.tsx` — el cableado. Cambiar de entregable
+  limpia el resultado del otro, así un PDF viejo nunca queda debajo de
+  una carta (ni al revés). En modo carta se ocultan la foto (solo es
+  del render) y los paneles de auditoría y editor YAML, que no aplican.
+
+### Verificación
+
+- **360 tests en verde** (25,84 s), antes 333: los 27 nuevos cubren el
+  prompt (que lleva los datos, la taxonomía del dominio, el ángulo por
+  dominio, el tono, la longitud y el override de idioma), las seis
+  variantes de parseo, los errores (campo faltante, cuerpo vacío,
+  respuesta no-JSON) y el contrato del endpoint (422 en cada parámetro
+  inválido, 200 con el cuerpo documentado, 502 cuando el modelo no
+  entrega una carta legible, y el scope de rate limit propio).
+- **Prueba real end-to-end** contra el servidor corriendo con el LLM
+  configurado: `sample-pdfs/jakes-resume.pdf` + una JD de Ejecutivo
+  Comercial con `domain_game=general` → 200, 246 palabras, en español,
+  saluteando a la empresa por nombre, con la experiencia de soporte en
+  TI traducida al lenguaje comercial ("resolver sus problemas técnicos
+  y asegurar su satisfacción" → "asesorar y cerrar soluciones"), una
+  cifra real del CV (200 impresoras) y los datos de disponibilidad
+  (turnos, fines de semana, movilizarme en Medellín).
+- `tsc --noEmit` del frontend sin errores.
+
 ## 2026-11-24 — Sesión "Perfil general (servicio, ventas y operaciones)"
 
 **Tipo:** feature.
