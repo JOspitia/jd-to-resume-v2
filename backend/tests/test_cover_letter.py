@@ -582,3 +582,191 @@ class TestLetterRenderer:
         assert not rgx.fullmatch("cover_letter_abc.pdf")
         assert not rgx.fullmatch("../cover_letter_1.pdf")
         assert not rgx.fullmatch("cover_letter_1.PDF")
+
+
+# ---------------------------------------------------------------------------
+# Fact checking — the invented-figure guard
+# ---------------------------------------------------------------------------
+
+
+class _SequenceLLM:
+    """Stub that returns a different answer on each call.
+
+    The fact-check retry asks the model for a second draft, so the stub
+    has to be able to say "first draft is dirty, second one is clean".
+    """
+
+    def __init__(self, *responses: str) -> None:
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    async def complete(self, prompt: str, *, model: str | None = None) -> str:
+        self.prompts.append(prompt)
+        index = min(len(self.prompts) - 1, len(self.responses) - 1)
+        return self.responses[index]
+
+
+def _letter_with_figure(figure: str) -> dict[str, Any]:
+    """A letter whose opening carries the given (possibly invented) figure."""
+    payload = _letter_payload()
+    payload["opening"] = (
+        f"En mis roles atendi a mas de {figure} clientes por dia y "
+        "atendia estudiantes y personal administrativo."
+    )
+    payload["body"] = [
+        "En Southwestern University soy el primer contacto para cualquier falla de equipo.",
+        "Coordino con los gerentes para equipar los computadores del campus.",
+    ]
+    return payload
+
+
+class TestLetterFacts:
+    """The deterministic number check (``domain.letter_facts``)."""
+
+    def test_a_figure_backed_by_the_resume_passes(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        resume = "Mantenengo 200 impresoras en todo el campus."
+        assert find_unsupported_numbers("Mantengo 200 impresoras.", resume) == []
+
+    def test_an_invented_figure_is_detected(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        resume = "Mantenengo 200 impresoras en todo el campus."
+        assert find_unsupported_numbers("Atendi a 120 clientes por dia.", resume) == ["120"]
+
+    def test_the_same_figure_written_differently_is_the_same_figure(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        resume = "Cierre 2.000 ventas y 4,5 de calificacion."
+        # "2.000" (thousands) and "2,000" (thousands) are the same number.
+        assert find_unsupported_numbers("Cierre 2,000 ventas.", resume) == []
+        # "4,5" (decimal) and "4.5" (decimal) are the same number.
+        assert find_unsupported_numbers("Calificacion 4.5 de 5.", resume) == []
+
+    def test_small_integers_are_counts_not_invented_metrics(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        assert find_unsupported_numbers("Cumpli 3 de las responsabilidades.", "") == []
+
+    def test_a_decimal_is_always_checked(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        assert find_unsupported_numbers("Calificacion promedio 4,5.", "") == ["4.5"]
+
+    def test_figures_from_the_job_description_are_allowed(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        jd = "Se requieren 5 anos de experiencia en el sector."
+        assert find_unsupported_numbers("Cumplo los 5 anos que piden.", "", jd) == []
+
+    def test_urls_and_contacts_are_not_figures(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        letter = "Escribame a jane.doe@example.com o linkedin.com/in/jane-doe."
+        assert find_unsupported_numbers(letter, "") == []
+
+    def test_the_sentence_that_carries_the_invented_figure_is_dropped(self):
+        from domain.letter_facts import remove_sentences_with_numbers
+
+        text = (
+            "Atendi a 120 clientes por dia. "
+            "Trabajo con estudiantes y personal administrativo."
+        )
+        out = remove_sentences_with_numbers(text, ["120"], resume_text="")
+        assert "120" not in out
+        assert "Trabajo con estudiantes" in out
+
+    def test_a_sentence_with_a_backed_figure_survives(self):
+        from domain.letter_facts import remove_sentences_with_numbers
+
+        text = "Mantenengo 200 impresoras. Atendi a 120 clientes por dia."
+        out = remove_sentences_with_numbers(
+            text, ["120"], resume_text="Mantenengo 200 impresoras."
+        )
+        assert "200 impresoras" in out
+        assert "120" not in out
+
+
+class TestCoverLetterFactChecking:
+    """The service enforces the no-invention rule on the numbers."""
+
+    @pytest.mark.asyncio
+    async def test_a_clean_letter_is_returned_untouched(self):
+        svc = CoverLetterService(_StubLLM())
+        out = await svc.generate_text(RESUME_TEXT, JD_TEXT, get_game("tech"))
+        assert "Atendi" not in out["opening"]
+
+    @pytest.mark.asyncio
+    async def test_the_service_retries_when_the_model_invents_a_figure(self):
+        dirty = json.dumps(_letter_with_figure("120"))
+        clean = json.dumps(_letter_with_figure("200"))
+        llm = _SequenceLLM(dirty, clean)
+
+        svc = CoverLetterService(llm)
+        out = await svc.generate_text(
+            "Mantenengo 200 impresoras.", JD_TEXT, get_game("general")
+        )
+
+        assert len(llm.prompts) == 2, "the model must be asked for a second draft"
+        assert "CORRECTION REQUIRED" in llm.prompts[1]
+        assert "120" in llm.prompts[1]
+        assert "120" not in out["opening"]
+        assert "200" in out["opening"]
+
+    @pytest.mark.asyncio
+    async def test_the_invented_sentence_is_dropped_when_the_retry_still_fails(self):
+        dirty = json.dumps(_letter_with_figure("120"))
+        llm = _SequenceLLM(dirty, dirty)
+
+        svc = CoverLetterService(llm)
+        out = await svc.generate_text(RESUME_TEXT, JD_TEXT, get_game("general"))
+
+        assert "120" not in out["plain_text"]
+        assert "atendi" not in out["opening"].lower()
+        # The rest of the letter survives: an invented figure must not
+        # take the whole letter down with it.
+        assert out["body"]
+
+    @pytest.mark.asyncio
+    async def test_the_letter_never_claims_a_figure_the_resume_does_not_have(self):
+        """End-to-end shape of the guarantee: every figure in the returned
+        letter is either in the resume or in the job description."""
+        from domain.letter_facts import find_unsupported_numbers
+
+        dirty = json.dumps(_letter_with_figure("120"))
+        llm = _SequenceLLM(dirty, dirty)
+
+        svc = CoverLetterService(llm)
+        out = await svc.generate_text(RESUME_TEXT, JD_TEXT, get_game("general"))
+
+        assert find_unsupported_numbers(out["plain_text"], RESUME_TEXT, JD_TEXT) == []
+    def test_the_k_shorthand_is_the_same_figure_as_the_long_form(self):
+        """A resume writes "50K+ lines of code"; a letter writes
+        "50.000 lineas". Both are 50000, so the letter is not inventing."""
+        from domain.letter_facts import find_unsupported_numbers, normalize_number
+
+        assert normalize_number("50K+") == "50000"
+        assert normalize_number("2K+") == "2000"
+        assert normalize_number("1.5K") == "1500"
+        assert normalize_number("50.000") == "50000"
+
+        resume = "Contributed 50K+ lines of code. Published plugin with 2K+ downloads."
+        assert find_unsupported_numbers("Contribui con 50.000 lineas.", resume) == []
+        assert find_unsupported_numbers("Logré 2.000 descargas.", resume) == []
+        # A figure that is in neither is still an invention.
+        assert find_unsupported_numbers("Atendi a 120 clientes.", resume) == ["120"]
+
+    def test_a_date_range_is_not_read_as_a_phone_number(self):
+        """A range of years has the same shape as a phone number."""
+        from domain.letter_facts import find_unsupported_numbers
+
+        resume = "Jun. 2014 - May 2018. Bachelor of Arts."
+        assert find_unsupported_numbers("Me gradue en 2018.", resume) == []
+        assert find_unsupported_numbers("Estudiando desde 2014.", resume) == []
+
+    def test_a_phone_number_in_the_resume_is_not_a_figure(self):
+        from domain.letter_facts import find_unsupported_numbers
+
+        resume = "123-456-7890 | jane@example.com"
+        assert find_unsupported_numbers("Mi correo es jane@example.com.", resume) == []

@@ -63,6 +63,11 @@ from typing import Any, Optional, Protocol
 
 from language import detect_language
 
+from domain.letter_facts import (
+    find_unsupported_numbers,
+    remove_sentences_with_numbers,
+)
+
 
 class _LLMCompleter(Protocol):
     """Protocol subset of :class:`LLMOrchestrator` that the service needs."""
@@ -201,6 +206,18 @@ class CoverLetterService:
 
         letter = self._normalize(parsed)
 
+        # ------------------------------------------------------------------
+        # Fact check: every figure must be backed by the candidate's own
+        # documents. The prompt asks for this; the check enforces it. A
+        # letter that invents "120 clientes por día" ends the candidacy.
+        # ------------------------------------------------------------------
+        letter = await self._enforce_backed_facts(
+            letter,
+            prompt=prompt,
+            resume_text=resume_text,
+            jd_text=jd_text,
+        )
+
         # The contact block is deterministic: what the PDF says, or what
         # the user typed in the form. The model never gets to invent a
         # phone number, an email or a URL.
@@ -239,8 +256,165 @@ class CoverLetterService:
         return letter
 
     # ------------------------------------------------------------------
-    # Contact resolution
+    # Fact checking
     # ------------------------------------------------------------------
+
+    #: Fields whose prose is scanned for unsupported figures.
+    _PROSE_FIELDS = ("salutation", "opening", "closing")
+
+    @classmethod
+    def _letter_prose(cls, letter: dict) -> str:
+        """The letter's prose, without the letterhead or the signature.
+
+        The signature is excluded on purpose: the contact block (phone,
+        e-mail, URLs) is built by the backend and is not a claim about
+        the candidate's performance.
+        """
+        parts: list[str] = []
+        for field in cls._PROSE_FIELDS:
+            value = letter.get(field)
+            if isinstance(value, str) and value.strip():
+                parts.append(value)
+        body = letter.get("body")
+        if isinstance(body, list):
+            parts.extend(str(item) for item in body if str(item).strip())
+        return "\n".join(parts)
+
+    async def _enforce_backed_facts(
+        self,
+        letter: dict,
+        *,
+        prompt: str,
+        resume_text: str,
+        jd_text: str,
+    ) -> dict:
+        """Remove figures that no source document backs.
+
+        Three steps, in order:
+
+        1. **One corrective retry.** The model is told exactly which
+           numbers are unbacked and asked to rewrite the letter without
+           them. This is the good outcome: the letter keeps its shape
+           and simply loses the invention.
+        2. **Deterministic removal.** If the retry still carries an
+           unbacked number, the sentences that carry it are dropped. No
+           further model call: the letter stays usable instead of
+           failing the request.
+        3. **No change.** A letter whose figures are all backed is
+           returned untouched.
+
+        Args:
+            letter: the normalised letter.
+            prompt: the prompt that produced it, reused for the retry.
+            resume_text: the candidate's real resume text.
+            jd_text: the job description.
+
+        Returns:
+            The letter, with the unbacked figures gone.
+        """
+        unsupported = find_unsupported_numbers(
+            self._letter_prose(letter), resume_text, jd_text
+        )
+        if not unsupported:
+            return letter
+
+        draft = self._letter_prose(letter)
+        correction = self._correction_block(unsupported, draft)
+        try:
+            retry_content = await self._llm.complete(prompt + correction)
+            retried = self._normalize(self._parse_response(retry_content))
+        except Exception:
+            retried = None
+
+        if retried is not None:
+            still_bad = find_unsupported_numbers(
+                self._letter_prose(retried), resume_text, jd_text
+            )
+            if not still_bad:
+                return retried
+            letter = retried
+            unsupported = still_bad
+
+        return self._strip_unsupported(letter, unsupported, resume_text, jd_text)
+
+    @staticmethod
+    def _correction_block(unsupported: list[str], draft: str = "") -> str:
+        """The corrective instruction appended to the prompt for the retry."""
+        listed = ", ".join(unsupported)
+        draft_block = ""
+        if draft.strip():
+            draft_block = (
+                "\nHere is the draft to correct:\n"
+                "---\n"
+                f"{draft.strip()}\n"
+                "---\n"
+            )
+        return (
+            "\n\nCORRECTION REQUIRED (the draft below broke the "
+            "no-invention rule):\n"
+            f"The draft contained these figures that do NOT appear in the "
+            f"Base Resume: {listed}.\n"
+            "Rewrite the letter and remove every one of them. Do not replace "
+            "them with a different invented figure: either delete the "
+            "sentence or rephrase it using only what the Base Resume "
+            "states. Keep the same tone, length and structure.\n"
+            f"{draft_block}"
+        )
+
+    @classmethod
+    def _strip_unsupported(
+        cls,
+        letter: dict,
+        unsupported: list[str],
+        resume_text: str,
+        jd_text: str,
+    ) -> dict:
+        """Drop the sentences that carry an unbacked figure.
+
+        Policy, in order of preference:
+
+        * The **opening** and the **closing** may end up empty. That is
+          fine: a letter that starts right after the salutation with its
+          first argument is a normal letter, and an invented figure is
+          not.
+        * The **body** may not end up empty. If every sentence in it
+          carried an invented figure, the letter has no content left,
+          and that is a failure worth reporting (HTTP 502) instead of
+          shipping a letter with invented data in it.
+        """
+        cleaned = dict(letter)
+
+        for field in cls._PROSE_FIELDS:
+            original = cleaned.get(field)
+            if not isinstance(original, str) or not original.strip():
+                continue
+            cleaned[field] = remove_sentences_with_numbers(
+                original,
+                unsupported,
+                resume_text=resume_text,
+                jd_text=jd_text,
+            )
+
+        body = cleaned.get("body")
+        if isinstance(body, list):
+            new_body: list[str] = []
+            for paragraph in body:
+                stripped = remove_sentences_with_numbers(
+                    str(paragraph),
+                    unsupported,
+                    resume_text=resume_text,
+                    jd_text=jd_text,
+                )
+                if stripped.strip():
+                    new_body.append(stripped)
+            if not new_body:
+                raise ValueError(
+                    "La carta generada usó cifras que no están en el CV y "
+                    "no pudo corregirse automáticamente. Prueba de nuevo."
+                )
+            cleaned["body"] = new_body
+
+        return cleaned
 
     def _safe_extract_header(self, resume_text: str) -> dict:
         """Call ``parser.extract_header`` without letting it break the flow.

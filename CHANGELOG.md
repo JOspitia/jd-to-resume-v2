@@ -8,6 +8,60 @@ tomaron) y un trail de commits para auditoría.
 
 **Tipo:** feature.
 
+### Fix — La carta ya no puede inventar cifras (guard determinista)
+
+**El bug.** En la prueba end-to-end, la carta decía *"En mis roles he
+atendido a más de 120 clientes por día"*. El CV no menciona ningún
+cliente: es un CV de soporte de TI. La cifra no estaba inventada por
+casualidad — **era un ejemplo copiado del prompt**. La regla 5 del
+prompt de la carta ilustraba la gramática de una frase concreta con
+ejemplos que traían números de verdad ("atendí a más de 120 clientes
+por día", "cerré 35 ventas mensuales"), y el modelo los reutilizó
+como si fueran datos del candidato.
+
+Eso viola la regla que el proyecto sostiene desde el principio (no
+inventar), y en una carta es peor que en el CV: el CV es una lista
+verificable, la carta es prosa, y una cifra plausible se cuela sola.
+
+**Las dos correcciones, complementarias:**
+
+1. **La causa raíz (el prompt).** Los ejemplos de la regla 5 pasaron a
+   ser marcadores de posición explícitos — `"atendí a [NÚMERO DEL CV]
+   clientes por día"` — con un aviso de que son formas gramaticales y
+   **no** datos, y de que sus números no se copian nunca. La regla 12
+   (fact check) ahora avisa que las cifras se verifican
+   mecánicamente.
+
+2. **El garante (el backend).** El prompt no basta: la prosa es
+   donde un modelo se desliza. Nuevo módulo
+   `backend/domain/letter_facts.py`:
+   - Extrae todas las cifras de la carta y las compara, **normalizadas**,
+     contra el CV y contra la vacante. Normalizar importa: el CV
+     escribe "50K+ líneas" y "2.000 descargas"; la carta escribe
+     "50.000" y "2.000" — son la misma cifra, no una invención. La
+     notación `K`/`M`, los separadores de miles y las decimales se
+     normalizan antes de comparar.
+   - No se marcan: los enteros pequeños (1 a 12, que son recuentos y
+     ordinales, no métricas), las URL, los correos y los teléfonos; y
+     las cifras que salen de la vacante (que es un documento real). Los
+     decimales **sí** se marcan siempre. Un rango de años ("2014 -
+     2018") tiene la misma forma que un teléfono, así que se distingue
+     antes de comparar.
+   - Si hay una cifra sin respaldo: **un reintento correctivo** con el
+     modelo (se le dice exactamente cuáles son y se le pasa el
+     borrador), y si el reintento también falla, **se eliminan las
+     oraciones** que la llevan. Si el cuerpo entero quedara vacío, la
+     petición responde 502 en vez de devolver una carta con datos
+     inventados.
+   - El `opening` y el `closing` pueden quedar vacíos: una carta que
+     arranca con el argumento después del saludo es una carta normal,
+     y una cifra inventada no lo es.
+
+**Verificación.** Prueba real contra el LLM configurado: la carta
+devuelta tiene exactamente tres cifras — 200 impresoras, 2.000
+descargas y 4,5 de calificación — y **las tres están en el CV**.
+Cero cifras sin respaldo. 16 tests nuevos (385 en total).
+
 ### Feature — La carta también sale en PDF, con el diseño del CV y los contactos reales
 
 La carta de presentación solo se podía copiar como texto. Pero el PDF es

@@ -202,6 +202,24 @@ El prompt vive en `backend/domain/cover_letter_prompts.py` y tiene reglas propia
 - **La carta tiene que añadir algo que el CV no dice.** El reclutador ya tiene el CV; repetir sus bullets es peor que no mandar carta. La carta escoge los **dos o tres** requisitos que más pesan en la vacante y argumenta cada uno.
 - **Cero invención.** Cada frase que nombre una habilidad, una herramienta, una cifra, una empresa o una fecha tiene que ser rastreable al CV base. Si no se puede rastrear, la frase no se escribe.
 - **Sin frases vacías.** "Persona dinámica y proactiva", "gran capacidad de adaptación", "excelente compromiso" y "apasionado por el servicio" están prohibidos salvo que el CV las respalde.
+
+#### Las cifras se verifican, no se piden
+
+El prompt pide que la carta no invente cifras, pero **el prompt no basta**: la prosa es donde un modelo se desliza. Así que el backend lo verifica.
+
+`backend/domain/letter_facts.py` extrae todas las cifras de la carta y las compara, **normalizadas**, contra el CV y contra la vacante. Normalizar importa, porque la misma cifra se escribe de varias formas:
+
+| En el CV | En la carta | ¿Es la misma? |
+|---|---|---|
+| `50K+ lines of code` | `50.000 líneas` | Sí |
+| `2K+ downloads` | `2.000 descargas` | Sí |
+| `4.5/5-star` | `4,5 sobre 5` | Sí |
+| `200 printers` | `200 impresoras` | Sí |
+
+Si una cifra no tiene respaldo, la carta se corrige: primero se le pide al modelo un segundo borrador sin esas cifras; si el modelo insiste, se eliminan las oraciones que las llevan. Si el cuerpo entero quedara vacío, la API responde **502** en vez de devolver una carta con datos inventados.
+
+No se verifican: los enteros pequeños (1 a 12, que son recuentos y ordinales, no métricas), las URL, los correos, los teléfonos y las cifras que salen de la vacante (que es un documento real).
+
 - **Cifras, no adjetivos.** Una o dos métricas reales del CV (volumen atendido, % de meta, tiempo reducido).
 - **Sin metatexto.** Nunca menciona el ATS, el scoring, la IA ni "esta carta". Quien escribe es el candidato, no un robot.
 - **Ángulo por dominio.** Cada perfil aporta su propio enfoque: la carta de *tech* abre con el problema que el candidato resolvió de punta a punta, la de *hr* con la escala del proceso y la calidad de las decisiones, la de *psychology* con la población atendida y el rigor del método, y la de *general* con lo que el candidato le hace al cliente y cómo lo miden.

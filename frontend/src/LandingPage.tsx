@@ -24,7 +24,7 @@ const FEATURES = [
   {
     title: 'Carta de presentación',
     titleClass: 'text-secondary',
-    body: 'Con el mismo CV y la misma vacante, generás una carta en prosa para copiar y pegar en la postulación. Elige el tono, la extensión y la empresa: la carta argumenta por vos sin inventar experiencia.',
+    body: 'Con el mismo CV y la misma vacante, generás una carta en prosa para copiar y pegar o un PDF con el mismo diseño del CV. Elige el tono, la extensión y la empresa: la carta argumenta por vos sin inventar experiencia.',
   },
   {
     title: 'Auditoría ATS',

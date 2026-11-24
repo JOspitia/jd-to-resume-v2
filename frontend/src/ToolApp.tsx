@@ -164,7 +164,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
         </h1>
         <p className="text-sm md:text-base text-muted-foreground mt-2">
           {isCoverLetter
-            ? 'Subí tu CV, elegí el perfil, pegá la vacante — redactamos una carta de presentación lista para copiar y pegar.'
+            ? 'Subí tu CV, elegí el perfil, pegá la vacante — redactamos una carta de presentación lista para copiar o para descargar en PDF.'
             : 'Subí tu CV, elegí el perfil, pegá la vacante — generamos un PDF adaptado en minutos.'}
         </p>
       </motion.header>

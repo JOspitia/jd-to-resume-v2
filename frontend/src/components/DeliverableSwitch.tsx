@@ -33,7 +33,7 @@ const OPTIONS = [
     id: 'cover_letter' as const,
     Icon: PenLine,
     label: 'Carta de presentación',
-    description: 'Carta en texto para copiar y pegar en la postulación.',
+    description: 'Carta en texto o en PDF, con el diseño del CV.',
   },
 ];
 
