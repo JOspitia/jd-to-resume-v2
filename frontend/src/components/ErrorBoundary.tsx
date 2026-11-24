@@ -51,8 +51,42 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   };
 
+  /**
+   * A full page reload. Unlike ``handleReset`` (which only clears the hash
+   * and re-renders the tree), this discards the React tree entirely — and
+   * that is the only recovery for a hook-order error, because the mounted
+   * fiber keeps the old hook list no matter how many times the component
+   * re-renders.
+   */
+  handleReload = () => {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  };
+
+  /**
+   * True when the failure is React complaining that the order of hooks
+   * changed between renders.
+   *
+   * That happens in development when Vite hot-reloads a module that adds
+   * or removes a hook in a component that is already mounted: the fiber
+   * keeps the previous hook list and the new render asks for a different
+   * one. It is not a bug in the application code — the same code renders
+   * fine on a fresh load — so the message has to say so, otherwise the
+   * user thinks the app is broken.
+   */
+  isHookOrderError = (): boolean => {
+    const message = this.state.error?.message ?? '';
+    return (
+      message.includes('order of Hooks') ||
+      message.includes('Should have a queue') ||
+      message.includes('invalid hook call')
+    );
+  };
+
   render() {
     if (this.state.error) {
+      const hookOrder = this.isHookOrderError();
       return (
         <div
           role="alert"
@@ -66,9 +100,22 @@ export class ErrorBoundary extends Component<Props, State> {
               </h1>
             </div>
             <p className="text-muted-foreground leading-relaxed">
-              La aplicación encontró un error inesperado al renderizar esta
-              vista. Tus datos locales están a salvo — sólo necesitás recargar
-              para volver a la portada.
+              {hookOrder ? (
+                <>
+                  El código se recargó en caliente mientras tenías esta vista
+                  abierta, y React quedó con la lista de hooks anterior.
+                  <span className="block mt-2">
+                    No es un problema del código: <strong>recargá la página</strong>{' '}
+                    y seguí como si nada. Tus datos locales están a salvo.
+                  </span>
+                </>
+              ) : (
+                <>
+                  La aplicación encontró un error inesperado al renderizar esta
+                  vista. Tus datos locales están a salvo — sólo necesitás recargar
+                  para volver a la portada.
+                </>
+              )}
             </p>
             {import.meta.env.DEV && this.state.error && (
               <details className="text-xs font-mono bg-muted p-3 border-2 border-border">
@@ -83,10 +130,18 @@ export class ErrorBoundary extends Component<Props, State> {
             <Button
               variant="primary"
               size="md"
-              onClick={this.handleReset}
+              onClick={this.handleReload}
               className="w-full"
             >
               <RefreshCcw className="w-4 h-4" aria-hidden="true" />
+              Recargar ahora
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={this.handleReset}
+              className="w-full"
+            >
               Volver a la portada
             </Button>
           </div>
