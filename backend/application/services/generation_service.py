@@ -42,6 +42,7 @@ from domain.translation_facts import (
     is_untranslated,
     set_path,
     strip_degree_markers,
+    strip_subjects,
 )
 from language import detect_language
 from photo_helpers import prune_orphaned_photos as _prune_photos
@@ -553,6 +554,10 @@ IMPORTANT:
                 # The source PDF's text layer carries RenderCV's "in"
                 # marker; a faithful copy would render it twice.
                 strip_degree_markers(parsed_data)
+                # Spanish bullets carry a conjugated first-person verb
+                # ("Incrementé..."); English CV bullets do not carry the
+                # subject ("Increased...").
+                strip_subjects(parsed_data)
 
             gh_val = str(parsed_data.get("github", "")).strip()
             is_dummy_gh = any(dummy in gh_val.lower() for dummy in ["github.com/janedoe", "github.com/...", "example", "none"]) if gh_val else True
