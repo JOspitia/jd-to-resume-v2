@@ -35,7 +35,7 @@ def build_generate_router(
 
     router = APIRouter(prefix="/api", tags=["generate"])
 
-    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology", "general"}
 
     def _validate_domain_game(domain_game: Optional[str]) -> None:
         from fastapi import HTTPException

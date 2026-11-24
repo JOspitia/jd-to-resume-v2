@@ -1,11 +1,11 @@
 import { motion } from 'framer-motion';
-import { Code2, Briefcase, Brain, type LucideIcon } from 'lucide-react';
+import { Code2, Briefcase, Brain, Store, type LucideIcon } from 'lucide-react';
 import type { DomainGame } from '../hooks/useProfile';
 
 /**
  * ProfileSelector — T6 of the UX refactor (spec S10).
  *
- * Three large tiles, one per domain. The selected tile is filled with the
+ * Four large tiles, one per domain. The selected tile is filled with the
  * brand color and inverted text. The icons are 28px (bigger than before)
  * and the description sits right under the label so each tile is
  * self-explanatory in a single glance.
@@ -40,6 +40,12 @@ const PROFILE_OPTIONS: ProfileOption[] = [
     label: 'Psicología',
     description: 'Psicólogos/as organizacional, clínico, educativo, social o forense.',
   },
+  {
+    id: 'general',
+    Icon: Store,
+    label: 'Perfil General',
+    description: 'Atención al cliente, ventas, caja, reposición, exhibición e impulso.',
+  },
 ];
 
 export type ProfileSelectorProps = {
@@ -49,7 +55,7 @@ export type ProfileSelectorProps = {
 
 export function ProfileSelector({ domainGame, onChange }: ProfileSelectorProps) {
   return (
-    <div className="grid sm:grid-cols-3 gap-4" role="radiogroup" aria-label="Dominio profesional">
+    <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4" role="radiogroup" aria-label="Dominio profesional">
       {PROFILE_OPTIONS.map(({ id, Icon, label, description }) => {
         const selected = domainGame === id;
         return (

@@ -49,7 +49,7 @@ def build_yaml_editor_router(
 
     router = APIRouter(prefix="/api", tags=["yaml-editor"])
 
-    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology"}
+    ALLOWED_GAMES = {"tech", "hr_recruiting", "psychology", "general"}
 
     def _validate_domain_game(domain_game: Optional[str]) -> None:
         if domain_game is not None and domain_game not in ALLOWED_GAMES:
