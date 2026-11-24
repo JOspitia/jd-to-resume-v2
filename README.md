@@ -300,11 +300,29 @@ El checkbox nuevo es un **modo**, no una opción: cambia qué hace el pipeline. 
 - **Las cifras no se tocan.** "200 impresoras" sigue siendo "200 printers"; "2K+ descargas" se traduce a "2K+ downloads", no a "2.000".
 - **Las fechas sí se traducen**, pero solo el marcador: "2023-01 - Actualidad" → "2023-01 - Present".
 - **Los nombres propios se quedan**: universidad, empresa y ciudad no se traducen.
+- **Los cargos y los títulos sí se traducen**: "Ingeniero TICs - QA" → "ICT Engineer - QA". Son descripciones, no nombres.
 - **Las certificaciones no se pierden**: la sección "Certificaciones" del CV original va al array `achievements` de la salida.
 
 La salida usa **el mismo esquema JSON** que el pipeline del CV, así que los renderizadores no cambian nada: el PDF traducido sale con la plantilla y el color de acento que elegiste, en una sola columna y con texto seleccionable.
 
 Si el CV que subís ya está en inglés, el backend lo detecta y dice que no hay nada que traducir, en vez de devolver un re-render inútil.
+
+### El idioma de la salida se verifica, no se pide
+
+El prompt dice "traducí todo", y **el modelo no siempre lo hace**. En la primera versión de este modo pasó algo muy concreto: el modelo tradujo los títulos de sección (que el prompt escribe literal) y el resumen (que ya venía en inglés en el PDF de origen) — y dejó **todos los bullets, los cargos, las categorías de habilidades, los títulos de grado y los logros en español**.
+
+El motivo está en el propio prompt: las reglas de "no toques nada" eran muchas y enfáticas, y el modelo optimizó por no infringirlas. TraducirCV.com no es el problema; el balance del prompt era.
+
+El arreglo son dos cosas:
+
+1. **El prompt rebalanceado.** "EVERY TEXT IN YOUR ANSWER MUST BE IN ENGLISH" es la instrucción principal, y los campos que hay que traducir están enumerados uno por uno (cada bullet, cada cargo, cada categoría, cada grado, cada logro). Las reglas de "no toques" se reencuadran como reglas sobre el *contenido*: nodigas "no copies el texto", di "no cambies el contenido".
+2. **Un guard determinista** (`backend/domain/translation_facts.py`) que verifica el idioma de la salida, igual que el guard de cifras de la carta:
+   - Detecta las cadenas que siguen en español con **marcadores funcionales del español** (`desarrollo`, `gestión`, `años`, `experiencia`…). No usa un clasificador de documento: el grano importa, porque lo que hay que juzgar es *esta* cadena, no el CV entero.
+   - **No marca** los nombres propios (universidad, empresa, ciudad), los nombres de tecnologías, las fechas ni las URL.
+   - Si queda algo en español: primero se le pide al modelo un **segundo borrador** con las cadenas problemáticas entre comillas; si insiste, una **pasada dirigida** traduce solo esos pedacitos (un trabajo chico que el modelo no pierde de vista); si tampoco, se conserva el original — perder contenido es peor que una frase en español — y se reporta en la respuesta.
+   - Los campos que quedan en español se pueden ver en el log del backend (`[TRANSLATE-ONLY] N string(s) are still in the source language`).
+
+Un detalle que el guard también resuelve: el texto extraído del PDF arrastra el marcador `in` que RenderCV imprime antes de un grado ("in in Bachelor's Degree"). El backend lo limpia, así que el título no sale duplicado.
 
 ```bash
 curl -X POST http://localhost:8000/api/generate \

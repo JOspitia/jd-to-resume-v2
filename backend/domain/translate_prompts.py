@@ -133,34 +133,54 @@ you do not improve, rewrite, shorten, expand or optimise anything.
 The candidate's CV (source language detected as: {detected}) is given
 below. Translate it into English.
 
-TRANSLATION RULES (ABSOLUTE — THEY OVERRIDE ANY OTHER HABIT):
-1. TRANSLATE, DO NOT REWRITE. Every piece of text in the output must be
-   the translation of a specific piece of text in the input. If a
-   sentence, bullet point or line is not in the input, it does not go in
-   the output. If it is in the input, it goes in the output — same
-   meaning, same emphasis, in English.
-2. KEEP THE STRUCTURE EXACTLY. The same sections, in the same order.
+THE ONE THING THAT MATTERS: EVERY TEXT IN YOUR ANSWER MUST BE IN
+ENGLISH. Not the summary, not one bullet, not a job title, not a skill
+category, not a degree. ALL of it. The rules below are about the
+CONTENT of your translation — they are not an excuse to copy the
+Spanish text through. A single Spanish sentence left in the output
+makes the whole document wrong.
+
+WHAT YOU MUST TRANSLATE — go through this list, item by item:
+- the "summary" → English prose
+- EVERY bullet of EVERY "experience" entry → English
+- EVERY bullet of EVERY "projects" entry → English
+- EVERY "skills" category name → English ("Lenguajes & Frameworks" →
+  "Languages & Frameworks")
+- EVERY skill item that is a Spanish phrase → English (a technology
+  name like "Docker" stays as it is; "Automatización de pruebas" becomes
+  "Test automation")
+- EVERY job title ("Ingeniero TICs - QA" → "ICT Engineer - QA"; job
+  titles are not names, translate them)
+- EVERY degree or study title ("Máster Universitario en Dirección y
+  Gestión de Tecnologías de la Información" → "Master's Degree in
+  Management of Information Technologies")
+- EVERY entry of "achievements" → English
+- the "section_labels" → the English labels listed below
+
+WHAT MUST NOT CHANGE — the content of your translation:
+1. KEEP THE STRUCTURE EXACTLY. The same sections, in the same order.
    The same entries in each section, in the same order. The same number
    of bullet points per entry, in the same order. Do not merge two
    bullets into one, do not split one into two, do not add a bullet,
-   do not drop a bullet, do not reorder anything.
-3. NO TAILORING. There is no job description and there is no target
+   do not drop a bullet, do not reorder anything. (Translate each of
+   them — all of them.)
+2. NO TAILORING. There is no job description and there is no target
    role. Do not reorder anything by relevance, do not emphasise one
    entry over another, do not rewrite anything to sound more impressive
    for any position. A recruiter reading the English version must find
    exactly the same CV they would find in the original language.
-4. NO ADDITIONS AND NO INVENTIONS. Do not add achievements, metrics,
+3. NO ADDITIONS AND NO INVENTIONS. Do not add achievements, metrics,
    skills, projects, certifications, employers, job titles, dates or
    responsibilities that are not in the input. Do not "complete" a
    bullet point that looks thin. Do not reformat a date into a
-   different date.
-5. KEEP EVERY FACT AS IT IS. Numbers, percentages, volumes, dates,
+   different date. (Translate what is there — do not make more of it.)
+4. KEEP EVERY FACT AS IT IS. Numbers, percentages, volumes, dates,
    company names, job titles, degrees, institutions and URLs are copied
    across unchanged. Translate the words around them, never the values.
-6. DATES: keep the same format and the same values. Translate the
+5. DATES: keep the same format and the same values. Translate the
    markers only: "Actualidad" -> "Present", "En curso" -> "In progress",
    "Egresado" -> "Graduated", "Fecha" -> "Date".
-7. CONTACT FIELDS ARE PROTECTED. Copy them verbatim.
+6. CONTACT FIELDS ARE PROTECTED. Copy them verbatim.
    Never translate or reformat a URL, an e-mail address or a phone number:
    - email: {email}
    - phone: {phone}
@@ -168,30 +188,34 @@ TRANSLATION RULES (ABSOLUTE — THEY OVERRIDE ANY OTHER HABIT):
    - github: {github}
    - portfolio: {portfolio}
    If one of them is empty, leave it empty. Never invent one.
-8. PROPER NOUNS STAY AS THEY ARE: company names, university names,
+7. PROPER NOUNS STAY AS THEY ARE: company names, university names,
    city names, product names and people's names are names, not words to
-   translate.
-9. TECHNICAL TERMS use their standard English industry name, not a
+   translate. (A job title is not a name — see the list above.)
+8. TECHNICAL TERMS use their standard English industry name, not a
    literal translation ("reposicion" -> "restocking", "caja" -> "cash
    handling", "soporte" -> "support", "mantenimiento" -> "maintenance").
    Keep the candidate's own level of detail — do not upgrade "worked
    with" into "specialised in".
-10. THE SUMMARY IS TRANSLATED, NOT REWRITTEN. Keep its length and its
-    content. Do not make it punchier.
-11. SKILL CATEGORIES keep the same categories, in the same order, with
+9. THE SUMMARY IS TRANSLATED, NOT REWRITTEN. Keep its length and its
+   content. Do not make it punchier.
+10. SKILL CATEGORIES keep the same categories, in the same order, with
     the same items. Translate the category name into its English
     equivalent and translate each item, but never regroup the items,
     never add a technology the CV does not mention and never drop one.
-12. SECTION LABELS must be exactly these:
+11. SECTION LABELS must be exactly these:
 {labels_block}
     Use the English labels for every section. Do not use Spanish ones.
-13. CERTIFICATIONS, AWARDS AND HONOURS: the output schema has an
+12. CERTIFICATIONS, AWARDS AND HONOURS: the output schema has an
     "achievements" array for them. If the source has a section called
     "Certificaciones", "Logros", "Premios", "Reconocimientos",
     "Certifications", "Awards" or "Honors", put EVERY entry of it in the
     "achievements" array, translated, in the same order. Leave the array
     empty only when the source really has no such entry. Dropping a
     certification is a content loss, not a translation.
+
+FINAL CHECK, before you answer: read your own JSON and look for any
+Spanish word left in it. Translate it. The answer must be readable by
+someone who speaks no Spanish.
 
 Respond ONLY with a JSON object in this exact structure:
 {_JSON_SCHEMA}

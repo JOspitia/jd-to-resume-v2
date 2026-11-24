@@ -8,6 +8,75 @@ tomaron) y un trail de commits para auditoría.
 
 **Tipo:** feature.
 
+### Fix — La traducción dejaba casi todo en español (guard de idioma)
+
+**El síntoma.** El usuarioPegó el PDF que le salió y señaló lo que faltaba:
+los bullets de experiencia, los cargos, las categorías de habilidades, los
+títulos de grado y los logros seguían **en español**. Solo se habían
+traducido los títulos de sección y el resumen (que en su PDF de origen ya
+venía en inglés).
+
+**La causa: el prompt estaba desbalanceado.** Las reglas de "no toques
+nada" eran muchas y enfáticas ("no agregues", "no borres", "no
+reordenes", "no reescribas") y la de "traducí" era una más. El modelo
+optimizó por no infringir las prohibiciones, y "no toques nada" se leyó
+como **"copiá el input"**. Lo que el modelo produjo fue, literalmente,
+lo que el prompt le pedía en los pocos lugares donde el prompt estaba
+escrito en detalle.
+
+**Dos arreglos:**
+
+1. **El prompt rebalanceado.** "EVERY TEXT IN YOUR ANSWER MUST BE IN
+   ENGLISH" pasó a ser la instrucción principal, con una lista explícita
+   de los campos que hay que traducir (cada bullet, cada cargo, cada
+   categoría, cada grado, cada logro). Las reglas de "no toques" se
+   reencuadran como reglas sobre el **contenido** ("no cambies el
+   contenido" en vez de "no copies el texto"), y se aclara que un cargo
+   ("Ingeniero TICs - QA") es una descripción, no un nombre propio.
+
+2. **Un guard determinista** (`backend/domain/translation_facts.py`),
+   con la misma filosofía que el guard de cifras de la carta: el prompt
+   pide, el backend verifica.
+   - Detecta las cadenas que siguen en español con **marcadores
+     funcionales del español**, no con un clasificador de documento: el
+     grano importa, porque lo que hay que juzgar es *esta* cadena y no
+     el CV entero.
+   - No marca los nombres propios (universidad, empresa, ciudad), los
+     nombres de tecnologías, las fechas ni las URL.
+   - Si queda algo en español: primero un **segundo borrador** con las
+     cadenas problemáticas entre comillas; si el modelo insiste, una
+     **pasada dirigida** que traduce solo esos pedacitos; si tampoco,
+     se conserva el original (perder contenido es peor que una frase en
+     español) y se reporta en el log.
+   - La primera versión del detector marcaba "backend" y "sector" como
+     palabras españolas: son inglesas válidas y disparaban una llamada
+     extra al modelo en cada CV. Se sacaron de la lista.
+
+Un bug del guard que los tests destaparon: si el modelo respondía a la
+pasada dirigida con el CV entero en vez del mapa de rutas, el
+`set_path` **reemplazaba listas por strings** y rompía el documento.
+Ahora solo se escribe sobre una ruta hoja cuyo valor actual sea un
+string, y una respuesta que no sea un mapa de rutas se ignora.
+
+**De paso:** el texto extraído del PDF arrastra el marcador `in` que
+RenderCV imprime antes de un grado ("in in Bachelor's Degree"). El
+backend lo limpia, así que el título no sale duplicado.
+
+**Verificación.** 30 tests nuevos (21 del detector + 9 del guard
+end-to-end), 430 en verde. Prueba real sobre el CV del usuario: **0
+campos en español** en el resultado — cargos, bullets, categorías,
+ítems de skills, títulos de grado y logros, todo en inglés — y un PDF
+de dos páginas limpio en los dos motores.
+
+### Fix — Tres instancias de uvicorn peleando por el puerto 8000
+
+El `netstat` mostró **tres** instancias de uvicorn escuchando en el
+puerto 8000 (la original de las 10:14 seguía atendiendo con el código
+viejo), y por eso los cambios no llegaban a probarse. Con la política
+de Windows de reutilizar el socket, varias instancias pueden escuchar
+el mismo puerto y el traffic se reparte: el servidor que responde puede
+no ser el que creaste. Se mataron todas y se arrancó una sola.
+
 ### Feature — Traducir el CV maestro sin adaptarlo, antes de generar
 
 **El pedido.** "La opción de traducir PDF sin modificar nada del mismo
