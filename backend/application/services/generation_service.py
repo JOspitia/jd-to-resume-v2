@@ -36,6 +36,13 @@ from application.services.linkedin_service import extract_linkedin_profile_data
 from application.services.translation_service import build_language_override
 from domain_games import get_game
 from domain.translate_prompts import build_translation_prompt
+from domain.translation_facts import (
+    build_targeted_prompt,
+    find_untranslated_fields,
+    is_untranslated,
+    set_path,
+    strip_degree_markers,
+)
 from language import detect_language
 from photo_helpers import prune_orphaned_photos as _prune_photos
 from ports.resume_parser import ResumeParser
@@ -230,7 +237,8 @@ class GenerationService:
                     source_language = "unknown"
                 print(
                     f"[INFO] force_language='{force_language}', detected "
-                    f"source_language='{source_language}', detection_path='{detection_path}'"
+                    f"source_language='{source_language}', detection_path='{detection_path}', "
+                    f"translate_only={translate_only}"
                 )
                 if source_language == "en":
                     raise ValueError(
@@ -303,6 +311,10 @@ class GenerationService:
                     contact_header=extracted_header,
                     section_labels=game.section_labels_en,
                     source_language=source_language,
+                )
+                print(
+                    "[TRANSLATE-ONLY] Using the faithful translation prompt "
+                    f"(no JD, no tailoring). prompt_chars={len(prompt)}"
                 )
             elif strict_edits_only:
                 user_requested_changes = (
@@ -532,6 +544,16 @@ IMPORTANT:
                 if k not in parsed_data or parsed_data[k] is None:
                     parsed_data[k] = v
 
+            if translate_only:
+                # The prompt asks for English; the backend verifies it.
+                # Models translate a whole document unreliably — the first
+                # run of this mode translated the headings and left every
+                # bullet in Spanish — so the leftovers are caught here.
+                parsed_data = await self._enforce_english(parsed_data, prompt=prompt)
+                # The source PDF's text layer carries RenderCV's "in"
+                # marker; a faithful copy would render it twice.
+                strip_degree_markers(parsed_data)
+
             gh_val = str(parsed_data.get("github", "")).strip()
             is_dummy_gh = any(dummy in gh_val.lower() for dummy in ["github.com/janedoe", "github.com/...", "example", "none"]) if gh_val else True
             if effective_github:
@@ -690,6 +712,125 @@ IMPORTANT:
     # ------------------------------------------------------------------ #
     # LLM helper
     # ------------------------------------------------------------------ #
+
+    async def _enforce_english(self, parsed_data: dict, *, prompt: str) -> dict:
+        """Make sure the translated CV is actually in English.
+
+        The prompt says "translate everything"; the model does what it
+        can and quietly leaves the rest in the source language. This is
+        the same philosophy as the cover letter's figure check: the
+        prompt asks, the backend verifies.
+
+        Three steps, in order:
+
+        1. **One corrective retry.** The model is handed the strings it
+           left behind, quoted, and asked to translate them.
+        2. **A targeted pass.** If the model still leaves Spanish in, a
+           second call translates *only* the leftovers. A small job is a
+           job the model does not lose focus on.
+        3. **Keep what we have.** Whatever is still in Spanish after
+           that is left as it is — losing content would be worse than a
+           Spanish sentence — and it is reported in the response so the
+           user can see it.
+
+        Args:
+            parsed_data: the CV the model returned.
+            prompt: the prompt that produced it, reused for the retry.
+
+        Returns:
+            The CV, with the leftovers translated when possible.
+        """
+        offenders = find_untranslated_fields(parsed_data)
+        if not offenders:
+            return parsed_data
+
+        print(
+            f"[TRANSLATE-ONLY] {len(offenders)} field(s) came back in the "
+            f"source language: {list(offenders)[:6]}"
+        )
+
+        # --- 1. Corrective retry with the whole document ---
+        try:
+            retry = await asyncio.wait_for(
+                self._call_llm(prompt + self._language_correction_block(offenders)),
+                timeout=60.0,
+            )
+            retried = self._parse_json_payload(retry)
+            remaining = find_untranslated_fields(retried)
+            if not remaining:
+                print("[TRANSLATE-ONLY] Corrective retry produced a fully English CV.")
+                return retried
+            parsed_data = retried
+            offenders = remaining
+        except Exception as retry_err:
+            print(f"[WARN] Corrective translation retry failed: {retry_err}")
+
+        # --- 2. Targeted pass over the leftovers only ---
+        try:
+            targeted = await asyncio.wait_for(
+                self._call_llm(build_targeted_prompt(offenders)),
+                timeout=60.0,
+            )
+            mapping = self._parse_json_payload(targeted)
+            applied = 0
+            for path, text in mapping.items():
+                if not isinstance(text, str) or not text.strip():
+                    continue
+                if is_untranslated(text):
+                    continue
+                # Only a leaf path can be written back. A model that
+                # answers with the whole CV instead of the path → text
+                # map is ignored rather than allowed to overwrite the
+                # document.
+                if not isinstance(path, str) or ("." not in path and "[" not in path):
+                    continue
+                if set_path(parsed_data, path, text):
+                    applied += 1
+            print(f"[TRANSLATE-ONLY] Targeted pass translated {applied} leftover string(s).")
+        except Exception as targeted_err:
+            print(f"[WARN] Targeted translation pass failed: {targeted_err}")
+
+        remaining = find_untranslated_fields(parsed_data)
+        if remaining:
+            print(
+                f"[TRANSLATE-ONLY] {len(remaining)} string(s) are still in the "
+                "source language."
+            )
+        return parsed_data
+
+    @staticmethod
+    def _language_correction_block(offenders: dict[str, str]) -> str:
+        """The corrective instruction appended to the prompt for the retry."""
+        listing = "\n".join(
+            f'  "{path}": {text!r}' for path, text in list(offenders.items())[:40]
+        )
+        return (
+            "\n\nCORRECTION REQUIRED (the draft came back partly in the "
+            "source language):\n"
+            "The following fields are still in Spanish. Translate them into "
+            "English and keep EVERY other field exactly as it is:\n"
+            f"{listing}\n"
+            "Do not return Spanish. The whole document must be in English.\n"
+        )
+
+    @staticmethod
+    def _parse_json_payload(content: str) -> dict:
+        """Parse an LLM answer into a dict, tolerating fences and lists."""
+        clean = content.strip()
+        if "```" in clean:
+            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean)
+            if match:
+                clean = match.group(1)
+        try:
+            data = json.loads(clean)
+        except Exception:
+            data = json.loads(content)
+        if isinstance(data, list) and data:
+            data = data[0]
+        if not isinstance(data, dict):
+            raise ValueError("La respuesta de la IA no fue un diccionario válido.")
+        return data
+
     async def _call_llm(self, prompt: str) -> str:
         """Wrap the LLM orchestrator's call. The orchestrator builds the
         cascade and applies timeouts / fallback policy."""

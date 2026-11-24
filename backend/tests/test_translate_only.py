@@ -185,6 +185,60 @@ def provider() -> _RecordingProvider:
     return _RecordingProvider(json.dumps(_translated_resume_json()))
 
 
+class _SequenceProvider:
+    """LLM provider that returns a different answer on each call.
+
+    The language guard asks the model for a second draft, so the stub has
+    to be able to say "the first draft is still in Spanish, the second one
+    is not".
+    """
+
+    name = "sequence"
+
+    def __init__(self, *responses: str) -> None:
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    def complete(self, prompt: str, *, model: str | None = None) -> str:
+        self.prompts.append(prompt)
+        index = min(len(self.prompts) - 1, len(self.responses) - 1)
+        return self.responses[index]
+
+
+def _untranslated_resume_json() -> dict[str, Any]:
+    """A CV the model "translated" but left half in Spanish.
+
+    This is the real failure: the headings come out in English (the
+    prompt spells them out) and everything else stays in Spanish.
+    """
+    payload = _translated_resume_json()
+    payload["summary"] = "IT support analyst with 5 years of experience."
+    payload["skills"] = [
+        {"category": "Lenguajes & Frameworks", "items": ["Python", "FastAPI"]}
+    ]
+    payload["experience"] = [
+        {
+            "company": "Universidad Nacional",
+            "role": "Ingeniero TICs - QA",
+            "dates": "2023-01 - Present",
+            "points": [
+                "Mantenimiento de 200 impresoras en todo el campus",
+                "Soporte a estudiantes y personal administrativo",
+            ],
+        }
+    ]
+    payload["education"] = [
+        {
+            "school": "Universidad de Bogota",
+            "degree": "Analisis y Desarrollo de Sistemas",
+            "dates": "2018 - 2022",
+            "gpa": "",
+        }
+    ]
+    payload["achievements"] = ["Diplomado en Big Data y Business Intelligence."]
+    return payload
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path, provider):
     """TestClient whose generation pipeline talks to the recording stub.
@@ -192,6 +246,10 @@ def client(monkeypatch, tmp_path, provider):
     The pipeline reaches the model through the shared orchestrator, so the
     orchestrator is swapped for one holding a single recording provider.
     """
+    return _build_client(monkeypatch, tmp_path, provider)
+
+
+def _build_client(monkeypatch, tmp_path, provider):
     import importlib
     import sys
 
@@ -238,8 +296,19 @@ class TestTranslationPrompt:
     def test_it_asks_for_a_translation_and_not_a_rewrite(self):
         prompt = self._prompt()
         assert "professional translator" in prompt
-        assert "TRANSLATE, DO NOT REWRITE" in prompt
+        assert "EVERY TEXT IN YOUR ANSWER MUST BE IN" in prompt
         assert "do not improve, rewrite, shorten, expand or optimise" in prompt
+
+    def test_it_lists_the_fields_that_must_be_translated(self):
+        """The first run translated the headings (the only ones spelled
+        out literally) and nothing else. The prompt now enumerates the
+        fields that were being skipped."""
+        prompt = self._prompt()
+        assert "EVERY bullet of EVERY" in prompt
+        assert "EVERY job title" in prompt
+        assert "EVERY degree or study title" in prompt
+        assert "EVERY entry of" in prompt
+        assert "skills" in prompt and "category" in prompt
 
     def test_it_forbids_tailoring(self):
         prompt = self._prompt()
@@ -418,3 +487,114 @@ class TestTranslateOnlyEndpoint:
         prompt = provider.prompts[0]
         assert "professional translator" not in prompt
         assert "Job Description / Target Requirements" in prompt
+
+# ---------------------------------------------------------------------------
+# The language guard
+# ---------------------------------------------------------------------------
+
+
+class TestLanguageGuard:
+    """The backend verifies that the translated CV is actually in English.
+
+    The first run of the mode translated the headings and left every
+    bullet, job title, skill category, degree and achievement in
+    Spanish. These tests pin the remedy down.
+    """
+
+    def _post(self, client, pdf, **data):
+        c, _ = client
+        payload = {"translate_only": "true", "theme": "classic_html"}
+        payload.update(data)
+        r = c.post(
+            "/api/generate",
+            files={"file": ("cv.pdf", pdf, "application/pdf")},
+            data=payload,
+        )
+        assert r.status_code == 200, r.text
+        events = [
+            json.loads(line.removeprefix("data: "))
+            for line in r.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        assert "error" not in events[-1], events[-1]
+        import yaml
+
+        return yaml.safe_load(events[-1]["yaml"])
+
+    def test_a_draft_left_in_spanish_is_caught_and_corrected(
+        self, monkeypatch, tmp_path, spanish_pdf
+    ):
+        from domain.translation_facts import find_untranslated_fields
+
+        dirty = json.dumps(_untranslated_resume_json())
+        clean = json.dumps(_translated_resume_json())
+        provider = _SequenceProvider(dirty, clean)
+
+        client = _build_client(monkeypatch, tmp_path, provider)
+        parsed = self._post(client, spanish_pdf)
+
+        # The model was asked a second time...
+        assert len(provider.prompts) == 2, "the guard must ask for a new draft"
+        assert "CORRECTION REQUIRED" in provider.prompts[1]
+        # ...and the returned CV is in English.
+        assert find_untranslated_fields(parsed) == {}
+
+    def test_the_targeted_pass_fixes_the_leftovers(
+        self, monkeypatch, tmp_path, spanish_pdf
+    ):
+        """When the model insists on the second draft too, a third and
+        much smaller call translates only the leftover strings."""
+        from domain.translation_facts import find_untranslated_fields
+
+        dirty = json.dumps(_untranslated_resume_json())
+        targeted = json.dumps(
+            {
+                "education[0].degree": "Systems Analysis and Development",
+                "skills[0].category": "Languages & Frameworks",
+                "experience[0].role": "ICT Engineer - QA",
+                "experience[0].points[0]": "Maintenance of 200 printers across the campus",
+                "experience[0].points[1]": "Support for students and administrative staff",
+                "achievements[0]": "Diploma in Big Data and Business Intelligence.",
+            }
+        )
+        provider = _SequenceProvider(dirty, dirty, targeted)
+
+        client = _build_client(monkeypatch, tmp_path, provider)
+        parsed = self._post(client, spanish_pdf)
+
+        assert len(provider.prompts) == 3, "the targeted pass must run"
+        assert "left in Spanish" in provider.prompts[2]
+        assert find_untranslated_fields(parsed) == {}
+
+    def test_a_model_that_answers_with_the_whole_cv_is_ignored(
+        self, monkeypatch, tmp_path, spanish_pdf
+    ):
+        """The targeted pass asks for a path → text map. If the model
+        sends the whole document instead, the document must not be
+        corrupted."""
+        from domain.translation_facts import find_untranslated_fields
+
+        dirty = json.dumps(_untranslated_resume_json())
+        provider = _SequenceProvider(dirty, dirty, dirty)
+
+        client = _build_client(monkeypatch, tmp_path, provider)
+        parsed = self._post(client, spanish_pdf)
+
+        # The skills list is still a list of categories, not a string.
+        assert isinstance(parsed["skills"], list)
+        assert isinstance(parsed["experience"], list)
+        assert parsed["experience"][0]["role"] == "Ingeniero TICs - QA"
+        assert find_untranslated_fields(parsed), "nothing could be fixed"
+
+    def test_the_normal_flow_is_not_guarded(self, monkeypatch, tmp_path, spanish_pdf):
+        """The guard only applies to the translation mode: the tailoring
+        flow legitimately produces Spanish."""
+        from domain.translation_facts import find_untranslated_fields
+
+        provider = _SequenceProvider(json.dumps(_untranslated_resume_json()))
+        client = _build_client(monkeypatch, tmp_path, provider)
+
+        parsed = self._post(client, spanish_pdf, translate_only="false")
+
+        assert len(provider.prompts) == 1, "the tailoring flow must not retry"
+        assert find_untranslated_fields(parsed), "the Spanish draft is expected here"
