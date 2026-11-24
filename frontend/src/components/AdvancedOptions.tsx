@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, SlidersHorizontal, Palette, LayoutTemplate,
-  FileCheck2, PenLine, MessageSquare, Droplet } from 'lucide-react';
+  FileCheck2, PenLine, MessageSquare, Droplet, Languages } from 'lucide-react';
 import { THEMES, useDesignOptions } from '../lib/designOptions';
 
 /**
@@ -39,6 +39,8 @@ export type AdvancedOptionsProps = {
   onEditBeforeGenerateChange: (checked: boolean) => void;
   strictEditsOnly: boolean;
   onStrictEditsOnlyChange: (checked: boolean) => void;
+  translateOnly: boolean;
+  onTranslateOnlyChange: (checked: boolean) => void;
   customPrompt: string;
   onCustomPromptChange: (value: string) => void;
 };
@@ -58,6 +60,8 @@ export function AdvancedOptions({
   onEditBeforeGenerateChange,
   strictEditsOnly,
   onStrictEditsOnlyChange,
+  translateOnly,
+  onTranslateOnlyChange,
   customPrompt,
   onCustomPromptChange,
 }: AdvancedOptionsProps) {
@@ -160,6 +164,42 @@ export function AdvancedOptions({
           sigue siendo negro y el CV mantiene una sola columna, así que los
           filtros ATS lo leen exactamente igual.
         </p>
+      </fieldset>
+
+      {/* Faithful translation. This is a MODE, not a micro-option: it changes
+          what the whole pipeline does, so it lives outside the collapsible
+          "Más opciones" panel, right under the design choices (the translated
+          PDF comes out with the template and the accent picked above). */}
+      <fieldset>
+        <legend className="font-bold font-mono text-xs uppercase tracking-wide text-muted-foreground flex items-center gap-1.5 mb-2">
+          <Languages className="w-3.5 h-3.5" /> Traducción
+        </legend>
+        <label
+          className={`flex items-start gap-3 border-2 p-3 cursor-pointer transition-all select-none shadow-neo-sm ${
+            translateOnly
+              ? 'border-primary bg-primary/15'
+              : 'border-border bg-card hover:bg-accent'
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={translateOnly}
+            onChange={(e) => onTranslateOnlyChange(e.target.checked)}
+            className="w-4 h-4 mt-0.5 accent-primary cursor-pointer shrink-0"
+          />
+          <div>
+            <div className="font-bold text-xs">Traducir mi CV al inglés (sin adaptar)</div>
+            <div className="text-[10px] text-muted-foreground leading-tight mt-1">
+              Traduce tu CV tal cual: mismas secciones, mismos puestos, mismas
+              fechas, mismos números. <strong>No lo reescribe</strong> y no lo
+              adapta a ninguna vacante — la vacante no hace falta.
+              <span className="block mt-1 text-muted-foreground">
+                El PDF sale con el diseño que elegiste arriba (plantilla y color
+                de acento), en una sola columna y con texto seleccionable.
+              </span>
+            </div>
+          </div>
+        </label>
       </fieldset>
 
       {/* Collapsible: page break + auto ATS + edit YAML + strict + custom prompt */}

@@ -209,6 +209,7 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             onGithubUrlChange={profile.setGithubUrl}
             portfolioUrl={profile.portfolioUrl}
             onPortfolioUrlChange={profile.setPortfolioUrl}
+            translateOnly={profile.translateOnly}
           />
 
           {/* The photo only exists for the rendered CV. */}
@@ -258,6 +259,8 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
               onEditBeforeGenerateChange={profile.setEditBeforeGenerate}
               strictEditsOnly={profile.strictEditsOnly}
               onStrictEditsOnlyChange={profile.setStrictEditsOnly}
+              translateOnly={profile.translateOnly}
+              onTranslateOnlyChange={profile.setTranslateOnly}
               customPrompt={profile.customPrompt}
               onCustomPromptChange={profile.setCustomPrompt}
             />
@@ -379,15 +382,29 @@ export default function ToolApp({ onBack }: { onBack: () => void }) {
             ? () => coverLetter.handleGenerate()
             : generation.handleGenerate
         }
-        ctaLabel={isCoverLetter ? 'Generar carta de presentación' : 'Generar CV'}
-        ctaBusyLabel={isCoverLetter ? 'Generando la carta' : 'Generando CV'}
+        ctaLabel={
+          isCoverLetter
+            ? 'Generar carta de presentación'
+            : profile.translateOnly
+              ? 'Traducir mi CV al inglés'
+              : 'Generar CV'
+        }
+        ctaBusyLabel={
+          isCoverLetter
+            ? 'Generando la carta'
+            : profile.translateOnly
+              ? 'Traduciendo el CV'
+              : 'Generando CV'
+        }
         ctaEmptyLabel={
           isCoverLetter ? 'Subí un CV para empezar' : 'Subí un CV para empezar'
         }
         ctaAriaLabel={
           isCoverLetter
             ? 'Generar carta de presentación a partir del CV'
-            : 'Generar CV adaptado'
+            : profile.translateOnly
+              ? 'Traducir el CV al inglés sin adaptarlo a la vacante'
+              : 'Generar CV adaptado'
         }
       />
     </div>

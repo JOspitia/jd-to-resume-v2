@@ -275,6 +275,47 @@ Si el modelo devuelve algo ilegible (no es JSON, o le falta un campo), el endpoi
 
 ---
 
+## Traducción fiel del CV al inglés
+
+Hay **dos** traducciones en la app y no son lo mismo:
+
+| | Traducción del CV ya adaptado | Traducción del CV maestro |
+|---|---|---|
+| **Dónde** | Botón *Traducir al inglés* en la tarjeta de resultado | Checkbox **Traducir mi CV al inglés (sin adaptar)** en OPCIONES AVANZADAS, **antes de generar** |
+| **Qué traduce** | El CV que ya adaptaste a una vacante | Tu CV original, tal como lo subiste |
+| **La vacante** | Se sigue usando para adaptar | **No se usa.** Es opcional |
+| **Para qué** | Aplicar a una oferta en inglés con el CV afinado | Tener tu CV maestro en inglés para muchas ofertas |
+
+El botón de la tarjeta de resultado ya existía desde el cambio *cv-translate-to-english*: vuelve a correr todo el pipeline con `force_language=en`, o sea que **re-adapta** el CV a la vacante y lo escribe en inglés. Es útil, pero no es una traducción.
+
+### El modo faithful translation
+
+El checkbox nuevo es un **modo**, no una opción: cambia qué hace el pipeline. Usa un prompt propio (`backend/domain/translate_prompts.py`) en lugar del prompt de adaptación, y por lo tanto:
+
+- **No hay vacante.** El formulario la oculta y la API ignora el `jd`.
+- **No hay enriquecimiento de LinkedIn.**
+- **No se reescribe nada.** El prompt obliga a conservar las mismas secciones, en el mismo orden, con los mismos puestos y el mismo número de bullets.
+- **No se inventa nada.** Ni logros, ni métricas, ni habilidades, ni certificaciones.
+- **Los datos de contacto van verbatim.** El correo, el teléfono y las URLs se copian tal cual: una URL no se traduce.
+- **Las cifras no se tocan.** "200 impresoras" sigue siendo "200 printers"; "2K+ descargas" se traduce a "2K+ downloads", no a "2.000".
+- **Las fechas sí se traducen**, pero solo el marcador: "2023-01 - Actualidad" → "2023-01 - Present".
+- **Los nombres propios se quedan**: universidad, empresa y ciudad no se traducen.
+- **Las certificaciones no se pierden**: la sección "Certificaciones" del CV original va al array `achievements` de la salida.
+
+La salida usa **el mismo esquema JSON** que el pipeline del CV, así que los renderizadores no cambian nada: el PDF traducido sale con la plantilla y el color de acento que elegiste, en una sola columna y con texto seleccionable.
+
+Si el CV que subís ya está en inglés, el backend lo detecta y dice que no hay nada que traducir, en vez de devolver un re-render inútil.
+
+```bash
+curl -X POST http://localhost:8000/api/generate \
+  -F "file=@mi-cv-en-español.pdf" \
+  -F "translate_only=true" \
+  -F "theme=sb2nov" \
+  -F "accent=navy"
+```
+
+---
+
 ## Features
 
 ### 1. Tres motores LLM en cadena
@@ -550,8 +591,17 @@ playwright install chromium
 Crea `backend/.env` (ver sección siguiente) y arranca:
 
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8000 \
+  --reload-exclude output --reload-exclude rendercv_output \
+  --reload-exclude venv --reload-exclude __pycache__
 ```
+
+> **Por qué los `--reload-exclude`:** sin ellos, el reloader vigila `output/`
+> y `rendercv_output/`, así que **escribir un PDF reinicia el server a
+> mitad de render** y mata el driver de Playwright
+> (`Connection closed while reading from the driver`). Los excludes
+> necesitan `watchfiles` instalado (`pip install -r requirements-dev.txt`);
+> sin esa dependencia uvicorn los ignora y avisa por log.
 
 ### 2. Frontend
 

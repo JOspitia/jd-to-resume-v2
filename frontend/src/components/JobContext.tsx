@@ -1,4 +1,4 @@
-import { Briefcase } from 'lucide-react';
+import { Briefcase, Languages } from 'lucide-react';
 
 /**
  * JobContext — T5 of the UX refactor (specs S5, S6).
@@ -29,6 +29,11 @@ export type JobContextProps = {
   onGithubUrlChange: (value: string) => void;
   portfolioUrl: string;
   onPortfolioUrlChange: (value: string) => void;
+  /**
+   * Faithful translation mode. The vacancy is not used at all, so the
+   * inputs that feed it are replaced by a note that says so.
+   */
+  translateOnly?: boolean;
 };
 
 const inputClass =
@@ -49,9 +54,29 @@ export function JobContext({
   onGithubUrlChange,
   portfolioUrl,
   onPortfolioUrlChange,
+  translateOnly = false,
 }: JobContextProps) {
   return (
     <div className="space-y-4">
+      {translateOnly ? (
+        /* Translation mode: the vacancy is not part of the job, so the
+           inputs that feed it are replaced by an explanation instead of
+           being left there to be ignored in silence. */
+        <div className="flex items-start gap-3 border-2 border-border bg-muted/40 p-3">
+          <Languages className="w-4 h-4 mt-0.5 shrink-0 text-primary" />
+          <div className="text-xs leading-tight">
+            <div className="font-bold text-foreground">Modo traducción: la vacante no se usa</div>
+            <p className="text-muted-foreground mt-1">
+              Tu CV se traduce tal cual — mismas secciones, mismos puestos, mismas
+              cifras — sin adaptarlo a ninguna oferta. Si lo que querés es un CV
+              adaptado a una vacante, desmarcá{' '}
+              <strong>&ldquo;Traducir mi CV al inglés&rdquo;</strong> en las opciones
+              avanzadas.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Target role — compact single-line input, ABOVE the JD */}
       <div className="flex flex-col gap-1.5">
         <label
@@ -122,6 +147,8 @@ export function JobContext({
           * Si no contás con una oferta específica, cambiá a "Requerimientos" o dejá vacío para optimización general ATS.
         </p>
       </div>
+        </>
+      )}
 
       {/* Profile links — single row */}
       <div className="border-t-2 border-border pt-3">

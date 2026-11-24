@@ -4,6 +4,93 @@ Registro cronológico de cambios por sesión. Cada sesión documenta su
 alcance (qué problemas atacó, qué archivos tocó, qué decisiones se
 tomaron) y un trail de commits para auditoría.
 
+## 2026-11-24 — Sesión "Traducción fiel del CV al inglés"
+
+**Tipo:** feature.
+
+### Feature — Traducir el CV maestro sin adaptarlo, antes de generar
+
+**El pedido.** "La opción de traducir PDF sin modificar nada del mismo
+¿dónde quedó? Debería poderlo hacer antes de generar el CV."
+
+**Dónde estaba.** La traducción existía, pero como botón en la tarjeta
+de resultado: el *Traducir al inglés* re-corre **todo** el pipeline de
+adaptación con `force_language=en`, o sea que vuelve a reescribir el CV
+contra la vacante y solo lo escribe en inglés. No era una traducción,
+era una segunda adaptación. Y como el botón vive en la tarjeta de
+resultado, no había forma de traducir **antes** de generar: el CV
+maestro no se podía traducir nunca.
+
+**La solución: un modo, no una opción.** El checkbox **"Traducir mi CV
+al inglés (sin adaptar)"** —en OPCIONES AVANZADAS, fuera del desplegable
+"Más opciones" porque no es una opción más: cambia qué hace el
+pipeline— activa `translate_only=true`, que:
+
+1. **Usa un prompt propio** (`backend/domain/translate_prompts.py`) en
+   lugar del prompt de adaptación. El contrato es el opuesto:
+   *traducí el contenido, no cambies nada más*.
+2. **Ignora la vacante.** El formulario la reemplaza por una nota que
+   lo explica y el `jd` se manda vacío.
+3. **No enriquece con LinkedIn** ni aplica las instrucciones
+   adicionales: no hay nada que adaptar.
+4. **Salta la re-auditoría automática**, porque no hay vacante contra la
+   cual auditar. El audit sigue disponible desde el frontend con
+   "Auto-validar ATS".
+
+El prompt protege lo que una traducción suele romper:
+
+- Mismas secciones, mismo orden, mismos puestos, mismo número de
+  bullets.
+- Cero añadidos: ni logros, ni métricas, ni habilidades, ni
+  certificaciones.
+- Contactos verbatim: una URL no se traduce.
+- Cifras intactas: "200 impresoras" → "200 printers"; "2K+ descargas" →
+  "2K+ downloads" (no "2.000").
+- Marcas de fecha traducidas ("Actualidad" → "Present"), nombres
+  propios intactos, términos técnicos con su nombre estándar de la
+  industria.
+- **Las certificaciones no se pierden**: la sección "Certificaciones"
+  del CV original va al array `achievements` de la salida. Esto se
+  detectó en la prueba real — la primera traducción dejó el array
+  vacío y las certificaciones desaparecieron — y se corrigió
+  añadiendo la regla 13 al prompt.
+
+La salida usa **el mismo esquema JSON** que el pipeline del CV, así que
+los renderizadores no cambian: el PDF traducido sale con la plantilla y
+el color de acento que elegiste, en una sola columna y con texto
+seleccionable.
+
+Si el CV ya está en inglés, el backend lo detecta y avisa que no hay
+nada que traducir, en vez de devolver un re-render inútil.
+
+**Verificación.** 15 tests nuevos (`test_translate_only.py`): el
+contrato del prompt, que la vacante no llegue al modelo, que el PDF
+salga descargable, que un CV en inglés se rechace y que **el flujo
+normal siga intacto**. 399 tests en verde. Prueba real contra el LLM
+configurado con un CV en español: las mismas secciones, los mismos
+cifras (200 impresoras, 15 horas, 2K+ descargas, 4,5/5, ocho meses),
+las mismas fechas, la certificación conservada, y un PDF de una sola
+página en los dos motores (RenderCV `sb2nov` y Playwright HTML).
+
+### Fix — El `--reload` de uvicorn mataba los renders a mitad de camino
+
+**El síntoma.** "Connection closed while reading from the driver":
+Playwright perdía la conexión con su driver en pleno render, y el
+backend se reiniciaba justo después.
+
+**La causa.** `uvicorn --reload` sin `--reload-exclude` vigila **todo**
+el directorio del backend, incluidos `output/` y `rendercv_output/`.
+RenderCV escribe ahí sus archivos temporales → el reloader lo ve →
+reinicia el server → mata el driver de Playwright → el render se cae a
+ mitad. No era un bug del modo de traducción: es un bug de **todo el
+ flujo de CV** en desarrollo, que aparece cuando RenderCV falla y cae
+ al motor de Playwright.
+
+**El arreglo.** `watchfiles` a `requirements-dev.txt` (los
+`--reload-exclude` de uvicorn son un no-op sin esa dependencia, y
+uvicorn solo lo avisa por log) y la receta de arranque con los excludes
+en el README.
+
 ## 2026-11-24 — Sesión "Carta de presentación: PDF, diseño y contactos"
 
 **Tipo:** feature.
